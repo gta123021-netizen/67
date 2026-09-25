@@ -416,24 +416,29 @@ return function(ctx: any)
 	local function tile(key: string, label: string, icon: string, color: Color3, deep: Color3, order: number, glyph: boolean?)
 		local t = Kit.plate({ Name = key, Parent = grid, LayoutOrder = order, Radius = 22, Stroke = 4, ZIndex = 12, Gradient = { C.Navy600, C.Navy800 } })
 		Kit.bevel(t, 18, 3, 12)
-		local disc = Kit.plate({
-			Name = "Disc",
+		-- the disc is the tile's top-left corner: its gap (in the tile's colours, the top 78 of
+		-- its 124 high gradient) and outline are rings on that corner, so it is exactly as far
+		-- from the tile's left edge as from its top
+		local disc = Kit.endIcon({
 			Parent = t,
-			Position = UDim2.fromOffset(12, 12),
-			Size = UDim2.fromOffset(54, 54),
-			Radius = UDim.new(1, 0),
+			Name = "Disc",
+			Side = "TopLeft",
+			Width = 78,
+			Height = 78,
+			Gap = 12,
 			Stroke = 3.5,
+			Band = ColorSequence.new(C.Navy600, C.Navy600:Lerp(C.Navy800, 78 / 124)),
+			Face = { Kit.lighten(color, 0.1), deep, 90 },
 			ZIndex = 13,
-			Gradient = { Kit.lighten(color, 0.1), deep },
 		})
-		Kit.snapCorner(disc, 12) -- as far from the left edge as from the top
+		Kit.outlineOnTop(t, 17)
 		Kit.image({
 			Image = icon,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = if glyph then UDim2.fromOffset(30, 30) else UDim2.fromOffset(38, 38), -- stays inside the ring
-			ZIndex = 14,
-			Parent = disc,
+			ZIndex = disc.ContentZ,
+			Parent = disc.Frame,
 		})
 		Kit.text({
 			Name = "Label",

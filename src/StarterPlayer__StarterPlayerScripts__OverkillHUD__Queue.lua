@@ -157,7 +157,7 @@ return function(ctx: any)
 				Name = "Letter",
 				Text = string.upper(string.sub(view.DisplayName or "?", 1, 1)),
 				TextSize = math.floor(size * 0.46),
-				ZIndex = z + 3,
+				ZIndex = z + 4,
 				Stroke = math.max(2, size * 0.04),
 				Parent = holder,
 			})
@@ -194,15 +194,22 @@ return function(ctx: any)
 			d -= bands[i][1]
 		end
 		if slot and gap - ink / 2 > 0 then
-			for _, layer in ipairs(slot.Bands or { { Paint = slot.Band or C.Navy700 } }) do
+			local layers = slot.Bands or { { Paint = slot.Band or C.Navy700 } }
+			for _, layer in ipairs(layers) do
 				table.insert(list, { gap - ink / 2, layer.Paint, layer.Transparency })
+			end
+			-- and the seam over the slot's edge (no trace of the rings beside the name)
+			for _, spec in ipairs(Kit.seams(layers)) do
+				table.insert(list, spec)
 			end
 		end
 		local _, grads = Kit.edgeStrokes(holder, UDim.new(1, 0), list, z + 2)
 		ringGrad = grads[1]
 		if not slot then
-			-- a free disc: the ink outline half outside its edge as well, like every other outline
+			-- a free disc: the ink outline half outside its edge as well, like every other outline,
+			-- over the rings (it covers their outer edge whole)
 			Kit.stroke(holder, math.max(2.5, size * 0.045), C.Ink, 0, true)
+			Kit.outlineOnTop(holder, z + 3)
 		end
 		local api = { Frame = holder }
 		function api.SetRing(c: Color3)

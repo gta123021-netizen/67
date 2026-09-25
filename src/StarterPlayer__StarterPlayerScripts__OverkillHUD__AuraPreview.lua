@@ -396,8 +396,9 @@ return function(ctx: any)
 			{ orbEdge - ink / 2, { C.Navy600, C.Navy800, 90 } },
 			{ g, r.Color },
 			{ g - 3, { C.Navy600, C.Navy800, 90 } },
+			Kit.seams({ { Paint = { C.Navy600, C.Navy800, 90 } } })[1], -- no trace of the rings beside the name
 		}, 14)
-		local gapGrads = { ringGrads[4], ringGrads[6] }
+		local gapGrads = { ringGrads[4], ringGrads[6], ringGrads[7] }
 		Kit.outlineOnTop(face, 17)
 		-- name + rarity + status
 		Kit.text({ Name = "Name", Text = item.Name, TextSize = 27, Position = UDim2.fromOffset(110, 16), Size = UDim2.new(1, -170, 0, 32), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 3.2, Parent = face })

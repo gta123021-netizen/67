@@ -801,10 +801,13 @@ end
 ctx.PillValue = pillValue
 
 -- an action button in a pill's right end (the coins +, the hero pill's CHANGE). The button is the
--- pill's whole right end (the same top, right and bottom edges as the pill), and its outline and
--- the gap round it are strokes on that end (Kit.endIcon): the gap is drawn in the pill's own
--- colours, so it reads as the pill, and it is exactly as wide at the top, the right and the
--- bottom at any screen size.
+-- pill's whole right end (the same top, right and bottom edges as the pill) and sits flush in
+-- it: one black band runs all the way round its face - the pill's own outline and the button's
+-- outline together, no gap and no second colour between them. The band is a stroke inward from
+-- the button's edge with, over it, the pill's outline stroke centred on the button's edge (on
+-- the top, right and bottom it lies exactly on the pill's own outline; on the left it gives the
+-- side facing into the pill the same weight and covers that edge whole, so no trace of the face
+-- shows through it), so it is exactly as thick on every side at any screen size.
 --   o = { Width (the button's own width; nil = round), Text, TextSize, Glyph (function(content, z)),
 --         Color, Deep, OnClick, HoverScale }
 local ACTION_H = PILL_H - RIGHT_PAD * 2 -- 44
@@ -815,22 +818,18 @@ local function faceSeq(c: Color3, d: Color3): ColorSequence
 		ColorSequenceKeypoint.new(1, Kit.lighten(d, 0.1)),
 	})
 end
+local PILL_LINE = 4.5 * 1.35 -- the pill's outline (Kit.stroke border width)
+local ACTION_LINE = 3 * 1.35 -- a button's own outline
 local function pillAction(pill: GuiObject, o: { [string]: any })
 	local w = o.Width or ACTION_H
 	local color, deep = o.Color or C.Blue, o.Deep or C.BlueDeep
-	local icon = Kit.endIcon({
-		Parent = pill,
-		Class = "TextButton",
-		Name = o.Name or "Action",
-		Side = "Right",
-		Width = w + RIGHT_PAD * 2,
-		Gap = RIGHT_PAD,
-		Stroke = 3,
-		Band = { C.Navy700, C.Night, 90 },
-		Face = faceSeq(color, deep),
-		ZIndex = pill.ZIndex + 1,
-	})
-	local btn = icon.Frame :: TextButton
+	local btn = Kit.slot({ Parent = pill, Class = "TextButton", Name = o.Name or "Action", Side = "Right", Width = w + RIGHT_PAD * 2, ZIndex = pill.ZIndex + 1 }) :: TextButton
+	btn.BackgroundTransparency = 0
+	Kit.pill(btn)
+	local faceGrad = Kit.paint(btn, faceSeq(color, deep))
+	Kit.edgeStrokes(btn, UDim.new(1, 0), { { PILL_LINE / 2 + ACTION_LINE, C.Ink }, { PILL_LINE, C.Ink, nil, "Center" } }, pill.ZIndex + 1)
+	local icon = { Face = faceGrad, ContentZ = pill.ZIndex + 2 }
+
 	-- the label or glyph pops on hover; the button's shape stays put in the pill's end
 	local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1, 1), ZIndex = icon.ContentZ, Parent = btn })
 	local pop = Kit.fx(content)
@@ -982,7 +981,7 @@ end
 
 ctx.Dock = {}
 local function dockButton(o: { [string]: any })
-	local accent, deep = o.Accent[1], o.Accent[2]
+	local accent = o.Accent[1]
 	local holder = new("Frame", { Name = o.Name, BackgroundTransparency = 1, Size = UDim2.fromOffset(100, 126), LayoutOrder = o.Order, Parent = dock })
 	local api: any
 	api = Kit.button({
@@ -994,7 +993,6 @@ local function dockButton(o: { [string]: any })
 		Radius = 28,
 		Depth = 0, -- flat tile, no 3D lip
 		Stroke = 4.5,
-		Shine = true,
 		HoverScale = 1.08,
 		OnClick = o.OnClick,
 		OnHover = function(on: boolean)
@@ -1004,38 +1002,20 @@ local function dockButton(o: { [string]: any })
 		end,
 	})
 	local z = api.Face.ZIndex
-	-- accent glow rising from the bottom of the face
-	local glow = new("Frame", {
-		Name = "Glow",
-		BackgroundColor3 = accent,
-		Position = UDim2.new(0, 0, 0.35, 0),
-		Size = UDim2.new(1, 0, 0.65, 0),
-		ZIndex = z,
-		Parent = api.Face,
-	})
-	Kit.corner(glow, 28)
-	Kit.gradient(glow, accent, accent, 90, 1, 0.45)
-	-- the thin accent ring 6 in from the tile's edge: strokes on the face's own rect (the ring,
-	-- then the face and its glow over the ring's outer side, then the face's outline), so it is
-	-- exactly as far in on every side
+	-- flat and 2D: one solid colour on the face (no shading, no glow rising from the bottom)
+	local faceGrad = api.Face:FindFirstChildOfClass("UIGradient")
+	if faceGrad then
+		faceGrad.Color = ColorSequence.new(C.Navy600)
+	end
+	-- the accent ring 6 in from the tile's edge: strokes on the face's own rect (the ring, then
+	-- the face over its outer side), so it is exactly as far in on every side; the tile's
+	-- outline goes over them, so their outer edge leaves no trace in it
 	local ringW = 2.5 * 1.35
 	Kit.edgeStrokes(api.Face, UDim.new(0, 28), {
-		{ 6 + ringW / 2, Kit.lighten(accent, 0.2), 0.45 },
-		{ 6 - ringW / 2, ColorSequence.new({ ColorSequenceKeypoint.new(0, Kit.lighten(C.Navy600, 0.14)), ColorSequenceKeypoint.new(0.55, C.Navy600), ColorSequenceKeypoint.new(1, Kit.lighten(C.Navy800, 0.1)) }) },
-		{ 6 - ringW / 2, accent, NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, 1), NumberSequenceKeypoint.new(1, 0.45) }) },
-		{ 4.5 * 1.35 / 2, C.Ink },
+		{ 6 + ringW / 2, accent },
+		{ 6 - ringW / 2, C.Navy600 },
 	}, z + 1)
-	local glowImg = Kit.image({
-		Name = "IconGlow",
-		Image = Theme.Icon.Glow,
-		ImageColor3 = accent,
-		ImageTransparency = 0.55,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.4, 0),
-		Size = UDim2.fromOffset(110, 110),
-		ZIndex = z + 2,
-		Parent = api.Face,
-	})
+	Kit.outlineOnTop(api.Face, z + 5)
 	local icon = Kit.image({
 		Name = "Icon",
 		Image = o.Icon,
@@ -1045,12 +1025,6 @@ local function dockButton(o: { [string]: any })
 		ZIndex = z + 3,
 		Parent = api.Face,
 	})
-	api.Button.MouseEnter:Connect(function()
-		tween(glowImg, 0.25, { ImageTransparency = 0.1, Size = UDim2.fromOffset(138, 138) }, Enum.EasingStyle.Back)
-	end)
-	api.Button.MouseLeave:Connect(function()
-		tween(glowImg, 0.25, { ImageTransparency = 0.55, Size = UDim2.fromOffset(110, 110) })
-	end)
 	-- name tag across the bottom edge
 	local tag = Kit.plate({
 		Name = "Tag",
@@ -1062,7 +1036,7 @@ local function dockButton(o: { [string]: any })
 		Radius = UDim.new(1, 0),
 		Stroke = 3.5,
 		ZIndex = z + 6,
-		Gradient = { Kit.lighten(accent, 0.12), deep },
+		Color = accent, -- flat, like the tile
 	})
 	Kit.padding(tag, 14, 0, 14, 0)
 	Kit.text({

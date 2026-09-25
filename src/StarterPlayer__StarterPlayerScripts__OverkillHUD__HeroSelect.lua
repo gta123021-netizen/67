@@ -693,6 +693,8 @@ return function(ctx: any)
 			{ 3, C.Ink },
 		}, 16)
 		local gapGrad = portraitGrads[1]
+		-- the seam over the portrait's edge (no trace of its rings beside the name)
+		local _, seamGrads = Kit.edgeStrokes(frame, UDim.new(0, 37), Kit.seams({ { Paint = { C.Navy600, C.Navy800, 90 } } }), 17)
 		Kit.outlineOnTop(face, 17)
 		-- name, epithet and a status chip
 		local nameText = Kit.text({ Name = "Name", Text = h.Name, TextSize = 32, Position = UDim2.fromOffset(132, 16), Size = UDim2.new(1, -196, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 3.5, Parent = face })
@@ -710,7 +712,7 @@ return function(ctx: any)
 			k.AnchorPoint = Vector2.new(1, 0.5)
 			k.Position = UDim2.new(1, -18, 0.5, 0)
 		end
-		local row = { Hero = h, Button = btn, Face = face, Grad = grad, GapGrad = gapGrad, Stroke = faceStroke, Scale = sc, Name = nameText, Playing = playingChip, MovesChip = movesChip, MovesLabel = movesLabel, Hover = false }
+		local row = { Hero = h, Button = btn, Face = face, Grad = grad, GapGrad = gapGrad, SeamGrad = seamGrads[1], Stroke = faceStroke, Scale = sc, Name = nameText, Playing = playingChip, MovesChip = movesChip, MovesLabel = movesLabel, Hover = false }
 		btn.MouseEnter:Connect(function()
 			row.Hover = true
 			tween(sc, 0.2, { Scale = 1.03 }, Enum.EasingStyle.Back)
@@ -1100,6 +1102,9 @@ return function(ctx: any)
 			row.Grad.Color = if on then ColorSequence.new(Kit.lighten(a, 0.02), Kit.darken(d, 0.1)) else ColorSequence.new(C.Navy600, C.Navy800)
 			if row.GapGrad then
 				row.GapGrad.Color = row.Grad.Color -- the gap round the portrait is the row's own colour
+				if row.SeamGrad then
+					row.SeamGrad.Color = row.Grad.Color
+				end
 			end
 			row.Stroke.Color = if on then Color3.new(1, 1, 1) else C.Ink
 			row.Playing.Visible = row.Hero.Id == playing
@@ -1952,7 +1957,10 @@ return function(ctx: any)
 		local function doubleRing(parent: Instance, size: number, pos: UDim2, z: number): (Frame, UIGradient, Frame)
 			local disc = new("Frame", { Name = "Portrait", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = pos, Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
 			Kit.pill(disc)
-			local _, grads = Kit.rings(disc, UDim.new(1, 0), { { 4, C.Ink }, { 5, { Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90 } }, { 3, C.Ink } }, 8)
+			local _, grads = Kit.rings(disc, UDim.new(1, 0), { { 3, C.Ink }, { 5, { Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90 } }, { 3, C.Ink } }, 8)
+			-- the outer ink finishes on a stroke centred on the disc's edge (4 wide in all), so
+			-- the disc's own edge leaves no trace outside the ring
+			Kit.edgeStrokes(disc, UDim.new(1, 0), { { 2, C.Ink, nil, "Center" } }, 9)
 			return disc, grads[2], disc
 		end
 

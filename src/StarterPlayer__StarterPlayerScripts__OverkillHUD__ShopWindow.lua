@@ -270,9 +270,11 @@ return function(ctx: any)
 		-- the border round the picture (in the card's colours) and its ink rim, as strokes on the
 		-- window's rect; then the card's own outline over the lot
 		local rim = new("Frame", { Name = "ShowRim", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, SHOW_H + 20), ZIndex = 16, Parent = card })
+		local cardPaint = { C.Navy600, C.Navy600:Lerp(C.Navy800, (SHOW_H + 20) / 350), 90 }
 		Kit.edgeStrokes(rim, UDim.new(0, 28), {
 			{ 10 + 3 * 1.35 / 2, C.Ink },
-			{ 10 - 3 * 1.35 / 2, { C.Navy600, C.Navy600:Lerp(C.Navy800, (SHOW_H + 20) / 350), 90 } },
+			{ 10 - 3 * 1.35 / 2, cardPaint },
+			Kit.seams({ { Paint = cardPaint } })[1], -- no trace of the picture along the window's bottom edge
 		}, 16)
 		Kit.outlineOnTop(card, 20)
 

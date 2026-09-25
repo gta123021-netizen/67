@@ -192,31 +192,6 @@ function Kit.textHeight(text: string, size: number, width: number, font: Font?):
 	return size * 1.25 * math.max(1, math.ceil(#text * size * 0.55 / math.max(1, width)))
 end
 
----------------------------------------------------------------------------
--- pixel snapping
--- Every frame is drawn on whole screen pixels. With the HUD scaled to the screen, a frame 10 units
--- in and one 6 units in can round different ways on each axis, so a gap that is equal in the
--- code comes out 1 pixel wider on one side. These helpers put a child a whole number of screen
--- pixels from its parent's edges and size it from the parent itself, so its gaps land exactly
--- equal on every side at any screen size. They re-run whenever the parent's size changes
--- (screen resize, the UI size setting, windows opening).
----------------------------------------------------------------------------
--- screen pixels per reference unit at `o`: every UIScale from `o` up to its ScreenGui.
--- The "FX" scales (pops, hovers) are left out unless `withFx`: they rest at 1, and snapping to
--- them mid-animation would only make the icons step a pixel as they grow.
-function Kit.pxScale(o: Instance, withFx: boolean?): number
-	local s = 1
-	local node: Instance? = o
-	while node and not node:IsA("LayerCollector") do
-		local sc = node:FindFirstChildOfClass("UIScale")
-		if sc and (withFx or sc.Name ~= "FX") then
-			s *= sc.Scale
-		end
-		node = node.Parent
-	end
-	return s
-end
-
 -- the parent's UIPadding offsets (children are placed inside the padded box)
 local function padOf(parent: Instance): (number, number, number, number)
 	local p = parent:FindFirstChildOfClass("UIPadding")
@@ -224,111 +199,6 @@ local function padOf(parent: Instance): (number, number, number, number)
 		return 0, 0, 0, 0
 	end
 	return p.PaddingLeft.Offset, p.PaddingTop.Offset, p.PaddingRight.Offset, p.PaddingBottom.Offset
-end
-
--- `v` reference units, rounded to whole screen pixels at scale `s` (still in reference units)
-local function snapUnits(v: number, s: number): number
-	return math.floor(v * s + 0.5) / s
-end
-
-local function watchParent(child: GuiObject, apply: () -> ())
-	local parent = child.Parent
-	if not (parent and parent:IsA("GuiObject")) then
-		return
-	end
-	apply()
-	local conn = parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(apply)
-	child.Destroying:Connect(function()
-		conn:Disconnect()
-	end)
-end
-
--- keep `child` the same whole number of screen pixels inside its parent on all four sides
-function Kit.snapFill(child: GuiObject, inset: number)
-	local lastS = -1
-	watchParent(child, function()
-		local parent = child.Parent :: GuiObject
-		local s = Kit.pxScale(parent)
-		if s < 0.01 or s == lastS then
-			return
-		end
-		lastS = s
-		local l, t, r, b = padOf(parent)
-		local n = snapUnits(inset, s)
-		child.AnchorPoint = Vector2.zero
-		child.Position = UDim2.fromOffset(n - l, n - t)
-		child.Size = UDim2.new(1, l + r - 2 * n, 1, t + b - 2 * n)
-	end)
-end
-
--- a square child (or one `Width` wide) in the left end of its parent (`Right` = the right end):
--- the same whole number of screen pixels from the end, the top and the bottom. The child stays
--- anchored on its centre, so pops and wiggles still grow from the middle.
--- Ring: a frame kept exactly `gap` outside the child on every side (a socket behind a button).
-function Kit.snapEnd(child: GuiObject, gap: number, o: { Right: boolean?, Width: number?, Ring: GuiObject? }?)
-	local right = o ~= nil and o.Right == true
-	local width = o and o.Width
-	local ring = o and o.Ring
-	local lastS, lastW, lastH = -1, -1, -1
-	watchParent(child, function()
-		local parent = child.Parent :: GuiObject
-		local s = Kit.pxScale(parent)
-		local sAll = Kit.pxScale(parent, true)
-		if s < 0.01 or sAll < 0.01 then
-			return
-		end
-		local l, t, r, b = padOf(parent)
-		local pw = parent.AbsoluteSize.X / sAll -- the parent's size in reference units
-		local h = parent.AbsoluteSize.Y / sAll
-		if s == lastS and math.abs(h - lastH) < 1e-3 and (not right or math.abs(pw - lastW) < 1e-3) then
-			return
-		end
-		lastS, lastW, lastH = s, pw, h
-		local g = snapUnits(gap, s)
-		local w = width or math.max(0, h - 2 * g)
-		child.AnchorPoint = Vector2.new(0.5, 0.5)
-		if right then
-			-- the left edge goes a whole number of pixels in from the parent's left edge and the width
-			-- is the parent's minus a whole number of pixels, so the right edge lands exactly g in from
-			-- the parent's right edge too (the width takes up the parent's fraction of a pixel)
-			local a = snapUnits(pw - w, s) - g -- left edge, in from the parent's left edge
-			child.Size = UDim2.new(1, l + r - a - g, 1, t + b - 2 * g)
-			child.Position = UDim2.new(0.5, (a - g - l + r) / 2, 0.5, (b - t) / 2)
-			if ring then
-				ring.AnchorPoint = Vector2.zero
-				ring.Position = UDim2.fromOffset(a - g - l, -t)
-				ring.Size = UDim2.new(1, l + r - a + g, 1, t + b)
-			end
-		else
-			-- edges: g from the end, g from the top, g from the bottom (the height follows the parent)
-			child.Size = UDim2.new(0, w, 1, t + b - 2 * g)
-			child.Position = UDim2.new(0, g + w / 2 - l, 0.5, (b - t) / 2)
-			if ring then
-				ring.AnchorPoint = Vector2.zero
-				ring.Position = UDim2.fromOffset(-l, -t)
-				ring.Size = UDim2.new(0, w + 2 * g, 1, t + b)
-			end
-		end
-	end)
-end
-
--- a child in its parent's top-left corner: the same whole number of screen pixels from the left
--- and the top edge (its size stays as it is; it stays anchored on its centre)
-function Kit.snapCorner(child: GuiObject, gap: number)
-	local lastS = -1
-	watchParent(child, function()
-		local parent = child.Parent :: GuiObject
-		local s = Kit.pxScale(parent)
-		if s < 0.01 or s == lastS then
-			return
-		end
-		lastS = s
-		local l, t = padOf(parent)
-		local g = snapUnits(gap, s)
-		local w, h = child.Size.X.Offset, child.Size.Y.Offset
-		child.AnchorPoint = Vector2.new(0.5, 0.5)
-		child.Position = UDim2.fromOffset(g + w / 2 - l, g + h / 2 - t)
-	end)
 end
 
 ---------------------------------------------------------------------------
@@ -391,13 +261,15 @@ function Kit.innerStroke(parent: Instance, depth: number, paint: any, transparen
 end
 
 -- strokes on `host`'s own rect, each from the edge inward to its depth, drawn in list order (a
--- later one over an earlier one): list = { { depth, paint, transparency? }, ... }.
+-- later one over an earlier one): list = { { depth, paint, transparency?, "Center"? }, ... }.
+-- A "Center" one is `depth` wide and centred on the edge instead (a seam, see Kit.SEAM).
 -- Returns the strokes and their gradients.
 function Kit.edgeStrokes(host: GuiObject, corner: any, list: { any }, z: number?): ({ UIStroke }, { any })
 	local l, t, r, b = padOf(host)
 	local strokes, grads = {}, {}
 	local parent: Instance = host
 	for i, spec in ipairs(list) do
+		local centred = spec[4] == "Center"
 		local f = new("Frame", { Name = "Edge" .. i, BackgroundTransparency = 1, ZIndex = z or host.ZIndex })
 		if INNER then
 			-- the host's whole rect (whatever padding it has), each one over the one before
@@ -405,6 +277,11 @@ function Kit.edgeStrokes(host: GuiObject, corner: any, list: { any }, z: number?
 			f.Size = if parent == host then UDim2.new(1, l + r, 1, t + b) else UDim2.fromScale(1, 1)
 			f.Parent = parent
 			parent = f
+		elseif centred then
+			-- clients without stroke positions draw a border stroke outside the edge: the outer half
+			f.Position = UDim2.fromOffset(-l, -t)
+			f.Size = UDim2.new(1, l + r, 1, t + b)
+			f.Parent = host
 		else
 			-- clients without inward strokes: an outer stroke round a frame inset by the depth
 			f.Position = UDim2.fromOffset(spec[1] - l, spec[1] - t)
@@ -414,9 +291,27 @@ function Kit.edgeStrokes(host: GuiObject, corner: any, list: { any }, z: number?
 		if corner ~= nil then
 			Kit.corner(f, corner)
 		end
-		strokes[i], grads[i] = Kit.innerStroke(f, spec[1], spec[2], spec[3])
+		strokes[i], grads[i] = Kit.innerStroke(f, if centred and not INNER then spec[1] / 2 else spec[1], spec[2], spec[3])
+		if centred and INNER then
+			(strokes[i] :: any).BorderStrokePosition = (Enum :: any).BorderStrokePosition.Center
+		end
 	end
 	return strokes, grads
+end
+
+-- The seam over the edge of an icon slot, a knob or a thumb that sits inside its container.
+-- Every ring stroke under that edge ends exactly on it, and where the edge falls between two
+-- screen pixels each of them leaves a faint anti-aliased trace of its colour along it (a ghost of
+-- the icon's rim beside the text). A stroke centred on the edge, SEAM wide, in the container's
+-- own paint (one per layer) covers the edge: it matches the container on both sides of it, so
+-- nothing of the rings shows past the gap. Kit.seams(layers) = the specs to add to edgeStrokes.
+Kit.SEAM = 3
+function Kit.seams(layers: { any }): { any }
+	local out = {}
+	for _, layer in ipairs(layers) do
+		table.insert(out, { Kit.SEAM, layer.Paint, layer.Transparency, "Center" })
+	end
+	return out
 end
 
 -- rings inside `host`'s edge, outermost first: bands = { { width, paint, transparency? }, ... }.
@@ -521,8 +416,13 @@ function Kit.endIcon(o: { [string]: any })
 	-- container's background (Band = a paint, or Bands = { { Paint, Transparency }, ... })
 	table.insert(list, { gapW + ink, C.Ink })
 	if gapW > 0 then
-		for _, layer in ipairs(o.Bands or { { Paint = o.Band or C.Navy700 } }) do
+		local layers = o.Bands or { { Paint = o.Band or C.Navy700 } }
+		for _, layer in ipairs(layers) do
 			table.insert(list, { gapW, layer.Paint, layer.Transparency })
+		end
+		-- and the seam over the slot's edge (no trace of the rings beside the text)
+		for _, spec in ipairs(Kit.seams(layers)) do
+			table.insert(list, spec)
 		end
 	end
 	local strokes, grads = Kit.edgeStrokes(slot, corner, list, (o.ZIndex or slot.ZIndex) + 1)
@@ -561,8 +461,9 @@ function Kit.switchThumb(o: { [string]: any })
 		table.insert(list, { gapW + ink, C.Ink })
 	end
 	table.insert(list, { gapW, o.Track })
+	table.insert(list, Kit.seams({ { Paint = o.Track } })[1])
 	local _, grads = Kit.edgeStrokes(f, corner, list, o.ZIndex)
-	local api = { Frame = f, Face = faceGrad, Band = grads[#grads] }
+	local api = { Frame = f, Face = faceGrad, Band = grads[#grads - 1], Seam = grads[#grads] }
 	function api.Set(i: number, instant: boolean?)
 		local target = if i == 2 then UDim2.new(0.5, -ov, 0, 0) else UDim2.new()
 		if instant then
@@ -1889,8 +1790,9 @@ function Kit.toggle(o: { [string]: any })
 	Kit.pill(knob)
 	Kit.gradient(knob, Color3.new(1, 1, 1), Color3.fromRGB(196, 208, 230), 90)
 	local ink = 3 * 1.35
-	local _, grads = Kit.edgeStrokes(knob, UDim.new(1, 0), { { 5 + ink / 2, C.Ink }, { 5 - ink / 2, { C.Navy600, C.Navy800, 90 } } }, z + 2)
-	local bandGrad = grads[2]
+	local trackPaint = { C.Navy600, C.Navy800, 90 }
+	local _, grads = Kit.edgeStrokes(knob, UDim.new(1, 0), { { 5 + ink / 2, C.Ink }, { 5 - ink / 2, trackPaint }, Kit.seams({ { Paint = trackPaint } })[1] }, z + 2)
+	local bandGrad, seamGrad = grads[2], grads[3]
 	-- the switch's own outline goes over the knob's end
 	local line = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = z + 3, Parent = btn })
 	Kit.pill(line)
@@ -1913,6 +1815,9 @@ function Kit.toggle(o: { [string]: any })
 		grad.Color = seq
 		if bandGrad then
 			bandGrad.Color = seq
+		end
+		if seamGrad then
+			seamGrad.Color = seq
 		end
 	end
 	function api.Set(v: boolean, silent: boolean?)

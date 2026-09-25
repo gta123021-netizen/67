@@ -1123,19 +1123,17 @@ local portrait = new("Frame", {
 })
 local portraitScale = Kit.fx(portrait)
 local halo = Kit.rays(portrait, GOLD, 320, 0.5, 20)
+-- the card is the portrait's well; its gold frame and the well's ink ring are rings on the
+-- card's own edge (exactly as wide on all four sides), drawn over the picture's edge
 local pCard = new("Frame", { Name = "Card", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromScale(1, 1), ZIndex = 21, Parent = portrait })
 Kit.corner(pCard, 34)
 Kit.stroke(pCard, 5, C.Ink, 0, true)
-local pCardGrad = Kit.gradient(pCard, Kit.lighten(GOLD, 0.15), GOLD_D, 90)
-Kit.bevel(pCard, 31, 3, 21)
-local pInner = new("Frame", { Name = "Inner", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 1, -20), ZIndex = 22, Parent = pCard })
-Kit.snapFill(pInner, 10) -- the same frame width on all four sides
-Kit.corner(pInner, 25)
-Kit.stroke(pInner, 3, C.Ink, 0.15, true)
-local pInnerGrad = Kit.gradient(pInner, Kit.lighten(GOLD, 0.3), Kit.darken(GOLD_D, 0.4), 90)
-Kit.image({ Name = "Glow", Image = Theme.Icon.Glow, ImageColor3 = Color3.new(1, 1, 1), ImageTransparency = 0.45, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromScale(1.1, 1.1), ZIndex = 22, Parent = pInner })
+local pInnerGrad = Kit.gradient(pCard, Kit.lighten(GOLD, 0.3), Kit.darken(GOLD_D, 0.4), 90)
+Kit.image({ Name = "Glow", Image = Theme.Icon.Glow, ImageColor3 = Color3.new(1, 1, 1), ImageTransparency = 0.45, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.43), Size = UDim2.fromScale(0.96, 0.96), ZIndex = 22, Parent = pCard })
 local pView = new("Frame", { Name = "Views", BackgroundTransparency = 1, ClipsDescendants = true, Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 1, -20), ZIndex = 23, Parent = pCard })
-Kit.snapFill(pView, 10)
+local _, pRimGrads = Kit.rings(pCard, UDim.new(0, 34), { { 10 - 3 * 1.35 / 2, { Kit.lighten(GOLD, 0.15), GOLD_D, 90 } }, { 3 * 1.35, C.Ink, 0.15 } }, 26)
+local pCardGrad = pRimGrads[1]
+Kit.outlineOnTop(pCard, 27)
 local portraitViews: { [string]: GuiObject } = {}
 for heroName, h in pairs(HERO) do
 	local v: GuiObject? = bust(pView, heroName, "bust", 23, 25)
@@ -1158,14 +1156,15 @@ local namePlate = new("Frame", {
 })
 Kit.corner(namePlate, 22)
 Kit.stroke(namePlate, 5, C.Ink, 0, true)
-local namePlateGrad = Kit.gradient(namePlate, Kit.lighten(GOLD, 0.15), GOLD_D, 90)
+-- the plate is the dark panel; the rim is a ring on its own edge (exactly 6 wide on all four
+-- sides at any screen size) and the outline goes over it
+Kit.gradient(namePlate, C.Navy800, C.Night, 90)
 local namePlateScale = Kit.fx(namePlate)
-local nameInner = new("Frame", { Name = "Inner", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 24, Parent = namePlate })
-Kit.snapFill(nameInner, 6) -- the same rim width on all four sides
-Kit.corner(nameInner, 17)
-Kit.gradient(nameInner, C.Navy800, C.Night, 90)
-local nameSheen = Kit.addShine(nameInner, 17)
-local nameLabel = Kit.text({ Name = "Name", Text = "GOKI", TextSize = 42, Position = UDim2.fromOffset(0, -1), ZIndex = 26, Stroke = 4.5, Parent = namePlate })
+local nameSheen = Kit.addShine(namePlate, 22)
+local _, nameRimGrads = Kit.rings(namePlate, UDim.new(0, 22), { { 6, { Kit.lighten(GOLD, 0.15), GOLD_D, 90 } } }, 30)
+local namePlateGrad = nameRimGrads[1]
+Kit.outlineOnTop(namePlate, 31)
+local nameLabel = Kit.text({ Name = "Name", Text = "GOKI", TextSize = 42, Position = UDim2.fromOffset(0, -1), ZIndex = 32, Stroke = 4.5, Parent = namePlate })
 local roleLabel = Kit.text({
 	Name = "Role",
 	Text = "",
@@ -1508,20 +1507,25 @@ for i, tierName in ipairs(Config.TierOrder) do
 		end,
 	})
 	local c = t.Btn.Content
-	local disc = new("Frame", {
-		Name = "Disc",
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 12, 0.5, 0),
-		Size = UDim2.fromOffset(70, 70),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		ZIndex = 16,
+	-- the disc is the tab's left end: its gap (in the tab's colours) and outline are rings on
+	-- that end, so it is exactly as far from the tab's left, top and bottom edges
+	t.FaceGrad = t.Btn.Face:FindFirstChildOfClass("UIGradient")
+	local discIcon = Kit.endIcon({
 		Parent = c,
+		Name = "Disc",
+		Side = "Left",
+		Width = 93,
+		Gap = (93 - 70) / 2,
+		Stroke = 3.5,
+		Band = if t.FaceGrad then t.FaceGrad.Color else C.Navy600,
+		Face = { Kit.lighten(h.Color, 0.25), h.Deep, 90 },
+		ZIndex = 16,
 	})
-	Kit.pill(disc)
-	Kit.stroke(disc, 3.5, C.Ink, 0, true)
-	Kit.gradient(disc, Kit.lighten(h.Color, 0.25), h.Deep, 90)
-	Kit.snapEnd(disc, (93 - 70) / 2) -- the same gap to the tab's left, top and bottom edges
-	local hold = new("Frame", { Name = "Face", BackgroundTransparency = 1, ClipsDescendants = true, Position = UDim2.fromOffset(3, 3), Size = UDim2.new(1, -6, 1, -6), ZIndex = 17, Parent = disc })
+	t.DiscBands = discIcon.BandGrads
+	Kit.outlineOnTop(t.Btn.Face, 19)
+	local disc = discIcon.Frame
+	-- the head reaches in under the ring, so its own edge never shows
+	local hold = new("Frame", { Name = "Face", BackgroundTransparency = 1, ClipsDescendants = true, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(67, 67), ZIndex = 16, Parent = disc })
 	if not bust(hold, heroName, "head", 17, UDim.new(1, 0)) then
 		Kit.image({ Image = h.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.74, 0.74), ZIndex = 17, Parent = hold })
 	end
@@ -1569,8 +1573,9 @@ local resetCard = Kit.plate({
 	ZIndex = 12,
 	Gradient = { C.Night, C.Navy900 },
 })
-local resetClock = Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 21, 0.5, 0), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetCard })
-Kit.snapEnd(resetClock, 21) -- the same gap to the card's left, top and bottom edges
+-- the clock is centred in the card's left end (a frame with the card's own left, top and bottom edges)
+local resetSlot = Kit.slot({ Parent = resetCard, Side = "Left", Width = 92, ZIndex = 13 })
+local resetClock = Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetSlot })
 Kit.text({
 	Text = "NEW QUESTS IN",
 	TextSize = 15,
@@ -1679,8 +1684,9 @@ local header = Kit.plate({
 	ZIndex = 12,
 	Gradient = { C.Night, C.Navy900 },
 })
-local headerIcon = Kit.image({ Name = "TierIcon", Image = HERO.Goki.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(40, 40), Size = UDim2.fromOffset(64, 64), ZIndex = 13, Parent = header })
-Kit.snapEnd(headerIcon, 8) -- the same gap to the header's left, top and bottom edges
+-- the icon is centred in the header's left end (a frame with the header's own left, top and bottom edges)
+local headerSlot = Kit.slot({ Parent = header, Side = "Left", Width = 80, ZIndex = 13 })
+local headerIcon = Kit.image({ Name = "TierIcon", Image = HERO.Goki.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(64, 64), ZIndex = 13, Parent = headerSlot })
 local headerIconScale = Kit.fx(headerIcon)
 local blurb = Kit.text({
 	Name = "Blurb",
@@ -1842,6 +1848,14 @@ local function setGrad(g: UIGradient?, a: Color3, b: Color3)
 	end
 end
 
+-- the card's colours, and the gap round its disc with them
+local function setCardGrad(c: any, a: Color3, b: Color3)
+	setGrad(c.Grad, a, b)
+	for _, g in ipairs(c.Bands or {}) do
+		setGrad(g, a, b)
+	end
+end
+
 local function buildCard(i: number, q: any, tierName: string)
 	local a, d = tierColors(tierName)
 	local slot = new("Frame", { Name = q.Id, BackgroundTransparency = 1, LayoutOrder = i, Size = UDim2.new(1, 0, 0, CARD_H), ZIndex = 13, Parent = list })
@@ -1859,22 +1873,26 @@ local function buildCard(i: number, q: any, tierName: string)
 	local cardScale = Kit.fx(card)
 	Kit.bevel(card, 19, 4, 13)
 
-	local disc = new("Frame", {
-		Name = "Disc",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(52, CARD_H / 2),
-		Size = UDim2.fromOffset(76, 76),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		ZIndex = 14,
+	-- the disc is the card's left end: its gap (in the card's colours) and outline are rings on
+	-- that end, so it is exactly as far from the card's left, top and bottom edges
+	local discIcon = Kit.endIcon({
 		Parent = card,
+		Name = "Disc",
+		Side = "Left",
+		Width = CARD_H,
+		Gap = (CARD_H - 76) / 2,
+		Stroke = 4,
+		Band = { C.Navy600, C.Navy800, 90 },
+		Face = { Kit.lighten(a, 0.15), d, 90 },
+		ZIndex = 14,
 	})
-	Kit.snapEnd(disc, (CARD_H - 76) / 2) -- the same gap to the card's left, top and bottom edges
-	Kit.pill(disc)
-	Kit.stroke(disc, 4, C.Ink, 0, true)
-	local discGrad = Kit.gradient(disc, Kit.lighten(a, 0.15), d, 90)
-	local discScale = Kit.fx(disc)
-	local num = Kit.text({ Name = "Num", Text = tostring(i), TextSize = 38, ZIndex = 16, Stroke = 4, Parent = disc })
-	local mark = Kit.image({ Name = "Mark", Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(54, 54), Visible = false, ZIndex = 16, Parent = disc })
+	local _, cardStroke = Kit.outlineOnTop(card, 19)
+	local discGrad = discIcon.Face
+	-- the number / tick pops; the disc itself stays put in the card's end
+	local discContent = new("Frame", { Name = "Content", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = discIcon.ContentZ, Parent = discIcon.Frame })
+	local discScale = Kit.fx(discContent)
+	local num = Kit.text({ Name = "Num", Text = tostring(i), TextSize = 38, ZIndex = 16, Stroke = 4, Parent = discContent })
+	local mark = Kit.image({ Name = "Mark", Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(54, 54), Visible = false, ZIndex = 16, Parent = discContent })
 
 	local title = Kit.text({ Name = "Title", Text = q.Title, TextSize = 27, TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(104, 12), Size = UDim2.fromOffset(352, 32), ZIndex = 14, Stroke = 3.4, Parent = card })
 	Kit.text({
@@ -1962,8 +1980,9 @@ local function buildCard(i: number, q: any, tierName: string)
 		Card = card,
 		Scale = cardScale,
 		Grad = card:FindFirstChildOfClass("UIGradient"),
-		Stroke = card:FindFirstChildOfClass("UIStroke"),
-		Disc = disc,
+		Bands = discIcon.BandGrads, -- the gap round the disc: the card's own colours
+		Stroke = cardStroke,
+		Disc = discIcon.Frame,
 		DiscGrad = discGrad,
 		DiscScale = discScale,
 		Num = num,
@@ -2003,14 +2022,14 @@ function applyCard(c: any, q: any, animate: boolean)
 		c.Shimmer = nil
 	end
 	if status == "progress" then
-		setGrad(c.Grad, C.Navy600, C.Navy800)
+		setCardGrad(c, C.Navy600, C.Navy800)
 		c.Stroke.Color = C.Ink
 		c.Stroke.Thickness = 4
 		setGrad(c.DiscGrad, Kit.lighten(c.A, 0.15), c.D)
 		setGrad(c.BarGrad, c.A, c.D)
 		c.Title.TextColor3 = C.Text
 	elseif status == "ready" then
-		setGrad(c.Grad, C.Navy600:Lerp(C.Gold, 0.18), C.Navy800:Lerp(C.GoldDeep, 0.1))
+		setCardGrad(c, C.Navy600:Lerp(C.Gold, 0.18), C.Navy800:Lerp(C.GoldDeep, 0.1))
 		c.Stroke.Color = Color3.new(1, 1, 1)
 		c.Stroke.Thickness = 4.5
 		c.Shimmer = Kit.shimmer(c.Stroke, C.Gold, C.GoldDeep)
@@ -2019,7 +2038,7 @@ function applyCard(c: any, q: any, animate: boolean)
 		setGrad(c.BarGrad, C.Green, C.GreenDeep)
 		c.Title.TextColor3 = C.Text
 	else
-		setGrad(c.Grad, C.Navy700, C.Navy900)
+		setCardGrad(c, C.Navy700, C.Navy900)
 		c.Stroke.Color = C.Ink
 		c.Stroke.Thickness = 4
 		setGrad(c.DiscGrad, Kit.lighten(C.Green, 0.1), C.GreenDeep)
@@ -2184,6 +2203,12 @@ selectTier = function(tierName: string, instant: boolean?)
 		else
 			t.Btn.SetColor(C.Navy600, C.Navy800)
 			t.Sub.TextColor3 = C.TextSoft
+		end
+		-- the gap round the disc is the tab's own colour
+		for _, g in ipairs(t.DiscBands or {}) do
+			if g and t.FaceGrad then
+				g.Color = t.FaceGrad.Color
+			end
 		end
 	end
 	if not instant then
@@ -2404,7 +2429,7 @@ local function buildOption(i: number, opt: any)
 	local hoverA: Color3 = if h then h.Color elseif opt.Leave then C.Red else C.Blue
 	local hoverD: Color3 = if h then h.Deep elseif opt.Leave then C.RedDeep else C.BlueDeep
 	local holder = new("Frame", { Name = "Option" .. i, BackgroundTransparency = 1, LayoutOrder = i, Size = UDim2.new(1, 0, 0, OPT_H), ZIndex = 15, Parent = optionsFrame })
-	local key: Frame? = nil
+	local key: GuiObject? = nil
 	local api: any
 	local function hover(on: boolean)
 		if not api or not api.Enabled then
@@ -2447,11 +2472,33 @@ local function buildOption(i: number, opt: any)
 		hover(false)
 	end)
 	local c = api.Content
-	key = keycap(c, tostring(i), 46, 46, 26, 17)
-	local k = key :: Frame
-	k.AnchorPoint = Vector2.new(0, 0.5)
-	k.Position = UDim2.new(0, 10, 0.5, 0)
-	Kit.snapEnd(k, (OPT_H - 6 - 46) / 2) -- the same gap to the option's left, top and bottom edges
+	-- the key cap is the option's left end: its gap (in the option's colours) and outline are
+	-- rings on that end, so it is exactly as far from the option's left, top and bottom edges
+	local faceGrad = api.Face:FindFirstChildOfClass("UIGradient")
+	local keyIcon = Kit.endIcon({
+		Parent = c,
+		Name = "Key",
+		Side = "Left",
+		Width = OPT_H - 6,
+		Gap = (OPT_H - 6 - 46) / 2,
+		Stroke = 3,
+		Corner = math.floor(46 * 0.3),
+		Band = if faceGrad then faceGrad.Color else C.Navy600,
+		Face = { Color3.new(1, 1, 1), rgb(222, 230, 244), 90 },
+		ZIndex = 17,
+	})
+	Kit.outlineOnTop(api.Face, 21)
+	-- the gap follows the option's colour (hover, chosen)
+	local setFace = api.SetColor
+	function api.SetColor(a2: Color3, d2: Color3?)
+		setFace(a2, d2)
+		for _, g in ipairs(keyIcon.BandGrads) do
+			if g and faceGrad then
+				g.Color = faceGrad.Color
+			end
+		end
+	end
+	key = Kit.text({ Name = "Text", Text = tostring(i), TextSize = 26, TextColor3 = C.Ink, ZIndex = keyIcon.ContentZ, Stroke = false, Parent = keyIcon.Frame })
 	Kit.text({
 		Name = "Text",
 		Text = opt.Text or "",
