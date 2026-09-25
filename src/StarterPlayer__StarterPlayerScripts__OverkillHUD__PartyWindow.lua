@@ -154,9 +154,15 @@ return function(ctx: any)
 				Parent = wash,
 			})
 		end
-		local av = Q.Avatar(p, v, 80, if isLeader then C.Gold else TEAL, 13)
-		av.Frame.Position = UDim2.fromOffset(16, 16)
-		Kit.snapEnd(av.Frame, 16) -- the same gap to the slot's left, top and bottom edges
+		-- the avatar is the slot's whole left end (rings on it), so its gap to the slot's left,
+		-- top and bottom edges is exactly the same; the gap shows the slot's own colours
+		local bands = { { Paint = { C.Navy600, C.Navy800, 90 } } }
+		if isLeader then
+			-- the gold wash fades 0.78 -> 1 across 60% of the slot: its first SLOT_H of it
+			table.insert(bands, { Paint = { C.Gold, C.Gold, 0 }, Transparency = NumberSequence.new(0.78, 0.78 + 0.22 * SLOT_H / (LEFT_W * 0.6)) })
+		end
+		local av = Q.Avatar(p, v, 80, if isLeader then C.Gold else TEAL, 13, { Side = "Left", Gap = 16, Width = SLOT_H, Bands = bands })
+		Kit.outlineOnTop(p, 16)
 		if isLeader then
 			local crown = Kit.image({
 				Name = "Crown",
@@ -166,7 +172,7 @@ return function(ctx: any)
 				Position = UDim2.fromOffset(25, 12),
 				Size = UDim2.fromOffset(46, 46),
 				Rotation = -35,
-				ZIndex = 16,
+				ZIndex = 17,
 				Parent = p,
 			})
 			crown:SetAttribute("Crown", true)
@@ -272,10 +278,10 @@ return function(ctx: any)
 		if st then
 			st.Color = Kit.darken(TEAL_D, 0.2)
 		end
-		local av = Q.Avatar(p, v, 80, C.Grey, 13)
-		av.Frame.Position = UDim2.fromOffset(16, 16)
-		Kit.snapEnd(av.Frame, 16)
-		local veil = new("Frame", { Name = "Veil", BackgroundColor3 = C.Night, BackgroundTransparency = 0.45, Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = av.Frame })
+		local av = Q.Avatar(p, v, 80, C.Grey, 13, { Side = "Left", Gap = 16, Width = SLOT_H, Band = { C.Navy700, C.Navy900, 90 } })
+		Kit.outlineOnTop(p, 16)
+		-- dims the head; its edge is under the avatar's ink ring
+		local veil = new("Frame", { Name = "Veil", BackgroundColor3 = C.Night, BackgroundTransparency = 0.45, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(80, 80), ZIndex = 14, Parent = av.Frame })
 		Kit.pill(veil)
 		local right = if iAmLeader then 150 else 20
 		Kit.text({
@@ -345,29 +351,31 @@ return function(ctx: any)
 			Radius = 26,
 			Stroke = 3,
 			ZIndex = 12,
-			Color = C.Night,
-			Transparency = 0.35,
+			Gradient = { C.Night, C.Navy900 },
 		})
 		local st = p:FindFirstChildOfClass("UIStroke")
 		if st then
 			st.Color = C.Navy500
 		end
-		local disc = new("Frame", {
-			Name = "Plus",
-			BackgroundColor3 = Color3.new(1, 1, 1),
-			BackgroundTransparency = 0,
-			Position = UDim2.fromOffset(16, 16),
-			Size = UDim2.fromOffset(80, 80),
-			ZIndex = 13,
+		-- the + disc is the slot's whole left end: its outline and the gap round it are strokes
+		local plusIcon = Kit.endIcon({
 			Parent = p,
+			Name = "Plus",
+			Side = "Left",
+			Width = SLOT_H,
+			Gap = 16,
+			Stroke = 3,
+			Band = { C.Night, C.Navy900, 90 },
+			Face = { C.Navy600, C.Navy800, 90 },
+			ZIndex = 13,
 		})
-		Kit.snapEnd(disc, 16)
-		Kit.pill(disc)
-		Kit.gradient(disc, C.Navy600, C.Navy800, 90)
-		local ds = Kit.stroke(disc, 3, C.Navy500, 0, true)
+		local disc = plusIcon.Frame
+		local ds = plusIcon.Ink
+		ds.Color = C.Navy500
+		Kit.outlineOnTop(p, 16)
 		-- a drawn + (dead centre in the disc; a text + sits low)
 		local plusBars: { Frame } = {}
-		for _, bar in ipairs(Kit.plusGlyph(disc, 30, 14, C.TextDim):GetChildren()) do
+		for _, bar in ipairs(Kit.plusGlyph(disc, 30, plusIcon.ContentZ, C.TextDim):GetChildren()) do
 			if bar.Name == "Bar" then
 				table.insert(plusBars, bar :: Frame)
 			end
@@ -446,8 +454,9 @@ return function(ctx: any)
 		end,
 	})
 	local infoPlate = Kit.plate({ Name = "HowTo", Parent = leaveHolder, Size = UDim2.fromScale(1, 1), Radius = 22, Stroke = 3, ZIndex = 12, Gradient = { C.Navy700, C.Navy900 } })
-	local infoIcon = Kit.image({ Image = Theme.Icon.Info, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 9, 0.5, 0), Size = UDim2.fromOffset(46, 46), ZIndex = 13, Parent = infoPlate })
-	Kit.snapEnd(infoIcon, 9) -- 9 from the left, top and bottom
+	-- the info icon fills the plate's left end square, 9 in from its left, top and bottom
+	local infoSlot = Kit.slot({ Parent = infoPlate, Side = "Left", Width = 64, ZIndex = 13 })
+	Kit.image({ Image = Theme.Icon.Info, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(46, 46), ZIndex = 13, Parent = infoSlot })
 	Kit.text({
 		Text = "The leader walks into a portal and the whole party queues together.",
 		TextSize = 16,
@@ -609,9 +618,8 @@ return function(ctx: any)
 			Gradient = { C.Navy600, C.Navy800 },
 		})
 		Kit.bevel(r, 20, 3, 14)
-		local av = Q.Avatar(r, v, 68, TEAL, 15)
-		av.Frame.Position = UDim2.fromOffset(12, 12)
-		Kit.snapEnd(av.Frame, 12) -- the same gap to the row's left, top and bottom edges
+		local av = Q.Avatar(r, v, 68, TEAL, 15, { Side = "Left", Gap = 12, Width = 92, Band = { C.Navy600, C.Navy800, 90 } })
+		Kit.outlineOnTop(r, 18)
 		local name = Kit.text({
 			Name = "PlayerName",
 			Text = tostring(v.DisplayName),
@@ -806,9 +814,10 @@ return function(ctx: any)
 		local wash = new("Frame", { Name = "Wash", BackgroundColor3 = r.Color, Size = UDim2.new(0.55, 0, 1, 0), ZIndex = 12, Parent = p })
 		Kit.corner(wash, 22)
 		new("UIGradient", { Rotation = 0, Transparency = NumberSequence.new(0.72, 1), Parent = wash })
-		local b = Q.Badge(p, r.Mode, 52, 13)
-		b.Frame.Position = UDim2.fromOffset(10, 10)
-		Kit.snapEnd(b.Frame, 10) -- the same gap to the card's left, top and bottom edges
+		-- the badge is the card's whole left end: the gap round it shows the card and its wash
+		local washT = NumberSequence.new(0.72, 0.72 + 0.28 * 72 / (368 * 0.55))
+		local b = Q.Badge(p, r.Mode, 52, 13, { Side = "Left", Gap = 10, Width = 72, Bands = { { Paint = { C.Navy700, C.Navy900, 90 } }, { Paint = { r.Color, r.Color, 0 }, Transparency = washT } } })
+		Kit.outlineOnTop(p, 17)
 		Kit.text({
 			Name = "Title",
 			Text = r.Title,
@@ -1050,12 +1059,10 @@ return function(ctx: any)
 			ZIndex = 18,
 			Gradient = { C.Navy700, C.Night },
 		})
-		local av = Q.Avatar(b, v, 52, if isLeader then C.Gold else TEAL, 19)
-		av.Frame.AnchorPoint = Vector2.new(0, 0.5)
-		av.Frame.Position = UDim2.new(0, 5, 0.5, 0)
-		Kit.snapEnd(av.Frame, 5) -- centred in the pill's round end
+		local av = Q.Avatar(b, v, 52, if isLeader then C.Gold else TEAL, 19, { Side = "Left", Gap = 5, Width = 62, Band = { C.Navy700, C.Night, 90 } })
+		Kit.outlineOnTop(b, 22)
 		if isLeader then
-			Kit.image({ Name = "Crown", Image = Theme.Icon.Crown, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(11, 3), Size = UDim2.fromOffset(32, 32), Rotation = -35, ZIndex = 22, Parent = b })
+			Kit.image({ Name = "Crown", Image = Theme.Icon.Crown, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(11, 3), Size = UDim2.fromOffset(32, 32), Rotation = -35, ZIndex = 23, Parent = b })
 		end
 		Kit.text({
 			Name = "PlayerName",

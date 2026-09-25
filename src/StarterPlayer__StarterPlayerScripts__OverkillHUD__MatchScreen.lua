@@ -216,20 +216,12 @@ return function(ctx: any)
 		Parent = titleHolder,
 	})
 	Kit.corner(titlePlate, 30)
-	Kit.stroke(titlePlate, 6, C.Ink, 0, true)
-	local titleGrad = Kit.gradient(titlePlate, C.Blue, C.BlueDeep, 90)
-	local titleInner = new("Frame", {
-		Name = "Inner",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		Position = UDim2.fromOffset(8, 8),
-		Size = UDim2.new(1, -16, 1, -16),
-		ZIndex = 10,
-		Parent = titlePlate,
-	})
-	Kit.snapFill(titleInner, 8) -- the same rim width on all four sides
-	Kit.corner(titleInner, 23)
-	Kit.gradient(titleInner, C.Navy800, C.Night, 90)
-	local titleSheen = Kit.addShine(titleInner, 23)
+	-- the plate is the dark panel; the mode-coloured rim and the ink outline are strokes on its
+	-- own edge and the badge is its whole left end (rings on it), so the rim is the same width
+	-- all round and the badge is the same distance from the left, top and bottom edges
+	Kit.paint(titlePlate, { C.Navy800, C.Night, 90 })
+	local titleSheen = Kit.addShine(titlePlate, 30)
+	titleSheen.ZIndex = 11
 	local titleText = Kit.text({
 		Name = "Title",
 		Text = "MATCH FOUND",
@@ -241,19 +233,15 @@ return function(ctx: any)
 		Parent = titlePlate,
 	})
 	local titleScale = Kit.fx(titleHolder)
-	local badgeHolder = new("Frame", {
-		Name = "BadgeHolder",
-		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(56, 56),
-		Size = UDim2.fromOffset(86, 86),
-		ZIndex = 13,
-		Parent = titlePlate,
-	})
-	-- the mode badge: the same whole number of pixels from the plate's left, top and bottom edges
-	Kit.snapEnd(badgeHolder, 13)
-	local titleBadge = Q.Badge(badgeHolder, "Duel", 86, 13)
-	titleBadge.Frame.Size = UDim2.fromScale(1, 1)
+	local titleBadge = Q.Badge(titlePlate, "Duel", 86, 12, { Side = "Left", Gap = 13, Width = 112, Band = { C.Navy800, C.Night, 90 } })
+	local badgeHolder = titleBadge.Frame
+	local _, rimGrads = Kit.rings(titlePlate, 30, { { 8, { Kit.lighten(C.Blue, 0.15), C.BlueDeep, 90 } } }, 16)
+	local titleGrad = rimGrads[1]
+	do
+		local line = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 17, Parent = titlePlate })
+		Kit.corner(line, 30)
+		Kit.stroke(line, 6, C.Ink, 0, true)
+	end
 
 	local modeChip = Q.Chip(stage, "1V1 DUEL", C.Blue, C.BlueDeep, 42, 9)
 	modeChip.Frame.AnchorPoint = Vector2.new(0.5, 0)
@@ -1140,7 +1128,11 @@ return function(ctx: any)
 		tween(titleScale, 0.5, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0.1)
 		task.delay(0.55, function()
 			Kit.playShine(titleSheen)
-			Kit.wiggle(badgeHolder, 1)
+			-- the badge is the plate's end: wiggle its lettering, not the end itself
+			local badgeText = badgeHolder:FindFirstChild("Text")
+			if badgeText and badgeText:IsA("GuiObject") then
+				Kit.wiggle(badgeText, 1)
+			end
 		end)
 		modeChipScale.Scale = 0
 		tween(modeChipScale, 0.4, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0.35)

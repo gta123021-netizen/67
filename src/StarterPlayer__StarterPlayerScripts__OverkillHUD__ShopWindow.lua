@@ -121,8 +121,10 @@ return function(ctx: any)
 		ZIndex = 12,
 		Gradient = { C.Night, C.Navy900 },
 	})
-	local tipIcon = Kit.image({ Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Size = UDim2.fromOffset(42, 42), ZIndex = 13, Parent = tipBar })
-	Kit.snapEnd(tipIcon, 8) -- centred in the pill's round end: 8 from the left, top and bottom
+	-- the tip icon sits in the bar's round left end (a slot with the bar's own left, top and
+	-- bottom edges), 8 in from each
+	local tipSlot = Kit.slot({ Parent = tipBar, Side = "Left", Width = 58, ZIndex = 13 })
+	local tipIcon = Kit.image({ Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(42, 42), ZIndex = 13, Parent = tipSlot })
 	local tipText = Kit.text({
 		Text = "",
 		TextSize = 19,
@@ -153,7 +155,7 @@ return function(ctx: any)
 	-- a ViewportFrame can't show particles). It stands in the free part of the picture: below the
 	-- rarity chip and above the bottom edge.
 	local AURA_PPS = 22 -- pixels per stud in a card
-	local function makeAuraArt(card: GuiObject, show: GuiObject, auraName: string, sheet: number?, focus: { number }?)
+	local function makeAuraArt(card: GuiObject, show: { Position: UDim2, Size: UDim2 }, auraName: string, sheet: number?, focus: { number }?)
 		local src = Auras:FindFirstChild(auraName)
 		if not src and not sheet then
 			return nil
@@ -203,26 +205,32 @@ return function(ctx: any)
 			shimmer = Kit.shimmer(cardStroke, r.Color, r.Deep)
 		end
 
-		-- showcase window
+		-- showcase window. It shares the card's top, left and right edges; the card's border round
+		-- it and its ink rim are strokes on that rect (below), so the border is exactly as wide at
+		-- the left, the top and the right. `showRect` is the picture itself, 10 in from the card.
+		local SHOW_H = 190
+		local showRect = { Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 0, SHOW_H) }
 		local show = new("CanvasGroup", {
 			Name = "Showcase",
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(10, 10),
-			Size = UDim2.new(1, -20, 0, 190),
+			Size = UDim2.new(1, 0, 0, SHOW_H + 20),
 			ZIndex = 13,
 			Parent = card,
 		})
-		Kit.corner(show, 18)
+		Kit.corner(show, 28)
+		-- the picture: what used to be the whole showcase (the art keeps its coordinates); its edge
+		-- sits under the rim
+		local picture = new("Frame", { Name = "Picture", BackgroundTransparency = 1, Position = showRect.Position, Size = UDim2.new(1, -20, 1, -20), ZIndex = 13, Parent = show })
 		-- the gradient lives on a child: a UIGradient on the CanvasGroup itself would tint the art
-		local backdrop = new("Frame", { Name = "Backdrop", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromScale(1, 1), ZIndex = 13, Parent = show })
+		local backdrop = new("Frame", { Name = "Backdrop", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromScale(1, 1), ZIndex = 13, Parent = picture })
 		Kit.gradient(backdrop, Kit.lighten(r.Color, 0.05), Kit.darken(r.Deep, 0.45), 90)
 		local rays = Kit.rays(show, Color3.new(1, 1, 1), 380, 0.72, 13, false)
-		local shade = new("Frame", { BackgroundColor3 = C.Night, Position = UDim2.fromScale(0, 0.55), Size = UDim2.fromScale(1, 0.45), ZIndex = 13, Parent = show })
+		local shade = new("Frame", { BackgroundColor3 = C.Night, Position = UDim2.fromScale(0, 0.55), Size = UDim2.fromScale(1, 0.45), ZIndex = 13, Parent = picture })
 		Kit.gradient(shade, C.Night, C.Night, 90, 1, 0.35)
 		local preview = nil
 		local art: GuiObject? = nil
 		if item.Aura then
-			preview = makeAuraArt(card, show, item.Aura, item.CardSheet, item.CardFocus)
+			preview = makeAuraArt(card, showRect, item.Aura, item.CardSheet, item.CardFocus)
 		end
 		-- the art never touches the rarity / deal chip (top) or the x2 badge (bottom right): it is
 		-- fitted into the free part of the picture (picture-local pixels). Cards with a badge keep
@@ -238,7 +246,7 @@ return function(ctx: any)
 			-- coin packs are the same coin in growing piles, so the whole tab reads as one family
 			local bx0, bx1, by0, by1 = Kit.coinBounds(item.CoinArt)
 			local S = math.min((ART_Y1 - ART_Y0) / (by1 - by0), (ART_X1 - ART_X0) / (bx1 - bx0), if item.CoinArt == 1 then 150 else 200)
-			local pile = Kit.coinArt(show, item.CoinArt, S, 14)
+			local pile = Kit.coinArt(picture, item.CoinArt, S, 14)
 			pile.Position = UDim2.fromOffset((ART_X0 + ART_X1) / 2 - ((bx0 + bx1) / 2 - 0.5) * S, (ART_Y0 + ART_Y1) / 2 - ((by0 + by1) / 2 - 0.5) * S)
 			art = pile
 		elseif not preview then
@@ -250,18 +258,23 @@ return function(ctx: any)
 				Position = UDim2.fromOffset((ART_X0 + ART_X1) / 2, (ART_Y0 + ART_Y1) / 2),
 				Size = UDim2.fromOffset(S, S),
 				ZIndex = 14,
-				Parent = show,
+				Parent = picture,
 			})
 		end
 		if fancy then
-			local sparkleHolder = new("Frame", { Name = "SparkleHolder", BackgroundTransparency = 1, Position = show.Position + UDim2.fromOffset(8, 8), Size = show.Size - UDim2.fromOffset(16, 16), ZIndex = 15, Parent = card })
+			local sparkleHolder = new("Frame", { Name = "SparkleHolder", BackgroundTransparency = 1, Position = showRect.Position + UDim2.fromOffset(8, 8), Size = showRect.Size - UDim2.fromOffset(16, 16), ZIndex = 15, Parent = card })
 			Kit.sparkles(sparkleHolder, r.Color, 6, 15, function()
 				return win.Root.Visible and cell.Visible
 			end)
 		end
-		local rim = new("Frame", { Name = "ShowRim", BackgroundTransparency = 1, Position = show.Position, Size = show.Size, ZIndex = 16, Parent = card })
-		Kit.corner(rim, 18)
-		Kit.stroke(rim, 3, C.Ink, 0, true)
+		-- the border round the picture (in the card's colours) and its ink rim, as strokes on the
+		-- window's rect; then the card's own outline over the lot
+		local rim = new("Frame", { Name = "ShowRim", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, SHOW_H + 20), ZIndex = 16, Parent = card })
+		Kit.edgeStrokes(rim, UDim.new(0, 28), {
+			{ 10 + 3 * 1.35 / 2, C.Ink },
+			{ 10 - 3 * 1.35 / 2, { C.Navy600, C.Navy600:Lerp(C.Navy800, (SHOW_H + 20) / 350), 90 } },
+		}, 16)
+		Kit.outlineOnTop(card, 20)
 
 		-- rarity tag
 		local rtag = Kit.plate({
@@ -403,8 +416,8 @@ return function(ctx: any)
 				AutoButtonColor = false,
 				Text = "",
 				BackgroundTransparency = 1,
-				Position = show.Position,
-				Size = show.Size,
+				Position = showRect.Position,
+				Size = showRect.Size,
 				ZIndex = 16,
 				Parent = card,
 			})

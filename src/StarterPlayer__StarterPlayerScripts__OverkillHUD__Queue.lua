@@ -121,37 +121,45 @@ return function(ctx: any)
 	---------------------------------------------------------------------------
 	-- shared pieces
 	---------------------------------------------------------------------------
-	-- round head picture with a coloured ring; practice bots get a letter disc
-	function Q.Avatar(parent: Instance, view: any, size: number, ring: Color3, z: number)
-		local holder = new("Frame", {
-			Name = "Avatar",
-			BackgroundColor3 = Color3.new(1, 1, 1),
-			Size = UDim2.fromOffset(size, size),
-			ZIndex = z,
-			Parent = parent,
-		})
-		Kit.pill(holder)
-		Kit.stroke(holder, math.max(2.5, size * 0.045), C.Ink, 0, true)
-		local ringGrad = Kit.gradient(holder, Kit.lighten(ring, 0.12), Kit.darken(ring, 0.3), 90)
+	-- round head picture with a coloured ring; practice bots get a letter disc.
+	-- slot = { Side = "Left" | "Right" | "TopLeft", Gap, Band (paint) or Bands (layers), Width }:
+	-- the avatar is built as rings on a slot that is that whole end of `parent` (Kit.endIcon), so
+	-- its gap to the parent's edges is exactly the same on every side it touches. Without a slot
+	-- it is a free-standing disc of `size`.
+	function Q.Avatar(parent: Instance, view: any, size: number, ring: Color3, z: number, slot: any?)
+		local ink = math.max(2.5, size * 0.045) * 1.35
 		local inset = math.max(3, math.floor(size * 0.07))
-		local inner = new("Frame", {
+		local ringPaint = { Kit.lighten(ring, 0.12), Kit.darken(ring, 0.3), 90 }
+		local holder: GuiObject
+		local ringGrad: UIGradient?
+		local gap = if slot then slot.Gap else 0
+		if slot then
+			holder = Kit.slot({ Parent = parent :: GuiObject, Side = slot.Side, Width = slot.Width or (size + gap * 2), Height = slot.Height or (size + gap * 2), Name = "Avatar", ZIndex = z })
+		else
+			holder = new("Frame", { Name = "Avatar", Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
+		end
+		holder.BackgroundTransparency = 0
+		Kit.pill(holder)
+		Kit.paint(holder, { C.Navy500, C.Night, 90 })
+		-- the head (or letter) reaches in under the coloured ring, so its own edge never shows
+		local head = new("Frame", {
 			Name = "Inner",
-			BackgroundColor3 = Color3.new(1, 1, 1),
-			Position = UDim2.fromOffset(inset, inset),
-			Size = UDim2.new(1, -inset * 2, 1, -inset * 2),
-			ZIndex = z,
+			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(size - inset * 2 + 3, size - inset * 2 + 3),
+			ZIndex = z + 1,
 			Parent = holder,
 		})
-		Kit.pill(inner)
-		Kit.gradient(inner, C.Navy500, C.Night, 90)
+		Kit.pill(head)
 		if view.Bot or (view.UserId or 0) <= 0 then
 			Kit.text({
 				Name = "Letter",
 				Text = string.upper(string.sub(view.DisplayName or "?", 1, 1)),
 				TextSize = math.floor(size * 0.46),
-				ZIndex = z + 1,
+				ZIndex = z + 3,
 				Stroke = math.max(2, size * 0.04),
-				Parent = inner,
+				Parent = holder,
 			})
 		else
 			local img = Kit.image({
@@ -159,37 +167,93 @@ return function(ctx: any)
 				Image = Theme.Headshot(view.UserId),
 				ScaleType = Enum.ScaleType.Crop,
 				ZIndex = z + 1,
-				Parent = inner,
+				Parent = head,
 			})
 			Kit.pill(img)
 		end
+		-- rings from the outside in: the gap (in the parent's colours), ink, the coloured ring
+		local bands = {}
+		if slot and gap - ink / 2 > 0 then
+			table.insert(bands, { gap - ink / 2, "GAP" })
+		end
+		-- in a slot the whole outline is inside the slot; a free disc's outline is half outside
+		-- its edge (its own border stroke below), so only the inner half is a ring here
+		table.insert(bands, { if slot then ink else ink / 2, C.Ink })
+		table.insert(bands, { inset - ink / 2, ringPaint })
+		local list = {}
+		local depth = 0
+		for _, b in ipairs(bands) do
+			depth += b[1]
+		end
+		-- innermost first; the gap goes on last, one stroke per background layer
+		local d = depth
+		for i = #bands, 1, -1 do
+			if bands[i][2] ~= "GAP" then
+				table.insert(list, { d, bands[i][2] })
+			end
+			d -= bands[i][1]
+		end
+		if slot and gap - ink / 2 > 0 then
+			for _, layer in ipairs(slot.Bands or { { Paint = slot.Band or C.Navy700 } }) do
+				table.insert(list, { gap - ink / 2, layer.Paint, layer.Transparency })
+			end
+		end
+		local _, grads = Kit.edgeStrokes(holder, UDim.new(1, 0), list, z + 2)
+		ringGrad = grads[1]
+		if not slot then
+			-- a free disc: the ink outline half outside its edge as well, like every other outline
+			Kit.stroke(holder, math.max(2.5, size * 0.045), C.Ink, 0, true)
+		end
 		local api = { Frame = holder }
 		function api.SetRing(c: Color3)
-			ringGrad.Color = ColorSequence.new(Kit.lighten(c, 0.12), Kit.darken(c, 0.3))
+			if ringGrad then
+				ringGrad.Color = ColorSequence.new(Kit.lighten(c, 0.12), Kit.darken(c, 0.3))
+			end
 		end
 		return api
 	end
 
-	-- rounded mode badge: "1V1", "2V2", "FFA" in the mode colour
-	function Q.Badge(parent: Instance, modeId: string, size: number, z: number)
+	-- rounded mode badge: "1V1", "2V2", "FFA" in the mode colour. slot: as for Q.Avatar (the
+	-- badge as rings on that whole end of `parent`, the same gap on every side it touches).
+	function Q.Badge(parent: Instance, modeId: string, size: number, z: number, slot: any?)
 		local m = Config.Modes[modeId] or Config.Modes.Duel
 		local r = math.floor(size * 0.3)
-		local b = new("Frame", {
-			Name = "ModeBadge",
-			BackgroundColor3 = Color3.new(1, 1, 1),
-			Size = UDim2.fromOffset(size, size),
-			ZIndex = z,
-			Parent = parent,
-		})
-		Kit.corner(b, r)
-		Kit.stroke(b, math.max(3, size * 0.055), C.Ink, 0, true)
-		local grad = Kit.gradient(b, Kit.lighten(m.Color, 0.12), m.Deep, 90)
-		Kit.bevel(b, math.max(4, r - 3), 3, z)
+		local stroke = math.max(3, size * 0.055)
+		local b: GuiObject
+		local grad: UIGradient?
+		if slot then
+			local icon = Kit.endIcon({
+				Parent = parent,
+				Name = "ModeBadge",
+				Side = slot.Side,
+				Width = slot.Width or (size + slot.Gap * 2),
+				Height = slot.Height or (size + slot.Gap * 2),
+				Gap = slot.Gap,
+				Stroke = stroke,
+				Corner = r,
+				Band = slot.Band,
+				Bands = slot.Bands,
+				Face = { Kit.lighten(m.Color, 0.12), m.Deep, 90 },
+				ZIndex = z,
+			})
+			b, grad = icon.Frame, icon.Face
+		else
+			b = new("Frame", {
+				Name = "ModeBadge",
+				BackgroundColor3 = Color3.new(1, 1, 1),
+				Size = UDim2.fromOffset(size, size),
+				ZIndex = z,
+				Parent = parent,
+			})
+			Kit.corner(b, r)
+			Kit.stroke(b, stroke, C.Ink, 0, true)
+			grad = Kit.gradient(b, Kit.lighten(m.Color, 0.12), m.Deep, 90)
+		end
 		local label = Kit.text({
 			Name = "Text",
 			Text = m.Badge,
 			TextSize = math.floor(size * (if #m.Badge > 3 then 0.3 else 0.36)),
-			ZIndex = z + 2,
+			ZIndex = z + 3,
 			Stroke = math.max(2.4, size * 0.05),
 			Parent = b,
 		})
@@ -197,7 +261,9 @@ return function(ctx: any)
 		function api.Set(id: string)
 			local mm = Config.Modes[id]
 			if mm then
-				grad.Color = ColorSequence.new(Kit.lighten(mm.Color, 0.12), mm.Deep)
+				if grad then
+					grad.Color = ColorSequence.new(Kit.lighten(mm.Color, 0.12), mm.Deep)
+				end
 				label.Text = mm.Badge
 			end
 		end

@@ -208,23 +208,25 @@ function ctx.Toast(o: { [string]: any })
 	local sc = Kit.fx(card)
 	sc.Scale = 0.7
 	Kit.padding(card, 86, 0, 30, 0)
-	local stripe = new("Frame", {
-		Name = "Stripe",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, -80, 0.5, 0),
-		Size = UDim2.fromOffset(64, 64),
-		ZIndex = 2,
+	-- the icon disc is the card's whole round left end: its outline and the gap round it are
+	-- strokes on it, so the gap is the same at the left, the top and the bottom
+	local stripeIcon = Kit.endIcon({
 		Parent = card,
+		Name = "Stripe",
+		Side = "Left",
+		Width = 76,
+		Gap = 6,
+		Stroke = 3.5,
+		Band = { C.Navy700, C.Night, 90 },
+		Face = { Kit.lighten(color, 0.15), deep, 90 },
+		ZIndex = 2,
 	})
-	Kit.pill(stripe)
-	Kit.stroke(stripe, 3.5, C.Ink, 0, true)
-	Kit.gradient(stripe, Kit.lighten(color, 0.15), deep, 90)
-	Kit.snapEnd(stripe, 6) -- centred in the card's round end: 6 from the left, top and bottom
+	local stripe = stripeIcon.Frame
+	Kit.outlineOnTop(card, 6)
 	if o.Glyph == "close" then
-		Kit.closeGlyph(stripe, 30, 3)
+		Kit.closeGlyph(stripe, 30, stripeIcon.ContentZ)
 	elseif o.Icon then
-		Kit.image({ Image = o.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(46, 46), ZIndex = 3, Parent = stripe })
+		Kit.image({ Image = o.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(46, 46), ZIndex = stripeIcon.ContentZ, Parent = stripe })
 	end
 	local col = new("Frame", { Name = "Text", BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 2, Parent = card })
 	Kit.list(col, Enum.FillDirection.Vertical, -2, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
@@ -798,24 +800,91 @@ local function pillValue(pill: GuiObject, text: string, color: Color3, rightSpac
 end
 ctx.PillValue = pillValue
 
--- an action button in a pill's right end (the coins +, the hero pill's CHANGE). It sits in a flat
--- socket cut to the shape of the pill's own end, so the ring around it is one even colour all the
--- way round (the pill's shading fades to almost black at the bottom and would swallow that side
--- of the gap). The button and its socket are placed on whole screen pixels, so the ring is
--- exactly as wide on all four sides at any screen size. width = nil: a round button.
+-- an action button in a pill's right end (the coins +, the hero pill's CHANGE). The button is the
+-- pill's whole right end (the same top, right and bottom edges as the pill), and its outline and
+-- the gap round it are strokes on that end (Kit.endIcon): the gap is drawn in the pill's own
+-- colours, so it reads as the pill, and it is exactly as wide at the top, the right and the
+-- bottom at any screen size.
+--   o = { Width (the button's own width; nil = round), Text, TextSize, Glyph (function(content, z)),
+--         Color, Deep, OnClick, HoverScale }
 local ACTION_H = PILL_H - RIGHT_PAD * 2 -- 44
-local function pillAction(pill: GuiObject, button: GuiObject, width: number?)
-	local socket = new("Frame", {
-		Name = "Socket",
-		BackgroundColor3 = C.Navy800,
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.new(0, (width or ACTION_H) + RIGHT_PAD * 2, 1, 0),
-		ZIndex = pill.ZIndex + 1,
-		Parent = pill,
+local function faceSeq(c: Color3, d: Color3): ColorSequence
+	return ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Kit.lighten(c, 0.14)),
+		ColorSequenceKeypoint.new(0.55, c),
+		ColorSequenceKeypoint.new(1, Kit.lighten(d, 0.1)),
 	})
-	Kit.pill(socket)
-	Kit.snapEnd(button, RIGHT_PAD, { Right = true, Width = width, Ring = socket })
+end
+local function pillAction(pill: GuiObject, o: { [string]: any })
+	local w = o.Width or ACTION_H
+	local color, deep = o.Color or C.Blue, o.Deep or C.BlueDeep
+	local icon = Kit.endIcon({
+		Parent = pill,
+		Class = "TextButton",
+		Name = o.Name or "Action",
+		Side = "Right",
+		Width = w + RIGHT_PAD * 2,
+		Gap = RIGHT_PAD,
+		Stroke = 3,
+		Band = { C.Navy700, C.Night, 90 },
+		Face = faceSeq(color, deep),
+		ZIndex = pill.ZIndex + 1,
+	})
+	local btn = icon.Frame :: TextButton
+	-- the label or glyph pops on hover; the button's shape stays put in the pill's end
+	local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1, 1), ZIndex = icon.ContentZ, Parent = btn })
+	local pop = Kit.fx(content)
+	local label: TextLabel? = nil
+	if o.Text then
+		label = Kit.text({ Text = o.Text, TextSize = o.TextSize or 21, ZIndex = icon.ContentZ, Parent = content })
+	end
+	if o.Glyph then
+		o.Glyph(content, icon.ContentZ)
+	end
+	local api = { Button = btn, Label = label, Enabled = true }
+	local base = { color, deep }
+	function api.SetText(t: string)
+		if label then
+			label.Text = t
+		end
+	end
+	function api.SetColor(c: Color3, d: Color3?)
+		base = { c, d or Kit.darken(c, 0.35) }
+		if icon.Face then
+			icon.Face.Color = faceSeq(base[1], base[2])
+		end
+	end
+	local hovering = false
+	btn.MouseEnter:Connect(function()
+		hovering = true
+		tween(pop, 0.22, { Scale = o.HoverScale or 1.1 }, Enum.EasingStyle.Back)
+		if icon.Face then
+			icon.Face.Color = faceSeq(Kit.lighten(base[1], 0.1), Kit.lighten(base[2], 0.08))
+		end
+	end)
+	btn.MouseLeave:Connect(function()
+		hovering = false
+		tween(pop, 0.22, { Scale = 1 }, Enum.EasingStyle.Back)
+		if icon.Face then
+			icon.Face.Color = faceSeq(base[1], base[2])
+		end
+	end)
+	btn.MouseButton1Down:Connect(function()
+		tween(pop, 0.08, { Scale = 0.92 }, Enum.EasingStyle.Quad)
+	end)
+	btn.MouseButton1Up:Connect(function()
+		tween(pop, 0.18, { Scale = if hovering then o.HoverScale or 1.1 else 1 }, Enum.EasingStyle.Back)
+	end)
+	btn.Activated:Connect(function()
+		if not api.Enabled then
+			return
+		end
+		Kit.sfx("Click")
+		if o.OnClick then
+			o.OnClick()
+		end
+	end)
+	return api
 end
 ctx.PillAction = pillAction
 
@@ -832,25 +901,18 @@ local coinIcon = Kit.image({
 })
 local coinText = pillValue(coinPill, "0", C.Gold, RIGHT_PAD + ACTION_H + 12)
 local setCoins = Kit.counter(coinText, Theme.Comma, 0)
-local plus = Kit.button({
+pillAction(coinPill, {
 	Name = "Plus",
-	Parent = coinPill,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -RIGHT_PAD, 0.5, 0),
-	Size = UDim2.fromOffset(ACTION_H, ACTION_H),
-	Radius = UDim.new(1, 0),
-	Depth = 0, -- flat, like the dock tiles
-	Stroke = 3,
 	Color = C.Green,
 	Deep = C.GreenDeep,
-	ZIndex = coinPill.ZIndex + 3,
 	HoverScale = 1.12,
+	Glyph = function(content: GuiObject, z: number)
+		Kit.plusGlyph(content, 16, z)
+	end,
 	OnClick = function()
 		ctx.Open("Shop", "Coins")
 	end,
 })
-Kit.plusGlyph(plus.Content, 16, plus.Content.ZIndex + 1)
-pillAction(coinPill, plus.Button)
 
 -- level: star badge with the level, caption row "LEVEL n ... xp / need XP", the bar under it
 local levelHolder, levelPill, levelCaption = statusPill("Level", 2, "LEVEL 1", C.Blue, "Stars")
@@ -953,16 +1015,16 @@ local function dockButton(o: { [string]: any })
 	})
 	Kit.corner(glow, 28)
 	Kit.gradient(glow, accent, accent, 90, 1, 0.45)
-	local ring = new("Frame", {
-		Name = "Ring",
-		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(6, 6),
-		Size = UDim2.new(1, -12, 1, -12),
-		ZIndex = z + 1,
-		Parent = api.Face,
-	})
-	Kit.corner(ring, 22)
-	Kit.stroke(ring, 2.5, Kit.lighten(accent, 0.2), 0.45, true)
+	-- the thin accent ring 6 in from the tile's edge: strokes on the face's own rect (the ring,
+	-- then the face and its glow over the ring's outer side, then the face's outline), so it is
+	-- exactly as far in on every side
+	local ringW = 2.5 * 1.35
+	Kit.edgeStrokes(api.Face, UDim.new(0, 28), {
+		{ 6 + ringW / 2, Kit.lighten(accent, 0.2), 0.45 },
+		{ 6 - ringW / 2, ColorSequence.new({ ColorSequenceKeypoint.new(0, Kit.lighten(C.Navy600, 0.14)), ColorSequenceKeypoint.new(0.55, C.Navy600), ColorSequenceKeypoint.new(1, Kit.lighten(C.Navy800, 0.1)) }) },
+		{ 6 - ringW / 2, accent, NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.35, 1), NumberSequenceKeypoint.new(1, 0.45) }) },
+		{ 4.5 * 1.35 / 2, C.Ink },
+	}, z + 1)
 	local glowImg = Kit.image({
 		Name = "IconGlow",
 		Image = Theme.Icon.Glow,

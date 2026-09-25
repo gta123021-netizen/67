@@ -37,25 +37,27 @@ return function(ctx: any)
 	local list = new("Frame", { Name = "Rows", BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 88), Size = UDim2.new(1, 0, 0, 466), ZIndex = 12, Parent = content })
 	Kit.list(list, Enum.FillDirection.Vertical, 12, Enum.HorizontalAlignment.Center)
 
-	local function row(order: number, title: string, sub: string, color: Color3, deep: Color3, glyph: string?, icon: string?, parent: Instance?): (Frame, TextLabel)
+	local function row(order: number, title: string, sub: string, color: Color3, deep: Color3, glyph: string?, icon: string?, parent: Instance?): (Frame, TextLabel, UIStroke?)
 		local r = Kit.plate({ Name = title, Parent = parent or list, Size = UDim2.new(1, 0, 0, 82), LayoutOrder = order, Radius = 24, Stroke = 4, ZIndex = 12, Gradient = { C.Navy600, C.Navy800 } })
 		Kit.bevel(r, 20, 3, 12)
-		local disc = Kit.plate({
-			Name = "Disc",
+		-- the icon disc is the row's whole left end: its outline and the gap round it are strokes on
+		-- it (in the row's colours), so the gap is the same at the left, the top and the bottom
+		local disc = Kit.endIcon({
 			Parent = r,
-			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0, 13, 0.5, 0),
-			Size = UDim2.fromOffset(56, 56),
-			Radius = UDim.new(1, 0),
+			Name = "Disc",
+			Side = "Left",
+			Width = 82,
+			Gap = 13,
 			Stroke = 3.5,
+			Band = { C.Navy600, C.Navy800, 90 },
+			Face = { Kit.lighten(color, 0.1), deep, 90 },
 			ZIndex = 13,
-			Gradient = { Kit.lighten(color, 0.1), deep },
 		})
-		Kit.snapEnd(disc, 13) -- the same gap to the row's left, top and bottom edges
+		local _, rowStroke = Kit.outlineOnTop(r, 16)
 		if icon then
-			Kit.image({ Image = icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(38, 38), ZIndex = 14, Parent = disc })
+			Kit.image({ Image = icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(38, 38), ZIndex = disc.ContentZ, Parent = disc.Frame })
 		else
-			Kit.text({ Text = glyph or "", TextSize = 26, ZIndex = 14, Stroke = 3, Parent = disc })
+			Kit.text({ Text = glyph or "", TextSize = 26, ZIndex = disc.ContentZ, Stroke = 3, Parent = disc.Frame })
 		end
 		Kit.text({ Text = title, TextSize = 25, Position = UDim2.fromOffset(84, 12), Size = UDim2.new(0.5, 0, 0, 30), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 3.2, Parent = r })
 		local subLabel = Kit.text({
@@ -72,7 +74,7 @@ return function(ctx: any)
 			Stroke = 2,
 			Parent = r,
 		})
-		return r, subLabel
+		return r, subLabel, rowStroke
 	end
 
 	-- "57%" (string.format's %d cuts 0.57 * 100 = 56.999... down to 56)
@@ -343,9 +345,9 @@ return function(ctx: any)
 	for i, action in ipairs(Theme.KeyActions) do
 		local accent = Theme.Accent[action.Id] or Theme.Accent.Settings
 		local icon = (Theme.Icon :: any)[action.Id] or Theme.Icon.Gear
-		local r, sub = row(i, action.Label, action.Sub, accent[1], accent[2], nil, icon, keysPage)
+		local r, sub, rowStroke = row(i, action.Label, action.Sub, accent[1], accent[2], nil, icon, keysPage)
 		local kr: any = { Id = action.Id, Action = action, Row = r, Sub = sub }
-		kr.RowStroke = r:FindFirstChildOfClass("UIStroke")
+		kr.RowStroke = rowStroke
 		kr.Cap = Kit.button({
 			Name = "KeyCap",
 			Parent = r,
@@ -439,17 +441,19 @@ return function(ctx: any)
 		ZIndex = 12,
 		Gradient = { C.Night, C.Navy900 },
 	})
-	local knob = new("Frame", {
-		Name = "Knob",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		Position = UDim2.fromOffset(7, 7),
-		Size = UDim2.new(0.5, -10, 1, -14),
-		ZIndex = 13,
+	-- the purple thumb is half the track (plus 4 past the middle) and shares the track's edges on
+	-- the side it sits at: the gap round it and its outline are strokes, 7 from the end, the top
+	-- and the bottom
+	local thumb = Kit.switchThumb({
 		Parent = tabs,
+		Gap = 7,
+		Stroke = 3,
+		Overhang = 4,
+		Track = { C.Night, C.Navy900, 90 },
+		Face = { Kit.lighten(C.Purple, 0.14), C.PurpleDeep, 90 },
+		ZIndex = 13,
 	})
-	Kit.pill(knob)
-	Kit.stroke(knob, 3, C.Ink, 0, true)
-	Kit.gradient(knob, Kit.lighten(C.Purple, 0.14), C.PurpleDeep, 90)
+	Kit.outlineOnTop(tabs, 14)
 	local tabLabels: { [string]: TextLabel } = {}
 	local setPage: (string, boolean?) -> () = function() end
 	for i, def in ipairs({ { "General", "GENERAL" }, { "Keys", "KEYBINDS" } }) do
@@ -617,11 +621,8 @@ return function(ctx: any)
 		stopListening()
 		page = name
 		local isKeys = name == "Keys"
-		local target = if isKeys then UDim2.new(0.5, 3, 0, 7) else UDim2.fromOffset(7, 7)
-		if instant then
-			knob.Position = target
-		else
-			tween(knob, 0.3, { Position = target }, Enum.EasingStyle.Back)
+		thumb.Set(if isKeys then 2 else 1, instant)
+		if not instant then
 			Kit.sfx("Click")
 		end
 		tabLabels.General.TextColor3 = if isKeys then C.TextDim else C.Text

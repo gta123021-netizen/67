@@ -665,29 +665,35 @@ return function(ctx: any)
 		-- portrait: the hero's face on a sunburst in their colours
 		-- portrait with the same double outline as the HUD's hero badge: ink, the hero's colour,
 		-- ink, then the face on a sunburst
-		local frame = new("Frame", { Name = "PortraitFrame", BackgroundColor3 = C.Ink, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 11, 0.5, 0), Size = UDim2.fromOffset(106, 106), ZIndex = 13, Parent = face })
-		Kit.snapEnd(frame, 11) -- the same gap to the row's left, top and bottom edges
-		Kit.corner(frame, 26)
-		local band = new("Frame", { Name = "Band", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8), ZIndex = 13, Parent = frame })
-		Kit.corner(band, 22)
-		Kit.gradient(band, Kit.lighten(a, 0.25), d, 90)
-		local innerRing = new("Frame", { Name = "Inner", BackgroundColor3 = C.Ink, Position = UDim2.fromOffset(5, 5), Size = UDim2.new(1, -10, 1, -10), ZIndex = 13, Parent = band })
-		Kit.corner(innerRing, 18)
-		local well = new("Frame", { Name = "Well", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(3, 3), Size = UDim2.new(1, -6, 1, -6), ZIndex = 13, Parent = innerRing })
-		Kit.corner(well, 15)
-		Kit.gradient(well, Kit.lighten(a, 0.2), Kit.darken(d, 0.25), 90)
-		local art = new("CanvasGroup", { Name = "Art", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 13, Parent = well })
-		Kit.corner(art, 15)
-		Kit.rays(art, Color3.new(1, 1, 1), 150, 0.72, 13, false)
-		local shade = new("Frame", { Name = "Shade", BackgroundColor3 = C.Night, BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.5), ZIndex = 13, Parent = art })
+		-- the portrait is the row's whole left end: the gap round it (in the row's colours), then
+		-- ink, the hero's colour and ink again are strokes on it, so each is exactly as wide at the
+		-- left, the top and the bottom; the art reaches in under the inner ink ring
+		local frame = Kit.slot({ Parent = face, Side = "Left", Width = ROW_H, Name = "PortraitFrame", ZIndex = 13 })
+		frame.BackgroundTransparency = 0
+		Kit.corner(frame, 37) -- the portrait's corner (26) pushed out by the gap (11)
+		Kit.paint(frame, { Kit.lighten(a, 0.2), Kit.darken(d, 0.25), 90 })
+		local well = new("Frame", { Name = "Well", BackgroundTransparency = 1, Position = UDim2.fromOffset(21, 21), Size = UDim2.new(1, -42, 1, -42), ZIndex = 14, Parent = frame })
+		Kit.corner(well, 17)
+		local art = new("CanvasGroup", { Name = "Art", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 14, Parent = well })
+		Kit.corner(art, 17)
+		Kit.rays(art, Color3.new(1, 1, 1), 150, 0.72, 14, false)
+		local shade = new("Frame", { Name = "Shade", BackgroundColor3 = C.Night, BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0.5), ZIndex = 14, Parent = art })
 		Kit.gradient(shade, C.Night, C.Night, 90, 1, 0.45)
-		local vpHolder = new("Frame", { Name = "View", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 14, Parent = well })
+		local vpHolder = new("Frame", { Name = "View", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = well })
 		task.spawn(function()
-			local vp = portrait(vpHolder, h.Id, "bust", 14)
+			local vp = portrait(vpHolder, h.Id, "bust", 15)
 			if vp then
-				Kit.corner(vp, 15)
+				Kit.corner(vp, 17)
 			end
 		end)
+		local _, portraitGrads = Kit.rings(frame, UDim.new(0, 37), {
+			{ 11, { C.Navy600, C.Navy800, 90 } },
+			{ 4, C.Ink },
+			{ 5, { Kit.lighten(a, 0.25), d, 90 } },
+			{ 3, C.Ink },
+		}, 16)
+		local gapGrad = portraitGrads[1]
+		Kit.outlineOnTop(face, 17)
 		-- name, epithet and a status chip
 		local nameText = Kit.text({ Name = "Name", Text = h.Name, TextSize = 32, Position = UDim2.fromOffset(132, 16), Size = UDim2.new(1, -196, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 3.5, Parent = face })
 		Kit.text({ Name = "Epithet", Text = h.Title or "", TextSize = 17, FontFace = Theme.Font.Heavy, TextColor3 = C.TextSoft, Position = UDim2.fromOffset(132, 52), Size = UDim2.new(1, -196, 0, 22), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 2.2, Parent = face })
@@ -704,7 +710,7 @@ return function(ctx: any)
 			k.AnchorPoint = Vector2.new(1, 0.5)
 			k.Position = UDim2.new(1, -18, 0.5, 0)
 		end
-		local row = { Hero = h, Button = btn, Face = face, Grad = grad, Stroke = faceStroke, Scale = sc, Name = nameText, Playing = playingChip, MovesChip = movesChip, MovesLabel = movesLabel, Hover = false }
+		local row = { Hero = h, Button = btn, Face = face, Grad = grad, GapGrad = gapGrad, Stroke = faceStroke, Scale = sc, Name = nameText, Playing = playingChip, MovesChip = movesChip, MovesLabel = movesLabel, Hover = false }
 		btn.MouseEnter:Connect(function()
 			row.Hover = true
 			tween(sc, 0.2, { Scale = 1.03 }, Enum.EasingStyle.Back)
@@ -771,9 +777,18 @@ return function(ctx: any)
 	Kit.pill(new("Frame", { Name = "Divider", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, Position = UDim2.fromOffset(PADX, 184), Size = UDim2.new(1, -PADX * 2, 0, 3), ZIndex = 11, Parent = ic }))
 	-- MOVESET / LORE switch (the settings window's tab switch, in the hero's colours)
 	local tabTrack = Kit.plate({ Name = "Tabs", Parent = ic, Position = UDim2.fromOffset(PADX, TABS_Y), Size = UDim2.new(1, -PADX * 2, 0, 40), Radius = UDim.new(1, 0), Stroke = 3, ZIndex = 12, Gradient = { C.Night, C.Navy900 } })
-	local tabThumb = new("Frame", { Name = "Thumb", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(4, 4), Size = UDim2.new(0.5, -6, 1, -8), ZIndex = 13, Parent = tabTrack })
-	Kit.pill(tabThumb)
-	local tabThumbGrad = Kit.gradient(tabThumb, Kit.lighten(C.Gold, 0.1), C.GoldDeep, 90)
+	-- the thumb shares the track's edges on the side it sits at; the gap round it is a stroke in
+	-- the track's colours, 4 from the end, the top and the bottom
+	local thumbApi = Kit.switchThumb({
+		Parent = tabTrack,
+		Gap = 4,
+		Overhang = 2,
+		Track = { C.Night, C.Navy900, 90 },
+		Face = { Kit.lighten(C.Gold, 0.1), C.GoldDeep, 90 },
+		ZIndex = 13,
+	})
+	local tabThumbGrad = thumbApi.Face
+	Kit.outlineOnTop(tabTrack, 14)
 	local tabLabels: { [string]: TextLabel } = {}
 	local tabPage = "Moves"
 	for i, t in ipairs({ { "Moves", "MOVESET" }, { "Lore", "LORE" } }) do
@@ -962,15 +977,16 @@ return function(ctx: any)
 	})
 	local stampScale = Kit.fx(stamp)
 	Kit.corner(stamp, 26)
-	Kit.stroke(stamp, 5, C.Ink, 0, true)
-	local stampGrad = Kit.gradient(stamp, Kit.lighten(C.Gold, 0.15), C.GoldDeep, 90)
-	local stampSheen
+	Kit.paint(stamp, { C.Navy800, C.Night, 90 })
+	-- the gold rim and the ink outline are strokes on the stamp's own edge: the same all round
+	local stampSheen = Kit.addShine(stamp, 26)
+	stampSheen.ZIndex = 24
+	local _, stampRim = Kit.rings(stamp, 26, { { 6, { Kit.lighten(C.Gold, 0.15), C.GoldDeep, 90 } } }, 25)
+	local stampGrad = stampRim[1]
 	do
-		local stampInner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 24, Parent = stamp })
-		Kit.snapFill(stampInner, 6) -- the same rim width on all four sides
-		Kit.corner(stampInner, 21)
-		Kit.gradient(stampInner, C.Navy800, C.Night, 90)
-		stampSheen = Kit.addShine(stampInner, 21)
+		local line = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 27, Parent = stamp })
+		Kit.corner(line, 26)
+		Kit.stroke(line, 5, C.Ink, 0, true)
 	end
 	local stampLabel = Kit.text({ Name = "Title", Text = STAMP_TEXT, TextSize = 52, Size = UDim2.new(1, -150, 1, -6), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0), ZIndex = 26, Stroke = 5, Parent = stamp })
 	local stampStars: { ImageLabel } = {}
@@ -1082,6 +1098,9 @@ return function(ctx: any)
 			local on = i == index
 			local a, d = accentOf(row.Hero)
 			row.Grad.Color = if on then ColorSequence.new(Kit.lighten(a, 0.02), Kit.darken(d, 0.1)) else ColorSequence.new(C.Navy600, C.Navy800)
+			if row.GapGrad then
+				row.GapGrad.Color = row.Grad.Color -- the gap round the portrait is the row's own colour
+			end
 			row.Stroke.Color = if on then Color3.new(1, 1, 1) else C.Ink
 			row.Playing.Visible = row.Hero.Id == playing
 		end
@@ -1127,12 +1146,7 @@ return function(ctx: any)
 	local function setTab(page: string, instant: boolean?)
 		tabPage = page
 		local isLore = page == "Lore"
-		local target = if isLore then UDim2.new(0.5, 2, 0, 4) else UDim2.fromOffset(4, 4)
-		if instant then
-			tabThumb.Position = target
-		else
-			tween(tabThumb, 0.22, { Position = target }, Enum.EasingStyle.Quint)
-		end
+		thumbApi.Set(if isLore then 2 else 1, instant)
 		tabLabels.Moves.TextColor3 = if isLore then C.TextDim else C.Text
 		tabLabels.Lore.TextColor3 = if isLore then C.Text else C.TextDim
 		lore.Visible = isLore
@@ -1932,17 +1946,14 @@ return function(ctx: any)
 	local function buildHeroPill()
 		-- a round portrait with a double outline: ink ring, a band in the hero's colour, ink ring
 		-- again, then the face. Returns the face frame and the band's gradient.
+		-- the portrait disc: ink, a gold band, ink again, then the face. The three rings are strokes
+		-- on the disc's own circle (Kit.rings), so each is exactly as wide all the way round; the
+		-- portrait inside reaches in under the inner ink ring, so its own edge never shows.
 		local function doubleRing(parent: Instance, size: number, pos: UDim2, z: number): (Frame, UIGradient, Frame)
-			local outer = new("Frame", { Name = "Portrait", BackgroundColor3 = C.Ink, AnchorPoint = Vector2.new(0.5, 0.5), Position = pos, Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
-			Kit.pill(outer)
-			local band = new("Frame", { Name = "Band", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size - 8, size - 8), ZIndex = z, Parent = outer })
-			Kit.pill(band)
-			local bandGrad = Kit.gradient(band, Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90)
-			local inner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Ink, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size - 18, size - 18), ZIndex = z, Parent = band })
-			Kit.pill(inner)
-			local face = new("Frame", { Name = "Face", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size - 24, size - 24), ZIndex = z + 1, Parent = inner })
-			Kit.pill(face)
-			return face, bandGrad, outer
+			local disc = new("Frame", { Name = "Portrait", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = pos, Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
+			Kit.pill(disc)
+			local _, grads = Kit.rings(disc, UDim.new(1, 0), { { 4, C.Ink }, { 5, { Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90 } }, { 3, C.Ink } }, 8)
+			return disc, grads[2], disc
 		end
 
 		if not ctx.StatusPill then
@@ -1953,33 +1964,24 @@ return function(ctx: any)
 			local holder, pill, caption, glow = ctx.StatusPill("Hero", 0, "HERO", C.Gold, "Shuriken")
 			local face, bandGrad, disc = doubleRing(holder, 72, UDim2.fromOffset(M.BadgeX, M.BadgeY), 5)
 			local faceGrad = Kit.gradient(face, Kit.lighten(C.Navy500, 0.1), C.Navy800, 90)
-			local discView = new("Frame", { Name = "View", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 7, Parent = face })
+			local discView = new("Frame", { Name = "View", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(52, 52), ZIndex = 7, Parent = face })
 			local mystery = Kit.text({ Name = "Mystery", Text = "?", TextSize = 32, Size = UDim2.fromScale(1, 1), ZIndex = 8, Stroke = 3.5, Parent = face })
 			local CHANGE_W = 118
 			local pillName = if ctx.PillValue then ctx.PillValue(pill, "", C.Gold, M.RightPad + CHANGE_W + 12) else Kit.text({ Text = "", Parent = pill })
-			local change = Kit.button({
+			-- CHANGE is the pill's whole right end (see PillAction in the HUD): its outline sits
+			-- exactly as far from the pill's top, right and bottom edges
+			local change = ctx.PillAction(pill, {
 				Name = "Change",
-				Parent = pill,
-				AnchorPoint = Vector2.new(1, 0.5),
-				Position = UDim2.new(1, -M.RightPad, 0.5, 0),
-				Size = UDim2.fromOffset(CHANGE_W, 44),
-				Radius = UDim.new(1, 0),
-				Depth = 0,
-				Stroke = 3,
-				Color = C.Blue,
-				Deep = C.BlueDeep,
+				Width = CHANGE_W,
 				Text = "CHANGE",
 				TextSize = 21,
-				ZIndex = pill.ZIndex + 3,
+				Color = C.Blue,
+				Deep = C.BlueDeep,
 				HoverScale = 1.08,
 				OnClick = function()
 					ctx.Fire("HeroSelect")
 				end,
 			})
-			-- in the pill's socket, evenly inset top, right and bottom (same as the coins +)
-			if ctx.PillAction then
-				ctx.PillAction(pill, change.Button, CHANGE_W)
-			end
 			local discBtn = new("TextButton", { Name = "Open", AutoButtonColor = false, Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 9, Parent = disc })
 			local discScale = Kit.fx(disc)
 			discBtn.MouseEnter:Connect(function()

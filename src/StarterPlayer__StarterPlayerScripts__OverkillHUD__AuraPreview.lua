@@ -369,18 +369,36 @@ return function(ctx: any)
 		local faceStroke = Kit.stroke(face, 4, C.Ink, 0, true)
 		local grad = Kit.gradient(face, C.Navy600, C.Navy800, 90)
 		local sc = Kit.fx(face)
-		-- the aura's colour as a glowing orb with a rarity ring
-		local ring = new("Frame", { Name = "Ring", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(80, 80), ZIndex = 13, Parent = face })
-		Kit.snapEnd(ring, 16) -- the same gap to the row's left, top and bottom edges
+		-- the aura's colour as a glowing orb with a rarity ring. The whole icon is rings on the
+		-- row's left end (Kit.edgeStrokes), from the outside in: the gap in the row's colours, the
+		-- rarity ring, the row's colour again, the orb's ink outline, the orb, and the white ring
+		-- round its core. Every ring is exactly as wide all the way round, and the gap to the row's
+		-- left, top and bottom edges is the same.
+		local ring = Kit.slot({ Parent = face, Side = "Left", Width = ROW_H, Name = "Ring", ZIndex = 13 })
+		ring.BackgroundTransparency = 0
 		Kit.pill(ring)
-		Kit.stroke(ring, 3, r.Color, 0)
-		local orb = new("Frame", { Name = "Orb", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(64, 64), ZIndex = 14, Parent = ring })
-		Kit.pill(orb)
-		Kit.stroke(orb, 4, C.Ink, 0, true)
-		Kit.gradient(orb, Kit.lighten(tint, 0.35), Kit.darken(tint, 0.3), 90)
-		local core = new("Frame", { Name = "Core", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.54, 0.54), ZIndex = 15, Parent = orb })
-		Kit.pill(core)
-		Kit.stroke(core, 3, Color3.new(1, 1, 1), 0.25)
+		-- the orb's shading spans the orb (y 24..88 of the 112 end), flat beyond it
+		local o0, o1 = (ROW_H / 2 - 32) / ROW_H, (ROW_H / 2 + 32) / ROW_H
+		local orbSeq = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Kit.lighten(tint, 0.35)),
+			ColorSequenceKeypoint.new(o0, Kit.lighten(tint, 0.35)),
+			ColorSequenceKeypoint.new(o1, Kit.darken(tint, 0.3)),
+			ColorSequenceKeypoint.new(1, Kit.darken(tint, 0.3)),
+		})
+		Kit.paint(ring, orbSeq)
+		local g, ink = 16, 4 * 1.35
+		local orbEdge = g + 8 -- the orb (64) inside the rarity ring (80)
+		local coreR = 32 * 0.54 -- the white ring round the orb's core
+		local _, ringGrads = Kit.edgeStrokes(ring, UDim.new(1, 0), {
+			{ ROW_H / 2 - coreR, Color3.new(1, 1, 1), 0.25 },
+			{ ROW_H / 2 - coreR - 3, orbSeq },
+			{ orbEdge + ink / 2, C.Ink },
+			{ orbEdge - ink / 2, { C.Navy600, C.Navy800, 90 } },
+			{ g, r.Color },
+			{ g - 3, { C.Navy600, C.Navy800, 90 } },
+		}, 14)
+		local gapGrads = { ringGrads[4], ringGrads[6] }
+		Kit.outlineOnTop(face, 17)
 		-- name + rarity + status
 		Kit.text({ Name = "Name", Text = item.Name, TextSize = 27, Position = UDim2.fromOffset(110, 16), Size = UDim2.new(1, -170, 0, 32), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 3.2, Parent = face })
 		local sub = new("Frame", { Name = "Sub", BackgroundTransparency = 1, Position = UDim2.fromOffset(110, 58), Size = UDim2.new(1, -170, 0, 30), ZIndex = 13, Parent = face })
@@ -397,7 +415,7 @@ return function(ctx: any)
 			k.AnchorPoint = Vector2.new(1, 0.5)
 			k.Position = UDim2.new(1, -18, 0.5, 0)
 		end
-		local row = { Item = item, Button = btn, Face = face, Grad = grad, Stroke = faceStroke, Scale = sc, StatusIcon = statusIcon, StatusText = statusText, Hover = false }
+		local row = { Item = item, Button = btn, Face = face, Grad = grad, GapGrads = gapGrads, Stroke = faceStroke, Scale = sc, StatusIcon = statusIcon, StatusText = statusText, Hover = false }
 		btn.MouseEnter:Connect(function()
 			row.Hover = true
 			tween(sc, 0.2, { Scale = 1.03 }, Enum.EasingStyle.Back)
@@ -585,6 +603,9 @@ return function(ctx: any)
 			end
 			local on = i == index
 			row.Grad.Color = if on then ColorSequence.new(Kit.lighten(ACCENT, 0.08), ACCENT_DEEP) else ColorSequence.new(C.Navy600, C.Navy800)
+			for _, gg in ipairs(row.GapGrads or {}) do
+				gg.Color = row.Grad.Color -- the gaps in the orb icon are the row's own colour
+			end
 			row.Stroke.Color = if on then Color3.new(1, 1, 1) else C.Ink
 		end
 	end

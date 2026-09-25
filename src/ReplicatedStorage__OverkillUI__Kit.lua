@@ -332,6 +332,249 @@ function Kit.snapCorner(child: GuiObject, gap: number)
 end
 
 ---------------------------------------------------------------------------
+-- rings, rims and gaps drawn on a shape's own edge
+-- The HUD is scaled to the screen with a UIScale. Roblox lays scaled UI out in unscaled units,
+-- rounds every edge there, and only then scales it to the screen, so two frames that are meant
+-- to sit a set distance apart (a panel inset in a plate, an icon inset in a row, a knob in a
+-- track) are each rounded on their own and the gap between them comes out a pixel or two wider
+-- on one side than another. A UIStroke is drawn on its own frame's edge, the same on every side.
+-- So every rim, ring and icon gap is made of strokes on frames that share one rect: an icon's
+-- frame is the whole end of its row, and the gap around the icon is a stroke in the row's own
+-- colours. Nothing that has to line up is inset as a separate frame.
+---------------------------------------------------------------------------
+-- BorderStrokePosition.Inner (a stroke that grows inward from the edge)
+local INNER: any = nil
+pcall(function()
+	local pos = (Enum :: any).BorderStrokePosition.Inner
+	local probe = Instance.new("UIStroke")
+	;(probe :: any).BorderStrokePosition = pos
+	probe:Destroy()
+	INNER = pos
+end)
+
+-- paint: a Color3, { c1, c2, rotation? } (a gradient, default top to bottom) or a ColorSequence
+local function paintOf(target: Instance, paint: any): UIGradient?
+	if typeof(paint) == "Color3" then
+		(target :: any)[if target:IsA("UIStroke") then "Color" else "BackgroundColor3"] = paint
+		return nil
+	end
+	;(target :: any)[if target:IsA("UIStroke") then "Color" else "BackgroundColor3"] = Color3.new(1, 1, 1)
+	local seq, rot
+	if typeof(paint) == "ColorSequence" then
+		seq, rot = paint, 90
+	else
+		seq, rot = ColorSequence.new(paint[1], paint[2] or paint[1]), paint[3] or 90
+	end
+	return new("UIGradient", { Color = seq, Rotation = rot, Parent = target })
+end
+Kit.paint = paintOf
+
+-- a stroke that grows inward from `parent`'s edge, `depth` deep
+function Kit.innerStroke(parent: Instance, depth: number, paint: any, transparency: any?): (UIStroke, UIGradient?)
+	local st = new("UIStroke", {
+		Thickness = depth,
+		Transparency = if type(transparency) == "number" then transparency else 0,
+		LineJoinMode = Enum.LineJoinMode.Round,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+	if INNER then
+		(st :: any).BorderStrokePosition = INNER
+	end
+	local g = paintOf(st, paint)
+	if typeof(transparency) == "NumberSequence" then
+		-- a fade across the stroke (a wash): needs a gradient to carry it
+		g = g or new("UIGradient", { Rotation = 90, Parent = st })
+		g.Transparency = transparency
+	end
+	st.Parent = parent
+	return st, g
+end
+
+-- strokes on `host`'s own rect, each from the edge inward to its depth, drawn in list order (a
+-- later one over an earlier one): list = { { depth, paint, transparency? }, ... }.
+-- Returns the strokes and their gradients.
+function Kit.edgeStrokes(host: GuiObject, corner: any, list: { any }, z: number?): ({ UIStroke }, { any })
+	local l, t, r, b = padOf(host)
+	local strokes, grads = {}, {}
+	local parent: Instance = host
+	for i, spec in ipairs(list) do
+		local f = new("Frame", { Name = "Edge" .. i, BackgroundTransparency = 1, ZIndex = z or host.ZIndex })
+		if INNER then
+			-- the host's whole rect (whatever padding it has), each one over the one before
+			f.Position = if parent == host then UDim2.fromOffset(-l, -t) else UDim2.new()
+			f.Size = if parent == host then UDim2.new(1, l + r, 1, t + b) else UDim2.fromScale(1, 1)
+			f.Parent = parent
+			parent = f
+		else
+			-- clients without inward strokes: an outer stroke round a frame inset by the depth
+			f.Position = UDim2.fromOffset(spec[1] - l, spec[1] - t)
+			f.Size = UDim2.new(1, l + r - spec[1] * 2, 1, t + b - spec[1] * 2)
+			f.Parent = host
+		end
+		if corner ~= nil then
+			Kit.corner(f, corner)
+		end
+		strokes[i], grads[i] = Kit.innerStroke(f, spec[1], spec[2], spec[3])
+	end
+	return strokes, grads
+end
+
+-- rings inside `host`'s edge, outermost first: bands = { { width, paint, transparency? }, ... }.
+-- Every ring is exactly as wide on every side. Returns the strokes and gradients, outermost first.
+function Kit.rings(host: GuiObject, corner: any, bands: { any }, z: number?): ({ UIStroke }, { any })
+	local depth = 0
+	for _, b in ipairs(bands) do
+		depth += b[1]
+	end
+	-- the innermost ring is the deepest stroke, drawn first; each ring further out goes over it
+	local list = {}
+	for i = #bands, 1, -1 do
+		table.insert(list, { depth, bands[i][2], bands[i][3] })
+		depth -= bands[i][1]
+	end
+	local strokes, grads = Kit.edgeStrokes(host, corner, list, z)
+	local s2, g2 = {}, {}
+	for i = 1, #bands do
+		s2[i], g2[i] = strokes[#bands + 1 - i], grads[#bands + 1 - i]
+	end
+	return s2, g2
+end
+
+-- move `host`'s border stroke onto a frame of its own over everything inside it, so a child
+-- that shares the host's edge (an icon slot) sits under the outline, not over half of it
+function Kit.outlineOnTop(host: GuiObject, z: number): (Frame, UIStroke?)
+	local l, t, r, b = padOf(host)
+	local line = new("Frame", {
+		Name = "Outline",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(-l, -t),
+		Size = UDim2.new(1, l + r, 1, t + b),
+		ZIndex = z,
+		Parent = host,
+	})
+	local c = host:FindFirstChildOfClass("UICorner")
+	if c then
+		c:Clone().Parent = line
+	end
+	local st = host:FindFirstChildOfClass("UIStroke")
+	if st then
+		st.Parent = line
+	end
+	return line, st
+end
+
+-- a frame that is exactly one end (or corner) of `parent`: the same edges as the parent on the
+-- sides it touches, so whatever is drawn on it lines up with the parent's edge to the pixel.
+--   o = { Parent, Side = "Left" | "Right" | "TopLeft", Width (units; default Height),
+--         Height (TopLeft only), Class, Name, ZIndex }
+function Kit.slot(o: { [string]: any }): GuiObject
+	local parent = o.Parent :: GuiObject
+	local l, t, r, b = padOf(parent)
+	local side = o.Side or "Left"
+	local w = o.Width
+	local f = new(o.Class or "Frame", {
+		Name = o.Name or "Slot",
+		BackgroundTransparency = 1,
+		ZIndex = o.ZIndex or parent.ZIndex,
+		Parent = parent,
+	})
+	if f:IsA("GuiButton") then
+		f.AutoButtonColor = false
+		if f:IsA("TextButton") then
+			f.Text = ""
+		end
+	end
+	if side == "Right" then
+		f.AnchorPoint = Vector2.new(1, 0)
+		f.Position = UDim2.new(1, r, 0, -t)
+		f.Size = UDim2.new(0, w, 1, t + b)
+	elseif side == "TopLeft" then
+		f.Position = UDim2.fromOffset(-l, -t)
+		f.Size = UDim2.fromOffset(w, o.Height or w)
+	else
+		f.Position = UDim2.fromOffset(-l, -t)
+		f.Size = UDim2.new(0, w, 1, t + b)
+	end
+	return f
+end
+
+-- an icon in an end of its container, as rings on a slot that is that whole end: the gap round
+-- the icon (in the container's own colours), the icon's ink outline, then its face.
+--   o = { Parent, Side, Width (the slot: the container's height for a round end), Height (TopLeft),
+--         Gap (container edge to the icon's edge, where its outline is centred), Stroke (the
+--         outline, Kit.stroke units), Corner (the icon's corner radius; nil = round), Band (the
+--         container's paint) or Bands (its layers: { { Paint, Transparency }, ... }), Face (the
+--         icon's paint), Class, Name, ZIndex }
+-- The container's own outline has to be drawn over the slot (Kit.outlineOnTop).
+-- Returns { Frame (put the icon's content in it), Face (gradient), Ink (stroke), Bands (strokes) }
+function Kit.endIcon(o: { [string]: any })
+	local slotW = o.Width
+	local slot = Kit.slot({ Parent = o.Parent, Side = o.Side, Width = slotW, Height = o.Height, Class = o.Class, Name = o.Name, ZIndex = o.ZIndex })
+	slot.BackgroundTransparency = 0
+	local corner = if o.Corner then UDim.new(0, o.Corner + o.Gap) else UDim.new(1, 0)
+	Kit.corner(slot, corner)
+	local faceGrad = paintOf(slot, o.Face or C.Navy600)
+	local ink = (o.Stroke or 3.5) * 1.35
+	local gapW = math.max(0, o.Gap - ink / 2)
+	local list = {}
+	-- the icon's outline, then the gap over its outer part: one stroke per layer of the
+	-- container's background (Band = a paint, or Bands = { { Paint, Transparency }, ... })
+	table.insert(list, { gapW + ink, C.Ink })
+	if gapW > 0 then
+		for _, layer in ipairs(o.Bands or { { Paint = o.Band or C.Navy700 } }) do
+			table.insert(list, { gapW, layer.Paint, layer.Transparency })
+		end
+	end
+	local strokes, grads = Kit.edgeStrokes(slot, corner, list, (o.ZIndex or slot.ZIndex) + 1)
+	local api = { Frame = slot, Face = faceGrad, Ink = strokes[1], Bands = {}, BandGrads = {} }
+	for i = 2, #strokes do
+		table.insert(api.Bands, strokes[i])
+		table.insert(api.BandGrads, grads[i])
+	end
+	-- content goes over the rings (it sits inside the face)
+	api.ContentZ = (o.ZIndex or slot.ZIndex) + 2
+	return api
+end
+
+-- the thumb of a two-way switch (tabs): half the track plus `Overhang`, on the outer end it
+-- sits at, so it shares the track's edges there; the gap round it (in the track's colours) and
+-- its outline are strokes on it, so the gap is the same at the end, the top and the bottom.
+--   o = { Parent (the track), Gap, Stroke (outline; nil = none), Overhang, Corner (the track's
+--         corner, UDim), Track (paint), Face (paint), ZIndex }
+-- Returns { Frame, Face (gradient), Band (gradient), Set(index 1 | 2, instant) }
+function Kit.switchThumb(o: { [string]: any })
+	local ov = o.Overhang or 0
+	local f = new("Frame", {
+		Name = "Thumb",
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		Size = UDim2.new(0.5, ov, 1, 0),
+		ZIndex = o.ZIndex,
+		Parent = o.Parent,
+	})
+	local corner = o.Corner or UDim.new(1, 0)
+	Kit.corner(f, corner)
+	local faceGrad = paintOf(f, o.Face)
+	local list = {}
+	local ink = if o.Stroke then o.Stroke * 1.35 else 0
+	local gapW = math.max(0, o.Gap - ink / 2)
+	if ink > 0 then
+		table.insert(list, { gapW + ink, C.Ink })
+	end
+	table.insert(list, { gapW, o.Track })
+	local _, grads = Kit.edgeStrokes(f, corner, list, o.ZIndex)
+	local api = { Frame = f, Face = faceGrad, Band = grads[#grads] }
+	function api.Set(i: number, instant: boolean?)
+		local target = if i == 2 then UDim2.new(0.5, -ov, 0, 0) else UDim2.new()
+		if instant then
+			f.Position = target
+		else
+			Kit.tween(f, 0.3, { Position = target }, Enum.EasingStyle.Quint) -- no overshoot: it shares the track's edge
+		end
+	end
+	return api
+end
+
+---------------------------------------------------------------------------
 -- motion
 ---------------------------------------------------------------------------
 function Kit.tween(o: Instance, t: number, props: { [string]: any }, style: Enum.EasingStyle?, dir: Enum.EasingDirection?, delay: number?): Tween
@@ -991,29 +1234,32 @@ function Kit.plate(o: { [string]: any }): Frame
 end
 
 ---------------------------------------------------------------------------
--- title plate: the accent plate with a dark inner panel that heads every window and screen.
--- A rounded-square icon tile sits in its left end, the title follows it. The rim, and the tile's
--- gap to the plate edge on the left, top and bottom, are whole screen pixels (Kit.snapFill /
--- Kit.snapEnd), so the three gaps round the same way at any screen size.
+-- title plate: the dark panel with an accent rim that heads every window and screen, a rounded
+-- icon tile in its left end and the title after it. The ink outline, the accent rim, the gap
+-- round the tile and the tile's own outline are all strokes on rects that share the plate's
+-- edges (Kit.rings), so each is exactly as wide on every side at any screen size.
 --   o = { Parent, Name, Title, TextSize, Height, Rim, Radius, TileGap, Accent, Deep, Icon,
 --         IconScale (share of the tile), Glyph (function(tile, zIndex)), ZIndex, Position,
---         AnchorPoint, TextGap, PadRight }
+--         AnchorPoint, TextGap, PadRight, Stroke, TextStroke, TileStroke }
 ---------------------------------------------------------------------------
 function Kit.titlePlate(o: { [string]: any })
 	local H = o.Height or 84
 	local rim = o.Rim or 6
 	local R = o.Radius or 24
-	local gap = o.TileGap or 10 -- plate edge to the tile's edge, on the left, top and bottom
+	local gap = o.TileGap or 10 -- plate edge to the tile's edge (its outline's centre), left, top and bottom
 	local tile = H - gap * 2
+	local tileInk = (o.TileStroke or 3.5) * 1.35
 	local textSize = o.TextSize or 46
 	local z = o.ZIndex or 20
 	local left = gap + tile + (o.TextGap or 16) -- where the title starts
 	local padRight = o.PadRight or 32
 	local accent, deep = o.Accent or C.Blue, o.Deep or C.BlueDeep
+	local PANEL = { C.Navy800, C.Night, 90 }
 	local function widthFor(t: string): number
 		return Kit.textWidth(t, textSize) + left + padRight
 	end
 
+	-- the plate is the dark panel; the rim and the outline are drawn on its edge further down
 	local plate = new("Frame", {
 		Name = o.Name or "TitlePlate",
 		AnchorPoint = o.AnchorPoint or Vector2.new(0.5, 0.5),
@@ -1024,31 +1270,29 @@ function Kit.titlePlate(o: { [string]: any })
 		Parent = o.Parent,
 	})
 	Kit.corner(plate, R)
-	Kit.stroke(plate, o.Stroke or 5, C.Ink, 0, true)
-	local plateGrad = Kit.gradient(plate, Kit.lighten(accent, 0.15), deep, 90)
-	local inner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, ZIndex = z, Parent = plate })
-	Kit.corner(inner, R - rim)
-	Kit.gradient(inner, C.Navy800, C.Night, 90)
-	Kit.snapFill(inner, rim)
-	local sheen = Kit.addShine(inner, R - rim)
-	local title = Kit.text({
-		Name = "Title",
-		Text = o.Title,
-		TextSize = textSize,
-		Position = UDim2.fromOffset(left, 0),
-		Size = UDim2.new(1, -left - padRight, 1, 0),
-		ZIndex = z + 2,
-		Stroke = o.TextStroke or 4.5,
+	paintOf(plate, PANEL)
+	local sheen = Kit.addShine(plate, R)
+	sheen.ZIndex = z + 1
+
+	-- the icon tile: the plate's whole left end, so its gap to the plate's edge is a stroke in the
+	-- panel's colours and comes out the same on the left, the top and the bottom. Its corners are
+	-- the tile's own corners pushed out by the gap, never tighter than the plate's own corners.
+	local tileApi = Kit.endIcon({
 		Parent = plate,
+		Name = "IconTile",
+		Side = "Left",
+		Width = H,
+		Gap = gap,
+		Stroke = o.TileStroke or 3.5,
+		Corner = math.max(o.TileRadius or 16, R - gap),
+		Band = PANEL,
+		Face = { Kit.lighten(accent, 0.2), deep, 90 },
+		ZIndex = z + 3,
 	})
-	local iconTile = new("Frame", { Name = "IconTile", BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = z + 3, Parent = plate })
-	Kit.corner(iconTile, o.TileRadius or 16)
-	Kit.stroke(iconTile, 3.5, C.Ink, 0, true)
-	local tileGrad = Kit.gradient(iconTile, Kit.lighten(accent, 0.2), deep, 90)
-	Kit.snapEnd(iconTile, gap)
+	local iconTile = tileApi.Frame
 	local icon: ImageLabel? = nil
 	if o.Glyph then
-		o.Glyph(iconTile, z + 4)
+		o.Glyph(iconTile, tileApi.ContentZ)
 	else
 		local k = o.IconScale or 0.84
 		icon = Kit.image({
@@ -1056,20 +1300,41 @@ function Kit.titlePlate(o: { [string]: any })
 			Image = o.Icon,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromScale(k, k),
-			ZIndex = z + 4,
+			Size = UDim2.fromOffset(math.floor(tile * k + 0.5), math.floor(tile * k + 0.5)),
+			ZIndex = tileApi.ContentZ,
 			Parent = iconTile,
 		})
 	end
+	local title = Kit.text({
+		Name = "Title",
+		Text = o.Title,
+		TextSize = textSize,
+		Position = UDim2.fromOffset(left, 0),
+		Size = UDim2.new(1, -left - padRight, 1, 0),
+		ZIndex = z + 4,
+		Stroke = o.TextStroke or 4.5,
+		Parent = plate,
+	})
 
-	local api = { Plate = plate, Inner = inner, Tile = iconTile, TitleIcon = icon, Title = title, Sheen = sheen, Grad = plateGrad, TileGrad = tileGrad }
+	-- the accent rim and the ink outline, on the plate's own edge, over the tile's end
+	local _, rimGrads = Kit.rings(plate, R, { { rim, { Kit.lighten(accent, 0.15), deep, 90 } } }, z + 6)
+	local line = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = z + 7, Parent = plate })
+	Kit.corner(line, R)
+	Kit.stroke(line, o.Stroke or 5, C.Ink, 0, true)
+
+	local api = { Plate = plate, Tile = iconTile, TitleIcon = icon, Title = title, Sheen = sheen, Grad = rimGrads[1], TileGrad = tileApi.Face }
 	function api.SetTitle(t: string)
 		title.Text = t
 		plate.Size = UDim2.fromOffset(widthFor(t), H)
 	end
+	-- recolour the rim and the icon tile together
 	function api.SetAccent(a: Color3, d: Color3)
-		plateGrad.Color = ColorSequence.new(Kit.lighten(a, 0.15), d)
-		tileGrad.Color = ColorSequence.new(Kit.lighten(a, 0.2), d)
+		if rimGrads[1] then
+			rimGrads[1].Color = ColorSequence.new(Kit.lighten(a, 0.15), d)
+		end
+		if tileApi.Face then
+			tileApi.Face.Color = ColorSequence.new(Kit.lighten(a, 0.2), d)
+		end
 	end
 	return api
 end
@@ -1349,6 +1614,9 @@ function Kit.bar(o: { [string]: any })
 	-- a short fill is still a whole capsule, never a squashed dot
 	local barH = (o.Size or UDim2.fromOffset(200, 22)).Y.Offset
 	new("UISizeConstraint", { MinSize = Vector2.new(barH, 0), Parent = fill })
+	-- the outline goes over the fill (a child draws over its parent's stroke), so it is as thick
+	-- along the filled part as along the empty part
+	Kit.outlineOnTop(track, track.ZIndex + 1)
 	-- the numbers: plain white with a heavy ink outline, straight on the bar (no capsule behind)
 	local textSize = o.TextSize or 16
 	local chip = new("Frame", {
@@ -1360,7 +1628,7 @@ function Kit.bar(o: { [string]: any })
 		Size = UDim2.fromOffset(0, math.max(barH - 8, textSize + 2)),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Visible = false,
-		ZIndex = track.ZIndex + 1,
+		ZIndex = track.ZIndex + 2,
 		Parent = track,
 	})
 	Kit.pill(chip)
@@ -1372,7 +1640,7 @@ function Kit.bar(o: { [string]: any })
 		FontFace = Theme.Font.Heavy,
 		Size = UDim2.fromScale(0, 1),
 		AutomaticSize = Enum.AutomaticSize.X,
-		ZIndex = track.ZIndex + 2,
+		ZIndex = track.ZIndex + 3,
 		Stroke = 2.8,
 		Parent = chip,
 	})
@@ -1537,7 +1805,8 @@ function Kit.slider(o: { [string]: any })
 	local fill = new("Frame", { Name = "Fill", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.fromScale(0.5, 1), ZIndex = z, Parent = track })
 	Kit.pill(fill)
 	Kit.gradient(fill, Kit.lighten(o.Color or C.Blue, 0.15), o.Deep or C.BlueDeep, 90)
-	local knob = new("Frame", { Name = "Knob", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(34, 34), ZIndex = z + 1, Parent = track })
+	Kit.outlineOnTop(track, z + 1) -- as thick along the fill as along the empty track
+	local knob = new("Frame", { Name = "Knob", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(34, 34), ZIndex = z + 2, Parent = track })
 	Kit.pill(knob)
 	Kit.stroke(knob, 3.5, C.Ink, 0, true)
 	Kit.gradient(knob, Color3.new(1, 1, 1), Color3.fromRGB(196, 208, 230), 90)
@@ -1598,6 +1867,7 @@ end
 ---------------------------------------------------------------------------
 function Kit.toggle(o: { [string]: any })
 	local z = o.ZIndex or 14
+	local H = 48
 	local btn = new("TextButton", {
 		Name = "Toggle",
 		AutoButtonColor = false,
@@ -1605,28 +1875,45 @@ function Kit.toggle(o: { [string]: any })
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		AnchorPoint = o.AnchorPoint or Vector2.zero,
 		Position = o.Position or UDim2.new(),
-		Size = UDim2.fromOffset(104, 48),
+		Size = UDim2.fromOffset(104, H),
 		ZIndex = z,
 		Parent = o.Parent,
 	})
 	Kit.pill(btn)
-	Kit.stroke(btn, 3.5, C.Ink, 0, true)
 	local grad = Kit.gradient(btn, C.Navy600, C.Navy800, 90)
 	local label = Kit.text({ Text = "OFF", TextSize = 18, Size = UDim2.new(0.6, 0, 1, 0), Position = UDim2.fromScale(0.4, 0), ZIndex = z + 1, Stroke = 2.4, Parent = btn })
-	local knob = new("Frame", { Name = "Knob", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.24, 0.5), Size = UDim2.fromOffset(38, 38), ZIndex = z + 2, Parent = btn })
+	-- the knob is the switch's whole round end: the gap round it (in the switch's colours) and
+	-- its outline are strokes on that end, so the gap is the same at the end, the top and the
+	-- bottom (5 all round)
+	local knob = new("Frame", { Name = "Knob", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.new(0, H, 1, 0), ZIndex = z + 2, Parent = btn })
 	Kit.pill(knob)
-	Kit.stroke(knob, 3, C.Ink, 0, true)
 	Kit.gradient(knob, Color3.new(1, 1, 1), Color3.fromRGB(196, 208, 230), 90)
+	local ink = 3 * 1.35
+	local _, grads = Kit.edgeStrokes(knob, UDim.new(1, 0), { { 5 + ink / 2, C.Ink }, { 5 - ink / 2, { C.Navy600, C.Navy800, 90 } } }, z + 2)
+	local bandGrad = grads[2]
+	-- the switch's own outline goes over the knob's end
+	local line = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = z + 3, Parent = btn })
+	Kit.pill(line)
+	Kit.stroke(line, 3.5, C.Ink, 0, true)
 	local value = o.Value == true
 	local api = {}
 	local function show(instant: boolean?)
-		local t = if instant then 0 else 0.22
 		local on = value
-		Kit.tween(knob, t, { Position = UDim2.fromScale(if on then 0.76 else 0.24, 0.5) }, Enum.EasingStyle.Back)
+		-- no overshoot: the knob is the switch's end, it must not swing out past it
+		local target = if on then UDim2.new(1, -H, 0, 0) else UDim2.new()
+		if instant then
+			knob.Position = target
+		else
+			Kit.tween(knob, 0.22, { Position = target }, Enum.EasingStyle.Quint)
+		end
 		label.Text = if on then "ON" else "OFF"
 		label.Position = if on then UDim2.fromScale(0, 0) else UDim2.fromScale(0.4, 0)
 		local c, d = o.Color or C.Green, o.Deep or C.GreenDeep
-		grad.Color = if on then ColorSequence.new(Kit.lighten(c, 0.1), d) else ColorSequence.new(C.Navy600, C.Navy800)
+		local seq = if on then ColorSequence.new(Kit.lighten(c, 0.1), d) else ColorSequence.new(C.Navy600, C.Navy800)
+		grad.Color = seq
+		if bandGrad then
+			bandGrad.Color = seq
+		end
 	end
 	function api.Set(v: boolean, silent: boolean?)
 		value = v == true

@@ -231,7 +231,6 @@ return function(ctx: any)
 	table.insert(qLoops, TweenService:Create(ringGrad, TweenInfo.new(1.25, Enum.EasingStyle.Linear, LOOP, -1), { Rotation = 360 }))
 	local badge = Q.Badge(plate, "Duel", BADGE, 23)
 	badge.Frame.Position = UDim2.fromOffset(20, 20)
-	Kit.snapCorner(badge.Frame, 20) -- as far from the left edge as from the top
 
 	local qTitle = Kit.text({
 		Name = "Title",
@@ -700,20 +699,21 @@ return function(ctx: any)
 		Gradient = { C.Navy700, C.Night },
 	})
 	Kit.padding(lockPlate, 66, 0, 24, 0)
-	local lockDisc = Kit.plate({
-		Name = "Disc",
+	-- the clock disc is the chip's whole round left end: its outline and the gap round it are
+	-- strokes on it, so the gap is the same at the left, the top and the bottom
+	local lockDisc = Kit.endIcon({
 		Parent = lockPlate,
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, -61, 0.5, 0),
-		Size = UDim2.fromOffset(48, 48),
-		Radius = UDim.new(1, 0),
+		Name = "Disc",
+		Side = "Left",
+		Width = 58,
+		Gap = 5,
 		Stroke = 3.5,
+		Band = { C.Navy700, C.Night, 90 },
+		Face = { C.Red, C.RedDeep, 90 },
 		ZIndex = 21,
-		Gradient = { C.Red, C.RedDeep },
 	})
-	Kit.snapEnd(lockDisc, 5) -- centred in the chip's round end: 5 from the left, top and bottom
-	Kit.bevel(lockDisc, UDim.new(1, 0), 3, 21)
-	local lockIcon = Kit.image({ Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(32, 32), ZIndex = 22, Parent = lockDisc })
+	Kit.outlineOnTop(lockPlate, 24)
+	local lockIcon = Kit.image({ Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(32, 32), ZIndex = lockDisc.ContentZ, Parent = lockDisc.Frame })
 	local lockRow = new("Frame", { Name = "Row", BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 21, Parent = lockPlate })
 	Kit.list(lockRow, Enum.FillDirection.Horizontal, 12, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	Kit.text({
@@ -770,9 +770,23 @@ return function(ctx: any)
 		local p = b.Plate
 		local from = inv.From or {}
 		-- inviter's head with a little party disc
-		local av = Q.Avatar(p, from, 84, C.Teal, 22)
-		av.Frame.Position = UDim2.fromOffset(20, 20)
-		Kit.snapCorner(av.Frame, 20) -- as far from the left edge as from the top
+		-- the avatar is the card's top-left corner (rings on it), as far from the left edge as
+		-- from the top; the gap shows the card's plate and the top of its teal band
+		local S = 84 + 40
+		local bandEnd = math.min(math.floor(IH * 0.56) / S, 0.99)
+		local av = Q.Avatar(p, from, 84, C.Teal, 22, {
+			Side = "TopLeft",
+			Gap = 20,
+			Width = S,
+			Height = S,
+			Bands = {
+				{ Paint = { C.Navy700, C.Navy700:Lerp(C.Navy900, S / IH), 90 } },
+				{
+					Paint = ColorSequence.new({ ColorSequenceKeypoint.new(0, C.Teal), ColorSequenceKeypoint.new(bandEnd, C.TealDeep), ColorSequenceKeypoint.new(1, C.TealDeep) }),
+					Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.66), NumberSequenceKeypoint.new(bandEnd, 1), NumberSequenceKeypoint.new(1, 1) }),
+				},
+			},
+		})
 		local disc = Kit.plate({
 			Name = "PartyDisc",
 			Parent = p,
