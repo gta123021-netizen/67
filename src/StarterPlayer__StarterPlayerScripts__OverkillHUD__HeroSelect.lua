@@ -536,10 +536,11 @@ return function(ctx: any)
 		table.insert(bands, bandGrad)
 		local vignette = new("Frame", { Name = "Vignette", BackgroundColor3 = C.Night, BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0.35, 0), ZIndex = 10, Parent = skin })
 		Kit.gradient(vignette, C.Night, C.Night, 90, 1, 0.3)
-		local iconHolder = new("Frame", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(24, 42), Size = UDim2.fromOffset(40, 40), ZIndex = 12, Parent = holder })
+		-- heading icon: as far in from the panel's left edge as from its top edge
+		local iconHolder = new("Frame", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(22, 42), Size = UDim2.fromOffset(40, 40), ZIndex = 12, Parent = holder })
 		icon(iconHolder)
-		Kit.text({ Name = "Title", Text = title, TextSize = 30, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(74, 42), Size = UDim2.new(1, -98, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Stroke = 3.5, Parent = holder })
-		local line = new("Frame", { Name = "Line", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, Position = UDim2.fromOffset(24, 76), Size = UDim2.new(1, -48, 0, 3), ZIndex = 11, Parent = holder })
+		Kit.text({ Name = "Title", Text = title, TextSize = 30, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(72, 42), Size = UDim2.new(1, -94, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Stroke = 3.5, Parent = holder })
+		local line = new("Frame", { Name = "Line", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 76), Size = UDim2.new(1, -44, 0, 3), ZIndex = 11, Parent = holder })
 		Kit.pill(line)
 		local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 86), Size = UDim2.new(1, 0, 1, -86), ZIndex = 11, Parent = holder })
 		return { Root = holder, Scale = scale, Content = content }
@@ -572,13 +573,17 @@ return function(ctx: any)
 
 	-- a fighter glyph: head and shoulders, white with an ink outline
 	local function fistGlyph(parent: GuiObject, size: number, z: number)
-		local holder = new("Frame", { Name = "Fighter", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
+		-- the figure runs from the top of the head to the bottom of the shoulders: that span (not
+		-- the box around it) is what sits dead centre in the parent
+		local headTop, bodyBottom = math.floor(size * 0.04), size - math.floor(size * 0.02)
+		local shift = size / 2 - (headTop + bodyBottom) / 2
+		local holder = new("Frame", { Name = "Fighter", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, shift), Size = UDim2.fromOffset(size, size), ZIndex = z, Parent = parent })
 		local stroke = math.max(2.5, size * 0.07)
 		local body = new("Frame", {
 			Name = "Shoulders",
 			BackgroundColor3 = Color3.new(1, 1, 1),
 			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.new(0.5, 0, 1, -math.floor(size * 0.02)),
+			Position = UDim2.new(0.5, 0, 0, bodyBottom),
 			Size = UDim2.fromOffset(math.floor(size * 0.84), math.floor(size * 0.42)),
 			ZIndex = z,
 			Parent = holder,
@@ -590,7 +595,7 @@ return function(ctx: any)
 			Name = "Head",
 			BackgroundColor3 = Color3.new(1, 1, 1),
 			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, math.floor(size * 0.04)),
+			Position = UDim2.new(0.5, 0, 0, headTop),
 			Size = UDim2.fromOffset(math.floor(size * 0.46), math.floor(size * 0.46)),
 			ZIndex = z + 1,
 			Parent = holder,
@@ -605,41 +610,23 @@ return function(ctx: any)
 	-- title plate
 	---------------------------------------------------------------------------
 	local TITLE = "CHOOSE YOUR HERO"
-	local head = new("Frame", {
-		Name = "TitlePlate",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0, HEAD_Y),
-		Size = UDim2.fromOffset(Kit.textWidth(TITLE, 44) + 84 + 30, 82),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		ZIndex = 20,
+	-- the shared title plate (the windows' plate): the fighter tile evenly inset on three sides
+	local headPlate = Kit.titlePlate({
 		Parent = root,
+		Title = TITLE,
+		TextSize = 44,
+		Height = 82,
+		Accent = C.Gold,
+		Deep = C.GoldDeep,
+		Position = UDim2.new(0.5, 0, 0, HEAD_Y),
+		ZIndex = 20,
+		Glyph = function(tile: Frame, z: number)
+			fistGlyph(tile, 38, z)
+		end,
 	})
+	local head = headPlate.Plate
 	local headScale = Kit.fx(head)
-	Kit.corner(head, 24)
-	Kit.stroke(head, 5, C.Ink, 0, true)
-	local headGrad = Kit.gradient(head, Kit.lighten(C.Gold, 0.15), C.GoldDeep, 90)
-	local headSheen
-	do
-		local headInner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 20, Parent = head })
-		Kit.corner(headInner, 19)
-		Kit.gradient(headInner, C.Navy800, C.Night, 90)
-		headSheen = Kit.addShine(headInner, 19)
-	end
-	Kit.text({ Name = "Title", Text = TITLE, TextSize = 44, Position = UDim2.fromOffset(84, 0), Size = UDim2.new(1, -84 - 24, 1, -4), ZIndex = 22, Stroke = 4.5, Parent = head })
-	-- the icon tile: a rounded square sitting inside the plate's left end, level with it
-	local badge = new("Frame", {
-		Name = "Badge",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(41, 41),
-		Size = UDim2.fromOffset(62, 62),
-		ZIndex = 23,
-		Parent = head,
-	})
-	Kit.corner(badge, 16)
-	Kit.stroke(badge, 3.5, C.Ink, 0, true)
-	local badgeGrad = Kit.gradient(badge, Kit.lighten(C.Gold, 0.2), C.GoldDeep, 90)
-	fistGlyph(badge, 38, 24)
+	local headSheen = headPlate.Sheen
 
 	local closeApi = Kit.closeButton({ Name = "Back", Parent = root, Position = UDim2.new(1, -62, 0, HEAD_Y), Size = 68, ZIndex = 30 })
 
@@ -654,7 +641,7 @@ return function(ctx: any)
 		local countChip
 		countChip, countLabel = chip(list.Root, ("1 / %d"):format(#HEROES), C.Navy500, C.Navy700, 30, 15, 12)
 		countChip.AnchorPoint = Vector2.new(1, 0.5)
-		countChip.Position = UDim2.new(1, -24, 0, 42)
+		countChip.Position = UDim2.new(1, -22, 0, 42) -- as far in as the heading icon on the left
 	end
 
 	local rows: { any } = {}
@@ -679,6 +666,7 @@ return function(ctx: any)
 		-- portrait with the same double outline as the HUD's hero badge: ink, the hero's colour,
 		-- ink, then the face on a sunburst
 		local frame = new("Frame", { Name = "PortraitFrame", BackgroundColor3 = C.Ink, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 11, 0.5, 0), Size = UDim2.fromOffset(106, 106), ZIndex = 13, Parent = face })
+		Kit.snapEnd(frame, 11) -- the same gap to the row's left, top and bottom edges
 		Kit.corner(frame, 26)
 		local band = new("Frame", { Name = "Band", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8), ZIndex = 13, Parent = frame })
 		Kit.corner(band, 22)
@@ -979,6 +967,7 @@ return function(ctx: any)
 	local stampSheen
 	do
 		local stampInner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 24, Parent = stamp })
+		Kit.snapFill(stampInner, 6) -- the same rim width on all four sides
 		Kit.corner(stampInner, 21)
 		Kit.gradient(stampInner, C.Navy800, C.Night, 90)
 		stampSheen = Kit.addShine(stampInner, 21)
@@ -1084,8 +1073,7 @@ return function(ctx: any)
 		for _, g in ipairs(bands) do
 			g.Color = ColorSequence.new(a, d)
 		end
-		headGrad.Color = ColorSequence.new(Kit.lighten(a, 0.15), d)
-		badgeGrad.Color = ColorSequence.new(Kit.lighten(a, 0.2), d)
+		headPlate.SetAccent(a, d)
 	end
 
 	local function refreshRows()
@@ -1988,6 +1976,10 @@ return function(ctx: any)
 					ctx.Fire("HeroSelect")
 				end,
 			})
+			-- in the pill's socket, evenly inset top, right and bottom (same as the coins +)
+			if ctx.PillAction then
+				ctx.PillAction(pill, change.Button, CHANGE_W)
+			end
 			local discBtn = new("TextButton", { Name = "Open", AutoButtonColor = false, Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 9, Parent = disc })
 			local discScale = Kit.fx(disc)
 			discBtn.MouseEnter:Connect(function()

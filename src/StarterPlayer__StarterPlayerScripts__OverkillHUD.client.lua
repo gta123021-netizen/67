@@ -220,6 +220,7 @@ function ctx.Toast(o: { [string]: any })
 	Kit.pill(stripe)
 	Kit.stroke(stripe, 3.5, C.Ink, 0, true)
 	Kit.gradient(stripe, Kit.lighten(color, 0.15), deep, 90)
+	Kit.snapEnd(stripe, 6) -- centred in the card's round end: 6 from the left, top and bottom
 	if o.Glyph == "close" then
 		Kit.closeGlyph(stripe, 30, 3)
 	elseif o.Icon then
@@ -689,7 +690,18 @@ local function patternShape(kind: string, parent: Instance, x: number, y: number
 		new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = rim })
 		new("UIStroke", { Color = C.Night, Thickness = math.max(1, r * 0.16), Parent = rim })
 	else
-		Kit.text({ Text = "\u{2605}", TextScaled = true, TextColor3 = C.Rim, Size = UDim2.fromScale(1, 1), ZIndex = z, Stroke = false, Parent = holder })
+		-- the glyph fills less of its line than the other shapes: drawn a size up
+		Kit.text({
+			Text = "\u{2605}",
+			TextScaled = true,
+			TextColor3 = C.Rim,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1.3, 1.3),
+			ZIndex = z,
+			Stroke = false,
+			Parent = holder,
+		})
 	end
 end
 
@@ -699,7 +711,9 @@ local function pillPattern(skin: Instance, kind: string, z: number)
 	local rng = Random.new(PATTERN_SEED[kind] or 1)
 	local placed: { { number } } = {}
 	local rMin, rMax = if kind == "Coins" then 4.5 else 5.5, if kind == "Coins" then 6 else 7.5
-	local gap = 15
+	-- a star glyph covers far less of its box than a shuriken or a coin, so the star pill packs
+	-- them closer to read as the same density as the other two
+	local gap = if kind == "Stars" then 9 else 15
 	for _ = 1, 1400 do
 		local r = rng:NextNumber(rMin, rMax)
 		local x, y = rng:NextNumber(0, W), rng:NextNumber(0, H)
@@ -730,10 +744,15 @@ local function statusPill(name: string, order: number, caption: string?, accent:
 		Position = UDim2.fromOffset(PILL_X, (HOLDER_H - PILL_H) / 2),
 		Size = UDim2.new(1, -PILL_X, 0, PILL_H),
 		Radius = UDim.new(1, 0),
-		Stroke = 4.5,
+		Stroke = false, -- drawn by the Outline layer on top (below)
 	})
 	Kit.gradient(pill, C.Navy700, C.Night, 90)
 	pill.BackgroundColor3 = Color3.new(1, 1, 1)
+	-- the ink outline is its own layer above the pill's texture and the action socket (children
+	-- draw over their parent's stroke), same rect as the pill so it lines up to the pixel
+	local outline = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = pill.ZIndex + 2, Parent = pill })
+	Kit.pill(outline)
+	Kit.stroke(outline, 4.5, C.Ink, 0, true)
 	-- the windows' dress: faint stripes and the pill's own colour glowing in from the left
 	local skin = new("CanvasGroup", { Name = "Skin", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = pill.ZIndex, Parent = pill })
 	Kit.pill(skin)
@@ -779,6 +798,27 @@ local function pillValue(pill: GuiObject, text: string, color: Color3, rightSpac
 end
 ctx.PillValue = pillValue
 
+-- an action button in a pill's right end (the coins +, the hero pill's CHANGE). It sits in a flat
+-- socket cut to the shape of the pill's own end, so the ring around it is one even colour all the
+-- way round (the pill's shading fades to almost black at the bottom and would swallow that side
+-- of the gap). The button and its socket are placed on whole screen pixels, so the ring is
+-- exactly as wide on all four sides at any screen size. width = nil: a round button.
+local ACTION_H = PILL_H - RIGHT_PAD * 2 -- 44
+local function pillAction(pill: GuiObject, button: GuiObject, width: number?)
+	local socket = new("Frame", {
+		Name = "Socket",
+		BackgroundColor3 = C.Navy800,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, (width or ACTION_H) + RIGHT_PAD * 2, 1, 0),
+		ZIndex = pill.ZIndex + 1,
+		Parent = pill,
+	})
+	Kit.pill(socket)
+	Kit.snapEnd(button, RIGHT_PAD, { Right = true, Width = width, Ring = socket })
+end
+ctx.PillAction = pillAction
+
 -- coins
 local coinHolder, coinPill = statusPill("Coins", 1, "COINS", C.Gold, "Coins")
 local coinIcon = Kit.image({
@@ -790,27 +830,27 @@ local coinIcon = Kit.image({
 	ZIndex = 5,
 	Parent = coinHolder,
 })
-local coinText = pillValue(coinPill, "0", C.Gold, RIGHT_PAD + 44 + 12)
+local coinText = pillValue(coinPill, "0", C.Gold, RIGHT_PAD + ACTION_H + 12)
 local setCoins = Kit.counter(coinText, Theme.Comma, 0)
-Kit.button({
+local plus = Kit.button({
 	Name = "Plus",
 	Parent = coinPill,
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, -RIGHT_PAD, 0.5, 0),
-	Size = UDim2.fromOffset(44, 44),
+	Size = UDim2.fromOffset(ACTION_H, ACTION_H),
 	Radius = UDim.new(1, 0),
 	Depth = 0, -- flat, like the dock tiles
 	Stroke = 3,
 	Color = C.Green,
 	Deep = C.GreenDeep,
-	Text = "+",
-	TextSize = 34,
 	ZIndex = coinPill.ZIndex + 3,
 	HoverScale = 1.12,
 	OnClick = function()
 		ctx.Open("Shop", "Coins")
 	end,
 })
+Kit.plusGlyph(plus.Content, 16, plus.Content.ZIndex + 1)
+pillAction(coinPill, plus.Button)
 
 -- level: star badge with the level, caption row "LEVEL n ... xp / need XP", the bar under it
 local levelHolder, levelPill, levelCaption = statusPill("Level", 2, "LEVEL 1", C.Blue, "Stars")

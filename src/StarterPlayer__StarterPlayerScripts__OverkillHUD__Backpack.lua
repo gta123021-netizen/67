@@ -311,17 +311,17 @@ return function(ctx: any)
 		ZIndex = 12,
 		Gradient = { C.Night, C.Navy900 },
 	})
-	-- magnifier drawn from shapes
-	local lens = new("Frame", { Name = "Lens", BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 13), Size = UDim2.fromOffset(20, 20), ZIndex = 13, Parent = search })
+	-- magnifier drawn from shapes, as far in from the left as from the top and bottom
+	local lens = new("Frame", { Name = "Lens", BackgroundTransparency = 1, Position = UDim2.fromOffset(13, 13), Size = UDim2.fromOffset(20, 20), ZIndex = 13, Parent = search })
 	Kit.pill(lens)
 	Kit.stroke(lens, 3.5, C.TextSoft, 0, true)
-	local handle = new("Frame", { Name = "Handle", BackgroundColor3 = C.TextSoft, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(38, 36), Size = UDim2.fromOffset(11, 4), Rotation = 45, ZIndex = 13, Parent = search })
+	local handle = new("Frame", { Name = "Handle", BackgroundColor3 = C.TextSoft, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(35, 36), Size = UDim2.fromOffset(11, 4), Rotation = 45, ZIndex = 13, Parent = search })
 	Kit.pill(handle)
 	local box = new("TextBox", {
 		Name = "Box",
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(52, 0),
-		Size = UDim2.new(1, -66, 1, 0),
+		Position = UDim2.fromOffset(49, 0),
+		Size = UDim2.new(1, -63, 1, 0),
 		FontFace = Theme.Font.Heavy,
 		TextSize = 21,
 		TextColor3 = C.Text,

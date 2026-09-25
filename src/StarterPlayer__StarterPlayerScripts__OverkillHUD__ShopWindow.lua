@@ -121,7 +121,8 @@ return function(ctx: any)
 		ZIndex = 12,
 		Gradient = { C.Night, C.Navy900 },
 	})
-	local tipIcon = Kit.image({ Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(42, 42), ZIndex = 13, Parent = tipBar })
+	local tipIcon = Kit.image({ Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Size = UDim2.fromOffset(42, 42), ZIndex = 13, Parent = tipBar })
+	Kit.snapEnd(tipIcon, 8) -- centred in the pill's round end: 8 from the left, top and bottom
 	local tipText = Kit.text({
 		Text = "",
 		TextSize = 19,

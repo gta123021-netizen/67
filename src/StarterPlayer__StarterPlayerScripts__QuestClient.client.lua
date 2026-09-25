@@ -1129,11 +1129,13 @@ Kit.stroke(pCard, 5, C.Ink, 0, true)
 local pCardGrad = Kit.gradient(pCard, Kit.lighten(GOLD, 0.15), GOLD_D, 90)
 Kit.bevel(pCard, 31, 3, 21)
 local pInner = new("Frame", { Name = "Inner", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 1, -20), ZIndex = 22, Parent = pCard })
+Kit.snapFill(pInner, 10) -- the same frame width on all four sides
 Kit.corner(pInner, 25)
 Kit.stroke(pInner, 3, C.Ink, 0.15, true)
 local pInnerGrad = Kit.gradient(pInner, Kit.lighten(GOLD, 0.3), Kit.darken(GOLD_D, 0.4), 90)
 Kit.image({ Name = "Glow", Image = Theme.Icon.Glow, ImageColor3 = Color3.new(1, 1, 1), ImageTransparency = 0.45, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromScale(1.1, 1.1), ZIndex = 22, Parent = pInner })
 local pView = new("Frame", { Name = "Views", BackgroundTransparency = 1, ClipsDescendants = true, Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 1, -20), ZIndex = 23, Parent = pCard })
+Kit.snapFill(pView, 10)
 local portraitViews: { [string]: GuiObject } = {}
 for heroName, h in pairs(HERO) do
 	local v: GuiObject? = bust(pView, heroName, "bust", 23, 25)
@@ -1159,6 +1161,7 @@ Kit.stroke(namePlate, 5, C.Ink, 0, true)
 local namePlateGrad = Kit.gradient(namePlate, Kit.lighten(GOLD, 0.15), GOLD_D, 90)
 local namePlateScale = Kit.fx(namePlate)
 local nameInner = new("Frame", { Name = "Inner", BackgroundColor3 = Color3.new(1, 1, 1), Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 24, Parent = namePlate })
+Kit.snapFill(nameInner, 6) -- the same rim width on all four sides
 Kit.corner(nameInner, 17)
 Kit.gradient(nameInner, C.Navy800, C.Night, 90)
 local nameSheen = Kit.addShine(nameInner, 17)
@@ -1517,6 +1520,7 @@ for i, tierName in ipairs(Config.TierOrder) do
 	Kit.pill(disc)
 	Kit.stroke(disc, 3.5, C.Ink, 0, true)
 	Kit.gradient(disc, Kit.lighten(h.Color, 0.25), h.Deep, 90)
+	Kit.snapEnd(disc, (93 - 70) / 2) -- the same gap to the tab's left, top and bottom edges
 	local hold = new("Frame", { Name = "Face", BackgroundTransparency = 1, ClipsDescendants = true, Position = UDim2.fromOffset(3, 3), Size = UDim2.new(1, -6, 1, -6), ZIndex = 17, Parent = disc })
 	if not bust(hold, heroName, "head", 17, UDim.new(1, 0)) then
 		Kit.image({ Image = h.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.74, 0.74), ZIndex = 17, Parent = hold })
@@ -1565,15 +1569,16 @@ local resetCard = Kit.plate({
 	ZIndex = 12,
 	Gradient = { C.Night, C.Navy900 },
 })
-Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 14, 0.5, 0), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetCard })
+local resetClock = Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 21, 0.5, 0), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetCard })
+Kit.snapEnd(resetClock, 21) -- the same gap to the card's left, top and bottom edges
 Kit.text({
 	Text = "NEW QUESTS IN",
 	TextSize = 15,
 	FontFace = Theme.Font.Heavy,
 	TextColor3 = C.TextDim,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(76, 16),
-	Size = UDim2.fromOffset(166, 20),
+	Position = UDim2.fromOffset(83, 16),
+	Size = UDim2.fromOffset(159, 20),
 	ZIndex = 13,
 	Stroke = 2.2,
 	Parent = resetCard,
@@ -1582,8 +1587,8 @@ local resetText = Kit.text({
 	Text = "--:--:--",
 	TextSize = 30,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(76, 38),
-	Size = UDim2.fromOffset(166, 38),
+	Position = UDim2.fromOffset(83, 38),
+	Size = UDim2.fromOffset(159, 38),
 	ZIndex = 13,
 	Stroke = 3.5,
 	Parent = resetCard,
@@ -1674,7 +1679,8 @@ local header = Kit.plate({
 	ZIndex = 12,
 	Gradient = { C.Night, C.Navy900 },
 })
-local headerIcon = Kit.image({ Name = "TierIcon", Image = HERO.Goki.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(44, 40), Size = UDim2.fromOffset(64, 64), ZIndex = 13, Parent = header })
+local headerIcon = Kit.image({ Name = "TierIcon", Image = HERO.Goki.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(40, 40), Size = UDim2.fromOffset(64, 64), ZIndex = 13, Parent = header })
+Kit.snapEnd(headerIcon, 8) -- the same gap to the header's left, top and bottom edges
 local headerIconScale = Kit.fx(headerIcon)
 local blurb = Kit.text({
 	Name = "Blurb",
@@ -1684,8 +1690,8 @@ local blurb = Kit.text({
 	TextColor3 = C.TextSoft,
 	TextWrapped = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(88, 0),
-	Size = UDim2.fromOffset(400, 80),
+	Position = UDim2.fromOffset(84, 0),
+	Size = UDim2.fromOffset(404, 80),
 	ZIndex = 13,
 	Stroke = 2.4,
 	Parent = header,
@@ -1856,12 +1862,13 @@ local function buildCard(i: number, q: any, tierName: string)
 	local disc = new("Frame", {
 		Name = "Disc",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(54, CARD_H / 2),
+		Position = UDim2.fromOffset(52, CARD_H / 2),
 		Size = UDim2.fromOffset(76, 76),
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		ZIndex = 14,
 		Parent = card,
 	})
+	Kit.snapEnd(disc, (CARD_H - 76) / 2) -- the same gap to the card's left, top and bottom edges
 	Kit.pill(disc)
 	Kit.stroke(disc, 4, C.Ink, 0, true)
 	local discGrad = Kit.gradient(disc, Kit.lighten(a, 0.15), d, 90)
@@ -1869,7 +1876,7 @@ local function buildCard(i: number, q: any, tierName: string)
 	local num = Kit.text({ Name = "Num", Text = tostring(i), TextSize = 38, ZIndex = 16, Stroke = 4, Parent = disc })
 	local mark = Kit.image({ Name = "Mark", Image = Theme.Icon.Check, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(54, 54), Visible = false, ZIndex = 16, Parent = disc })
 
-	local title = Kit.text({ Name = "Title", Text = q.Title, TextSize = 27, TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(106, 12), Size = UDim2.fromOffset(350, 32), ZIndex = 14, Stroke = 3.4, Parent = card })
+	local title = Kit.text({ Name = "Title", Text = q.Title, TextSize = 27, TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(104, 12), Size = UDim2.fromOffset(352, 32), ZIndex = 14, Stroke = 3.4, Parent = card })
 	Kit.text({
 		Name = "Desc",
 		Text = q.Desc,
@@ -1877,13 +1884,13 @@ local function buildCard(i: number, q: any, tierName: string)
 		FontFace = Theme.Font.Bold,
 		TextColor3 = C.TextSoft,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.fromOffset(107, 43),
-		Size = UDim2.fromOffset(350, 22),
+		Position = UDim2.fromOffset(105, 43),
+		Size = UDim2.fromOffset(352, 22),
 		ZIndex = 14,
 		Stroke = false,
 		Parent = card,
 	})
-	local bar = Kit.bar({ Parent = card, Position = UDim2.fromOffset(106, 70), Size = UDim2.fromOffset(340, 22), Color = a, Deep = d, ZIndex = 14, TextSize = 15 })
+	local bar = Kit.bar({ Parent = card, Position = UDim2.fromOffset(104, 70), Size = UDim2.fromOffset(342, 22), Color = a, Deep = d, ZIndex = 14, TextSize = 15 })
 	local barGrad = bar.Fill:FindFirstChildOfClass("UIGradient")
 
 	-- rewards
@@ -2443,14 +2450,15 @@ local function buildOption(i: number, opt: any)
 	key = keycap(c, tostring(i), 46, 46, 26, 17)
 	local k = key :: Frame
 	k.AnchorPoint = Vector2.new(0, 0.5)
-	k.Position = UDim2.new(0, 14, 0.5, 0)
+	k.Position = UDim2.new(0, 10, 0.5, 0)
+	Kit.snapEnd(k, (OPT_H - 6 - 46) / 2) -- the same gap to the option's left, top and bottom edges
 	Kit.text({
 		Name = "Text",
 		Text = opt.Text or "",
 		TextSize = 28,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.fromOffset(76, -1),
-		Size = UDim2.new(1, -236, 1, 0),
+		Position = UDim2.fromOffset(72, -1),
+		Size = UDim2.new(1, -232, 1, 0),
 		ZIndex = 17,
 		Stroke = 3.2,
 		Parent = c,

@@ -426,6 +426,7 @@ return function(ctx: any)
 			ZIndex = 13,
 			Gradient = { Kit.lighten(color, 0.1), deep },
 		})
+		Kit.snapCorner(disc, 12) -- as far from the left edge as from the top
 		Kit.image({
 			Image = icon,
 			AnchorPoint = Vector2.new(0.5, 0.5),
@@ -637,8 +638,14 @@ return function(ctx: any)
 		since.Text = if days > 0 then ("Roblox member for %s days"):format(Theme.Comma(days)) else ""
 	end
 
-	ctx.On("Coins", refresh)
-	ctx.On("Xp", refresh)
+	-- (wrapped: these events pass the new value, which must not land in refresh's `animate`
+	-- flag - a number is truthy, so every coin or XP change reset all six tiles to 0)
+	ctx.On("Coins", function()
+		refresh()
+	end)
+	ctx.On("Xp", function()
+		refresh()
+	end)
 	ctx.On("ShopState", rebuildShelf)
 	win.Root:GetPropertyChangedSignal("Visible"):Connect(function()
 		for _, sp in ipairs(shelfSprites) do

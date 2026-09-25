@@ -226,6 +226,7 @@ return function(ctx: any)
 		ZIndex = 10,
 		Parent = titlePlate,
 	})
+	Kit.snapFill(titleInner, 8) -- the same rim width on all four sides
 	Kit.corner(titleInner, 23)
 	Kit.gradient(titleInner, C.Navy800, C.Night, 90)
 	local titleSheen = Kit.addShine(titleInner, 23)
@@ -234,7 +235,7 @@ return function(ctx: any)
 		Text = "MATCH FOUND",
 		TextSize = 66,
 		Position = UDim2.fromOffset(112, 0),
-		Size = UDim2.new(1, -142, 1, -4),
+		Size = UDim2.new(1, -142, 1, 0),
 		ZIndex = 12,
 		Stroke = 6,
 		Parent = titlePlate,
@@ -249,7 +250,10 @@ return function(ctx: any)
 		ZIndex = 13,
 		Parent = titlePlate,
 	})
+	-- the mode badge: the same whole number of pixels from the plate's left, top and bottom edges
+	Kit.snapEnd(badgeHolder, 13)
 	local titleBadge = Q.Badge(badgeHolder, "Duel", 86, 13)
+	titleBadge.Frame.Size = UDim2.fromScale(1, 1)
 
 	local modeChip = Q.Chip(stage, "1V1 DUEL", C.Blue, C.BlueDeep, 42, 9)
 	modeChip.Frame.AnchorPoint = Vector2.new(0.5, 0)

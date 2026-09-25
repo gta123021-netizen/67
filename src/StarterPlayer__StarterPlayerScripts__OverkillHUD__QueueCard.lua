@@ -231,6 +231,7 @@ return function(ctx: any)
 	table.insert(qLoops, TweenService:Create(ringGrad, TweenInfo.new(1.25, Enum.EasingStyle.Linear, LOOP, -1), { Rotation = 360 }))
 	local badge = Q.Badge(plate, "Duel", BADGE, 23)
 	badge.Frame.Position = UDim2.fromOffset(20, 20)
+	Kit.snapCorner(badge.Frame, 20) -- as far from the left edge as from the top
 
 	local qTitle = Kit.text({
 		Name = "Title",
@@ -703,13 +704,14 @@ return function(ctx: any)
 		Name = "Disc",
 		Parent = lockPlate,
 		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, -62, 0.5, 0),
+		Position = UDim2.new(0, -61, 0.5, 0),
 		Size = UDim2.fromOffset(48, 48),
 		Radius = UDim.new(1, 0),
 		Stroke = 3.5,
 		ZIndex = 21,
 		Gradient = { C.Red, C.RedDeep },
 	})
+	Kit.snapEnd(lockDisc, 5) -- centred in the chip's round end: 5 from the left, top and bottom
 	Kit.bevel(lockDisc, UDim.new(1, 0), 3, 21)
 	local lockIcon = Kit.image({ Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(32, 32), ZIndex = 22, Parent = lockDisc })
 	local lockRow = new("Frame", { Name = "Row", BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 21, Parent = lockPlate })
@@ -770,6 +772,7 @@ return function(ctx: any)
 		-- inviter's head with a little party disc
 		local av = Q.Avatar(p, from, 84, C.Teal, 22)
 		av.Frame.Position = UDim2.fromOffset(20, 20)
+		Kit.snapCorner(av.Frame, 20) -- as far from the left edge as from the top
 		local disc = Kit.plate({
 			Name = "PartyDisc",
 			Parent = p,

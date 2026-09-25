@@ -1222,7 +1222,9 @@ Players.PlayerRemoving:Connect(function(pl: Player)
 				end
 			end
 			if not anyone then
-				matches[match.Id] = nil
+				-- the last real player left: close the match properly, so the practice bots that
+				-- were in it are let go too (they were kept in memory forever before)
+				releaseMatch(match)
 			end
 		end
 	end

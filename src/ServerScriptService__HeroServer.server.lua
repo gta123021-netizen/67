@@ -375,9 +375,18 @@ Players.PlayerRemoving:Connect(function(p)
 	save(p)
 	profiles[p] = nil
 end)
+-- shutting down: save everyone and wait until every save has finished
 game:BindToClose(function()
-	for _, p in ipairs(Players:GetPlayers()) do
-		task.spawn(save, p)
+	local left = 0
+	for p in pairs(profiles) do
+		left += 1
+		task.spawn(function()
+			save(p)
+			left -= 1
+		end)
 	end
-	task.wait(2)
+	local t0 = os.clock()
+	while left > 0 and os.clock() - t0 < 25 do
+		task.wait(0.1)
+	end
 end)

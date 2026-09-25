@@ -193,6 +193,145 @@ function Kit.textHeight(text: string, size: number, width: number, font: Font?):
 end
 
 ---------------------------------------------------------------------------
+-- pixel snapping
+-- Every frame is drawn on whole screen pixels. With the HUD scaled to the screen, a frame 10 units
+-- in and one 6 units in can round different ways on each axis, so a gap that is equal in the
+-- code comes out 1 pixel wider on one side. These helpers put a child a whole number of screen
+-- pixels from its parent's edges and size it from the parent itself, so its gaps land exactly
+-- equal on every side at any screen size. They re-run whenever the parent's size changes
+-- (screen resize, the UI size setting, windows opening).
+---------------------------------------------------------------------------
+-- screen pixels per reference unit at `o`: every UIScale from `o` up to its ScreenGui.
+-- The "FX" scales (pops, hovers) are left out unless `withFx`: they rest at 1, and snapping to
+-- them mid-animation would only make the icons step a pixel as they grow.
+function Kit.pxScale(o: Instance, withFx: boolean?): number
+	local s = 1
+	local node: Instance? = o
+	while node and not node:IsA("LayerCollector") do
+		local sc = node:FindFirstChildOfClass("UIScale")
+		if sc and (withFx or sc.Name ~= "FX") then
+			s *= sc.Scale
+		end
+		node = node.Parent
+	end
+	return s
+end
+
+-- the parent's UIPadding offsets (children are placed inside the padded box)
+local function padOf(parent: Instance): (number, number, number, number)
+	local p = parent:FindFirstChildOfClass("UIPadding")
+	if not p then
+		return 0, 0, 0, 0
+	end
+	return p.PaddingLeft.Offset, p.PaddingTop.Offset, p.PaddingRight.Offset, p.PaddingBottom.Offset
+end
+
+-- `v` reference units, rounded to whole screen pixels at scale `s` (still in reference units)
+local function snapUnits(v: number, s: number): number
+	return math.floor(v * s + 0.5) / s
+end
+
+local function watchParent(child: GuiObject, apply: () -> ())
+	local parent = child.Parent
+	if not (parent and parent:IsA("GuiObject")) then
+		return
+	end
+	apply()
+	local conn = parent:GetPropertyChangedSignal("AbsoluteSize"):Connect(apply)
+	child.Destroying:Connect(function()
+		conn:Disconnect()
+	end)
+end
+
+-- keep `child` the same whole number of screen pixels inside its parent on all four sides
+function Kit.snapFill(child: GuiObject, inset: number)
+	local lastS = -1
+	watchParent(child, function()
+		local parent = child.Parent :: GuiObject
+		local s = Kit.pxScale(parent)
+		if s < 0.01 or s == lastS then
+			return
+		end
+		lastS = s
+		local l, t, r, b = padOf(parent)
+		local n = snapUnits(inset, s)
+		child.AnchorPoint = Vector2.zero
+		child.Position = UDim2.fromOffset(n - l, n - t)
+		child.Size = UDim2.new(1, l + r - 2 * n, 1, t + b - 2 * n)
+	end)
+end
+
+-- a square child (or one `Width` wide) in the left end of its parent (`Right` = the right end):
+-- the same whole number of screen pixels from the end, the top and the bottom. The child stays
+-- anchored on its centre, so pops and wiggles still grow from the middle.
+-- Ring: a frame kept exactly `gap` outside the child on every side (a socket behind a button).
+function Kit.snapEnd(child: GuiObject, gap: number, o: { Right: boolean?, Width: number?, Ring: GuiObject? }?)
+	local right = o ~= nil and o.Right == true
+	local width = o and o.Width
+	local ring = o and o.Ring
+	local lastS, lastW, lastH = -1, -1, -1
+	watchParent(child, function()
+		local parent = child.Parent :: GuiObject
+		local s = Kit.pxScale(parent)
+		local sAll = Kit.pxScale(parent, true)
+		if s < 0.01 or sAll < 0.01 then
+			return
+		end
+		local l, t, r, b = padOf(parent)
+		local pw = parent.AbsoluteSize.X / sAll -- the parent's size in reference units
+		local h = parent.AbsoluteSize.Y / sAll
+		if s == lastS and math.abs(h - lastH) < 1e-3 and (not right or math.abs(pw - lastW) < 1e-3) then
+			return
+		end
+		lastS, lastW, lastH = s, pw, h
+		local g = snapUnits(gap, s)
+		local w = width or math.max(0, h - 2 * g)
+		child.AnchorPoint = Vector2.new(0.5, 0.5)
+		if right then
+			-- the left edge goes a whole number of pixels in from the parent's left edge and the width
+			-- is the parent's minus a whole number of pixels, so the right edge lands exactly g in from
+			-- the parent's right edge too (the width takes up the parent's fraction of a pixel)
+			local a = snapUnits(pw - w, s) - g -- left edge, in from the parent's left edge
+			child.Size = UDim2.new(1, l + r - a - g, 1, t + b - 2 * g)
+			child.Position = UDim2.new(0.5, (a - g - l + r) / 2, 0.5, (b - t) / 2)
+			if ring then
+				ring.AnchorPoint = Vector2.zero
+				ring.Position = UDim2.fromOffset(a - g - l, -t)
+				ring.Size = UDim2.new(1, l + r - a + g, 1, t + b)
+			end
+		else
+			-- edges: g from the end, g from the top, g from the bottom (the height follows the parent)
+			child.Size = UDim2.new(0, w, 1, t + b - 2 * g)
+			child.Position = UDim2.new(0, g + w / 2 - l, 0.5, (b - t) / 2)
+			if ring then
+				ring.AnchorPoint = Vector2.zero
+				ring.Position = UDim2.fromOffset(-l, -t)
+				ring.Size = UDim2.new(0, w + 2 * g, 1, t + b)
+			end
+		end
+	end)
+end
+
+-- a child in its parent's top-left corner: the same whole number of screen pixels from the left
+-- and the top edge (its size stays as it is; it stays anchored on its centre)
+function Kit.snapCorner(child: GuiObject, gap: number)
+	local lastS = -1
+	watchParent(child, function()
+		local parent = child.Parent :: GuiObject
+		local s = Kit.pxScale(parent)
+		if s < 0.01 or s == lastS then
+			return
+		end
+		lastS = s
+		local l, t = padOf(parent)
+		local g = snapUnits(gap, s)
+		local w, h = child.Size.X.Offset, child.Size.Y.Offset
+		child.AnchorPoint = Vector2.new(0.5, 0.5)
+		child.Position = UDim2.fromOffset(g + w / 2 - l, g + h / 2 - t)
+	end)
+end
+
+---------------------------------------------------------------------------
 -- motion
 ---------------------------------------------------------------------------
 function Kit.tween(o: Instance, t: number, props: { [string]: any }, style: Enum.EasingStyle?, dir: Enum.EasingDirection?, delay: number?): Tween
@@ -564,6 +703,44 @@ function Kit.closeGlyph(parent: Instance, size: number, z: number, color: Color3
 end
 
 ---------------------------------------------------------------------------
+-- the +: two rounded bars crossed square, drawn like the X (a font's "+" sits below the middle
+-- of its line, so a text plus never lands dead centre in a round button; this one always does)
+---------------------------------------------------------------------------
+function Kit.plusGlyph(parent: Instance, size: number, z: number, color: Color3?): Frame
+	local holder = new("Frame", {
+		Name = "PlusGlyph",
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(size, size),
+		ZIndex = z,
+		Parent = parent,
+	})
+	local thick = math.max(4, size * 0.3)
+	local edge = math.max(2, size * 0.14)
+	for layer = 1, 2 do
+		for _, across in ipairs({ true, false }) do
+			local w, h = if across then size else thick, if across then thick else size
+			if layer == 1 then
+				w += edge * 2
+				h += edge * 2
+			end
+			local bar = new("Frame", {
+				Name = if layer == 1 then "Outline" else "Bar",
+				BackgroundColor3 = if layer == 1 then C.Ink else (color or Color3.new(1, 1, 1)),
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(w, h),
+				ZIndex = z + layer - 1,
+				Parent = holder,
+			})
+			Kit.pill(bar)
+		end
+	end
+	return holder
+end
+
+---------------------------------------------------------------------------
 -- chevron (< or >): two rounded bars meeting at the tip, drawn like the X (outline layer
 -- underneath). Both bars are centred on the holder, so the arrow sits dead centre in its bubble.
 --   dir: -1 = points left, 1 = points right
@@ -814,6 +991,90 @@ function Kit.plate(o: { [string]: any }): Frame
 end
 
 ---------------------------------------------------------------------------
+-- title plate: the accent plate with a dark inner panel that heads every window and screen.
+-- A rounded-square icon tile sits in its left end, the title follows it. The rim, and the tile's
+-- gap to the plate edge on the left, top and bottom, are whole screen pixels (Kit.snapFill /
+-- Kit.snapEnd), so the three gaps round the same way at any screen size.
+--   o = { Parent, Name, Title, TextSize, Height, Rim, Radius, TileGap, Accent, Deep, Icon,
+--         IconScale (share of the tile), Glyph (function(tile, zIndex)), ZIndex, Position,
+--         AnchorPoint, TextGap, PadRight }
+---------------------------------------------------------------------------
+function Kit.titlePlate(o: { [string]: any })
+	local H = o.Height or 84
+	local rim = o.Rim or 6
+	local R = o.Radius or 24
+	local gap = o.TileGap or 10 -- plate edge to the tile's edge, on the left, top and bottom
+	local tile = H - gap * 2
+	local textSize = o.TextSize or 46
+	local z = o.ZIndex or 20
+	local left = gap + tile + (o.TextGap or 16) -- where the title starts
+	local padRight = o.PadRight or 32
+	local accent, deep = o.Accent or C.Blue, o.Deep or C.BlueDeep
+	local function widthFor(t: string): number
+		return Kit.textWidth(t, textSize) + left + padRight
+	end
+
+	local plate = new("Frame", {
+		Name = o.Name or "TitlePlate",
+		AnchorPoint = o.AnchorPoint or Vector2.new(0.5, 0.5),
+		Position = o.Position or UDim2.new(),
+		Size = UDim2.fromOffset(widthFor(o.Title), H),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		ZIndex = z,
+		Parent = o.Parent,
+	})
+	Kit.corner(plate, R)
+	Kit.stroke(plate, o.Stroke or 5, C.Ink, 0, true)
+	local plateGrad = Kit.gradient(plate, Kit.lighten(accent, 0.15), deep, 90)
+	local inner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, ZIndex = z, Parent = plate })
+	Kit.corner(inner, R - rim)
+	Kit.gradient(inner, C.Navy800, C.Night, 90)
+	Kit.snapFill(inner, rim)
+	local sheen = Kit.addShine(inner, R - rim)
+	local title = Kit.text({
+		Name = "Title",
+		Text = o.Title,
+		TextSize = textSize,
+		Position = UDim2.fromOffset(left, 0),
+		Size = UDim2.new(1, -left - padRight, 1, 0),
+		ZIndex = z + 2,
+		Stroke = o.TextStroke or 4.5,
+		Parent = plate,
+	})
+	local iconTile = new("Frame", { Name = "IconTile", BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = z + 3, Parent = plate })
+	Kit.corner(iconTile, o.TileRadius or 16)
+	Kit.stroke(iconTile, 3.5, C.Ink, 0, true)
+	local tileGrad = Kit.gradient(iconTile, Kit.lighten(accent, 0.2), deep, 90)
+	Kit.snapEnd(iconTile, gap)
+	local icon: ImageLabel? = nil
+	if o.Glyph then
+		o.Glyph(iconTile, z + 4)
+	else
+		local k = o.IconScale or 0.84
+		icon = Kit.image({
+			Name = "TitleIcon",
+			Image = o.Icon,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(k, k),
+			ZIndex = z + 4,
+			Parent = iconTile,
+		})
+	end
+
+	local api = { Plate = plate, Inner = inner, Tile = iconTile, TitleIcon = icon, Title = title, Sheen = sheen, Grad = plateGrad, TileGrad = tileGrad }
+	function api.SetTitle(t: string)
+		title.Text = t
+		plate.Size = UDim2.fromOffset(widthFor(t), H)
+	end
+	function api.SetAccent(a: Color3, d: Color3)
+		plateGrad.Color = ColorSequence.new(Kit.lighten(a, 0.15), d)
+		tileGrad.Color = ColorSequence.new(Kit.lighten(a, 0.2), d)
+	end
+	return api
+end
+
+---------------------------------------------------------------------------
 -- window: the big rounded panel every menu lives in
 --   o = { Name, Size (Vector2), Accent {light, deep}, Title, Icon, Parent, OnClose, Tilt }
 --   Tilt: add a small rotation to the open/close pop. Off by default: any rotated ancestor
@@ -916,73 +1177,20 @@ function Kit.window(o: { [string]: any })
 		Parent = root,
 	})
 
-	-- title plate on the top edge
-	local plate = new("Frame", {
-		Name = "TitlePlate",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0, 2),
-		Size = UDim2.fromOffset(Kit.textWidth(o.Title, 46) + 90 + 32, 84),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		ZIndex = 20,
+	-- title plate on the top edge (the shared plate: icon tile evenly inset on three sides)
+	local titlePlate = Kit.titlePlate({
 		Parent = root,
-	})
-	Kit.corner(plate, 24)
-	Kit.stroke(plate, 5, C.Ink, 0, true)
-	local plateGrad = Kit.gradient(plate, Kit.lighten(accent, 0.15), accentDeep, 90)
-	local plateInner = new("Frame", {
-		Name = "Inner",
-		BackgroundColor3 = C.Night,
-		Position = UDim2.fromOffset(6, 6),
-		Size = UDim2.new(1, -12, 1, -12),
+		Title = o.Title,
+		Icon = o.Icon,
+		Accent = accent,
+		Deep = accentDeep,
+		Position = UDim2.new(0.5, 0, 0, 2),
 		ZIndex = 20,
-		Parent = plate,
 	})
-	Kit.corner(plateInner, 19)
-	Kit.gradient(plateInner, C.Navy800, C.Night, 90)
-	local plateSheen = Kit.addShine(plateInner, 19)
-	local plateRow = new("Frame", {
-		Name = "Row",
-		BackgroundTransparency = 1,
-		Size = UDim2.new(0, 0, 1, 0),
-		AutomaticSize = Enum.AutomaticSize.X,
-		ZIndex = 21,
-		Parent = plate,
-	})
-	Kit.padding(plateRow, 90, 0, 32, 0)
-	Kit.list(plateRow, Enum.FillDirection.Horizontal, 0, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local title = Kit.text({
-		Name = "Title",
-		Text = o.Title,
-		TextSize = 46,
-		Size = UDim2.new(0, 0, 1, -6),
-		AutomaticSize = Enum.AutomaticSize.X,
-		ZIndex = 22,
-		Stroke = 4.5,
-		Parent = plateRow,
-	})
-	-- the icon sits in a rounded-square tile inside the plate's left end, level with it (the
-	-- same tile as the hero select title): equal 4px gaps to the plate's rim on three sides
-	local iconTile = new("Frame", {
-		Name = "IconTile",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(42, 42),
-		Size = UDim2.fromOffset(64, 64),
-		ZIndex = 23,
-		Parent = plate,
-	})
-	Kit.corner(iconTile, 16)
-	Kit.stroke(iconTile, 3.5, C.Ink, 0, true)
-	Kit.gradient(iconTile, Kit.lighten(accent, 0.2), accentDeep, 90)
-	local titleIcon = Kit.image({
-		Name = "TitleIcon",
-		Image = o.Icon,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(54, 54),
-		ZIndex = 24,
-		Parent = iconTile,
-	})
+	local plate = titlePlate.Plate
+	local plateSheen = titlePlate.Sheen
+	local title = titlePlate.Title
+	local titleIcon = titlePlate.TitleIcon
 
 	-- close button: the shared flat red tile with the X, on the top-right corner
 	local closeApi = Kit.closeButton({
@@ -1025,14 +1233,11 @@ function Kit.window(o: { [string]: any })
 		IsOpen = false,
 	}
 
-	function api.SetTitle(t: string)
-		title.Text = t
-		plate.Size = UDim2.fromOffset(Kit.textWidth(t, 46) + 92 + 38, 84)
-	end
+	api.SetTitle = titlePlate.SetTitle
 
 	-- recolour the whole window (quest board switches colour per hero)
 	function api.SetAccent(a: Color3, d: Color3)
-		plateGrad.Color = ColorSequence.new(Kit.lighten(a, 0.15), d)
+		titlePlate.SetAccent(a, d) -- the plate and its icon tile
 		bandGrad.Color = ColorSequence.new(a, d)
 		washGrad.Color = ColorSequence.new(a, a)
 		for _, f in ipairs(bandStripeHolder:GetChildren()) do

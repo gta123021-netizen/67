@@ -124,6 +124,7 @@ return function(ctx: any)
 	local glowLoop = TweenService:Create(badgeGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { ImageTransparency = 0.75, Size = UDim2.fromOffset(150, 150) })
 	local badge = Q.Badge(plate, "Duel", 92, 17)
 	badge.Frame.Position = UDim2.fromOffset(20, 20)
+	Kit.snapEnd(badge.Frame, 20) -- the same gap to the card's left, top and bottom edges
 
 	local RIGHT = 188
 	local title = Kit.text({

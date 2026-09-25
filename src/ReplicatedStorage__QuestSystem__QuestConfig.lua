@@ -74,13 +74,6 @@ local HERO_OPTIONS = {
 	{ Text = "Maybe later", Leave = true },
 }
 
-local HERO_OPTIONS = {
-	{ Text = "Train with Goki", Next = "Daily" },
-	{ Text = "Talk to Naroto", Next = "Weekly" },
-	{ Text = "Visit Gojen", Next = "Monthly" },
-	{ Text = "Maybe later", Leave = true },
-}
-
 Config.Dialogue = {
 	Start = {
 		Speaker = "Goki",

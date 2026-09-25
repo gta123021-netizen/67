@@ -6,6 +6,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local DataStoreService = game:GetService("DataStoreService")
 local MarketplaceService = game:GetService("MarketplaceService")
 
@@ -239,28 +240,33 @@ local function coinsValue(p: Player): IntValue?
 	return if v and v:IsA("IntValue") then v else nil
 end
 
+-- The coins go through QuestServer (ServerStorage.QuestGrantCoins), which saves them together
+-- with the purchase id before we tell Roblox the purchase is done. A receipt Roblox sends again
+-- (a retry, a rejoin) is recognised by its id and never paid twice; if the save fails the
+-- receipt stays open and Roblox tries again later.
 MarketplaceService.ProcessReceipt = function(receipt)
-	local p = Players:GetPlayerByUserId(receipt.PlayerId)
-	if not p then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
-	end
-	for _, item in ipairs(ShopConfig.Items) do
-		if item.ProductId and item.ProductId ~= 0 and item.ProductId == receipt.ProductId then
-			-- wait for saved coins to load first so the grant is never overwritten
-			local t0 = os.clock()
-			while not p:GetAttribute("QuestDataLoaded") and os.clock() - t0 < 20 and p.Parent do
-				task.wait(0.5)
-			end
-			local v = coinsValue(p)
-			if not v or not p:GetAttribute("QuestDataLoaded") then
-				return Enum.ProductPurchaseDecision.NotProcessedYet
-			end
-			v.Value += item.Amount or 0
-			ShopEvent:FireClient(p, "Granted", snapshot(p), item.Id)
-			return Enum.ProductPurchaseDecision.PurchaseGranted
+	local item = nil
+	for _, it in ipairs(ShopConfig.Items) do
+		if it.ProductId and it.ProductId ~= 0 and it.ProductId == receipt.ProductId then
+			item = it
+			break
 		end
 	end
-	return Enum.ProductPurchaseDecision.NotProcessedYet
+	local p = Players:GetPlayerByUserId(receipt.PlayerId)
+	local grant = ServerStorage:WaitForChild("QuestGrantCoins", 10)
+	if not (item and p and grant and grant:IsA("BindableFunction")) then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	local ok, saved, fresh = pcall(function()
+		return (grant :: BindableFunction):Invoke(p, tostring(receipt.PurchaseId), item.Amount or 0)
+	end)
+	if not (ok and saved == true) then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	if fresh and p.Parent then
+		ShopEvent:FireClient(p, "Granted", snapshot(p), item.Id)
+	end
+	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
 ---------------------------------------------------------------------------
@@ -408,9 +414,18 @@ Players.PlayerRemoving:Connect(function(p)
 	profiles[p] = nil
 	lastRequest[p] = nil
 end)
+-- shutting down: save everyone and wait until every save has finished
 game:BindToClose(function()
-	for _, p in ipairs(Players:GetPlayers()) do
-		task.spawn(save, p)
+	local left = 0
+	for p in pairs(profiles) do
+		left += 1
+		task.spawn(function()
+			save(p)
+			left -= 1
+		end)
 	end
-	task.wait(2)
+	local t0 = os.clock()
+	while left > 0 and os.clock() - t0 < 25 do
+		task.wait(0.1)
+	end
 end)

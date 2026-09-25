@@ -156,6 +156,7 @@ return function(ctx: any)
 		end
 		local av = Q.Avatar(p, v, 80, if isLeader then C.Gold else TEAL, 13)
 		av.Frame.Position = UDim2.fromOffset(16, 16)
+		Kit.snapEnd(av.Frame, 16) -- the same gap to the slot's left, top and bottom edges
 		if isLeader then
 			local crown = Kit.image({
 				Name = "Crown",
@@ -273,6 +274,7 @@ return function(ctx: any)
 		end
 		local av = Q.Avatar(p, v, 80, C.Grey, 13)
 		av.Frame.Position = UDim2.fromOffset(16, 16)
+		Kit.snapEnd(av.Frame, 16)
 		local veil = new("Frame", { Name = "Veil", BackgroundColor3 = C.Night, BackgroundTransparency = 0.45, Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = av.Frame })
 		Kit.pill(veil)
 		local right = if iAmLeader then 150 else 20
@@ -359,10 +361,17 @@ return function(ctx: any)
 			ZIndex = 13,
 			Parent = p,
 		})
+		Kit.snapEnd(disc, 16)
 		Kit.pill(disc)
 		Kit.gradient(disc, C.Navy600, C.Navy800, 90)
 		local ds = Kit.stroke(disc, 3, C.Navy500, 0, true)
-		local plus = Kit.text({ Text = "+", TextSize = 52, TextColor3 = C.TextDim, Position = UDim2.fromOffset(0, -3), ZIndex = 14, Stroke = 3.5, Parent = disc })
+		-- a drawn + (dead centre in the disc; a text + sits low)
+		local plusBars: { Frame } = {}
+		for _, bar in ipairs(Kit.plusGlyph(disc, 30, 14, C.TextDim):GetChildren()) do
+			if bar.Name == "Bar" then
+				table.insert(plusBars, bar :: Frame)
+			end
+		end
 		Kit.text({
 			Name = "Title",
 			Text = "OPEN SLOT",
@@ -392,14 +401,18 @@ return function(ctx: any)
 			local b = p :: TextButton
 			b.MouseEnter:Connect(function()
 				tween(ds, 0.2, { Color = TEAL })
-				tween(plus, 0.2, { TextColor3 = TEAL })
+				for _, bar in ipairs(plusBars) do
+					tween(bar, 0.2, { BackgroundColor3 = TEAL })
+				end
 				if st then
 					tween(st, 0.2, { Color = TEAL_D })
 				end
 			end)
 			b.MouseLeave:Connect(function()
 				tween(ds, 0.2, { Color = C.Navy500 })
-				tween(plus, 0.2, { TextColor3 = C.TextDim })
+				for _, bar in ipairs(plusBars) do
+					tween(bar, 0.2, { BackgroundColor3 = C.TextDim })
+				end
 				if st then
 					tween(st, 0.2, { Color = C.Navy500 })
 				end
@@ -433,7 +446,8 @@ return function(ctx: any)
 		end,
 	})
 	local infoPlate = Kit.plate({ Name = "HowTo", Parent = leaveHolder, Size = UDim2.fromScale(1, 1), Radius = 22, Stroke = 3, ZIndex = 12, Gradient = { C.Navy700, C.Navy900 } })
-	Kit.image({ Image = Theme.Icon.Info, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(46, 46), ZIndex = 13, Parent = infoPlate })
+	local infoIcon = Kit.image({ Image = Theme.Icon.Info, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 9, 0.5, 0), Size = UDim2.fromOffset(46, 46), ZIndex = 13, Parent = infoPlate })
+	Kit.snapEnd(infoIcon, 9) -- 9 from the left, top and bottom
 	Kit.text({
 		Text = "The leader walks into a portal and the whole party queues together.",
 		TextSize = 16,
@@ -465,16 +479,17 @@ return function(ctx: any)
 		ZIndex = 12,
 		Gradient = { C.Night, C.Navy900 },
 	})
-	local lens = new("Frame", { Name = "Lens", BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 13), Size = UDim2.fromOffset(20, 20), ZIndex = 13, Parent = search })
+	-- magnifier drawn from shapes, as far in from the left as from the top and bottom
+	local lens = new("Frame", { Name = "Lens", BackgroundTransparency = 1, Position = UDim2.fromOffset(13, 13), Size = UDim2.fromOffset(20, 20), ZIndex = 13, Parent = search })
 	Kit.pill(lens)
 	Kit.stroke(lens, 3.5, C.TextSoft, 0, true)
-	local handle = new("Frame", { Name = "Handle", BackgroundColor3 = C.TextSoft, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(38, 36), Size = UDim2.fromOffset(11, 4), Rotation = 45, ZIndex = 13, Parent = search })
+	local handle = new("Frame", { Name = "Handle", BackgroundColor3 = C.TextSoft, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(35, 36), Size = UDim2.fromOffset(11, 4), Rotation = 45, ZIndex = 13, Parent = search })
 	Kit.pill(handle)
 	searchBox = new("TextBox", {
 		Name = "Box",
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(52, 0),
-		Size = UDim2.new(1, -66, 1, 0),
+		Position = UDim2.fromOffset(49, 0),
+		Size = UDim2.new(1, -63, 1, 0),
 		FontFace = Theme.Font.Heavy,
 		TextSize = 21,
 		TextColor3 = C.Text,
@@ -596,6 +611,7 @@ return function(ctx: any)
 		Kit.bevel(r, 20, 3, 14)
 		local av = Q.Avatar(r, v, 68, TEAL, 15)
 		av.Frame.Position = UDim2.fromOffset(12, 12)
+		Kit.snapEnd(av.Frame, 12) -- the same gap to the row's left, top and bottom edges
 		local name = Kit.text({
 			Name = "PlayerName",
 			Text = tostring(v.DisplayName),
@@ -792,6 +808,7 @@ return function(ctx: any)
 		new("UIGradient", { Rotation = 0, Transparency = NumberSequence.new(0.72, 1), Parent = wash })
 		local b = Q.Badge(p, r.Mode, 52, 13)
 		b.Frame.Position = UDim2.fromOffset(10, 10)
+		Kit.snapEnd(b.Frame, 10) -- the same gap to the card's left, top and bottom edges
 		Kit.text({
 			Name = "Title",
 			Text = r.Title,
@@ -1036,6 +1053,7 @@ return function(ctx: any)
 		local av = Q.Avatar(b, v, 52, if isLeader then C.Gold else TEAL, 19)
 		av.Frame.AnchorPoint = Vector2.new(0, 0.5)
 		av.Frame.Position = UDim2.new(0, 5, 0.5, 0)
+		Kit.snapEnd(av.Frame, 5) -- centred in the pill's round end
 		if isLeader then
 			Kit.image({ Name = "Crown", Image = Theme.Icon.Crown, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(11, 3), Size = UDim2.fromOffset(32, 32), Rotation = -35, ZIndex = 22, Parent = b })
 		end

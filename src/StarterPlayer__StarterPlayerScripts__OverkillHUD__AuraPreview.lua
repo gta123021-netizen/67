@@ -272,10 +272,11 @@ return function(ctx: any)
 		local vignette = new("Frame", { Name = "Vignette", BackgroundColor3 = C.Night, BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0.4, 0), ZIndex = 10, Parent = skin })
 		Kit.gradient(vignette, C.Night, C.Night, 90, 1, 0.3)
 		-- heading: icon + title + a hairline
-		local iconHolder = new("Frame", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(24, 42), Size = UDim2.fromOffset(40, 40), ZIndex = 12, Parent = holder })
+		-- heading icon: as far in from the panel's left edge as from its top edge
+		local iconHolder = new("Frame", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(22, 42), Size = UDim2.fromOffset(40, 40), ZIndex = 12, Parent = holder })
 		icon(iconHolder)
-		Kit.text({ Name = "Title", Text = title, TextSize = 30, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(74, 42), Size = UDim2.new(1, -98, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Stroke = 3.5, Parent = holder })
-		local line = new("Frame", { Name = "Line", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, Position = UDim2.fromOffset(24, 76), Size = UDim2.new(1, -48, 0, 3), ZIndex = 11, Parent = holder })
+		Kit.text({ Name = "Title", Text = title, TextSize = 30, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(72, 42), Size = UDim2.new(1, -94, 0, 36), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 12, Stroke = 3.5, Parent = holder })
+		local line = new("Frame", { Name = "Line", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 76), Size = UDim2.new(1, -44, 0, 3), ZIndex = 11, Parent = holder })
 		Kit.pill(line)
 		local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 86), Size = UDim2.new(1, 0, 1, -86), ZIndex = 11, Parent = holder })
 		return { Root = holder, Scale = scale, Content = content }
@@ -312,37 +313,23 @@ return function(ctx: any)
 	-- title plate (the windows' plate, with an eye badge for the icon)
 	---------------------------------------------------------------------------
 	local TITLE = "AURA PREVIEW"
-	local head = new("Frame", {
-		Name = "TitlePlate",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0, HEAD_Y),
-		Size = UDim2.fromOffset(Kit.textWidth(TITLE, 44) + 84 + 30, 82),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		ZIndex = 20,
+	-- the shared title plate (the windows' plate): the eye tile evenly inset on three sides
+	local headPlate = Kit.titlePlate({
 		Parent = root,
+		Title = TITLE,
+		TextSize = 44,
+		Height = 82,
+		Accent = ACCENT,
+		Deep = ACCENT_DEEP,
+		Position = UDim2.new(0.5, 0, 0, HEAD_Y),
+		ZIndex = 20,
+		Glyph = function(tile: Frame, z: number)
+			Kit.eyeGlyph(tile, 42, z, C.Pink)
+		end,
 	})
+	local head = headPlate.Plate
 	local headScale = Kit.fx(head)
-	Kit.corner(head, 24)
-	Kit.stroke(head, 5, C.Ink, 0, true)
-	Kit.gradient(head, Kit.lighten(ACCENT, 0.15), ACCENT_DEEP, 90)
-	local headInner = new("Frame", { Name = "Inner", BackgroundColor3 = C.Night, Position = UDim2.fromOffset(6, 6), Size = UDim2.new(1, -12, 1, -12), ZIndex = 20, Parent = head })
-	Kit.corner(headInner, 19)
-	Kit.gradient(headInner, C.Navy800, C.Night, 90)
-	local headSheen = Kit.addShine(headInner, 19)
-	Kit.text({ Name = "Title", Text = TITLE, TextSize = 44, Position = UDim2.fromOffset(84, 0), Size = UDim2.new(1, -84 - 24, 1, -4), ZIndex = 22, Stroke = 4.5, Parent = head })
-	local badge = new("Frame", {
-		Name = "Badge",
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(41, 41),
-		Size = UDim2.fromOffset(62, 62),
-		ZIndex = 23,
-		Parent = head,
-	})
-	Kit.corner(badge, 16)
-	Kit.stroke(badge, 3.5, C.Ink, 0, true)
-	Kit.gradient(badge, Kit.lighten(ACCENT, 0.2), ACCENT_DEEP, 90)
-	Kit.eyeGlyph(badge, 42, 24, C.Pink)
+	local headSheen = headPlate.Sheen
 
 	local closeApi = Kit.closeButton({ Name = "Back", Parent = root, Position = UDim2.new(1, -62, 0, HEAD_Y), Size = 68, ZIndex = 30 })
 
@@ -361,7 +348,7 @@ return function(ctx: any)
 	-- "1 / 3" counter on the heading, like the party size chip
 	local countChip, countLabel = chip(list.Root, ("1 / %d"):format(#ITEMS), C.Navy500, C.Navy700, 30, 15, 12)
 	countChip.AnchorPoint = Vector2.new(1, 0.5)
-	countChip.Position = UDim2.new(1, -24, 0, 42)
+	countChip.Position = UDim2.new(1, -22, 0, 42) -- as far in as the heading icon on the left
 
 	local rows: { any } = {}
 	for i, item in ipairs(ITEMS) do
@@ -383,7 +370,8 @@ return function(ctx: any)
 		local grad = Kit.gradient(face, C.Navy600, C.Navy800, 90)
 		local sc = Kit.fx(face)
 		-- the aura's colour as a glowing orb with a rarity ring
-		local ring = new("Frame", { Name = "Ring", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 14, 0.5, 0), Size = UDim2.fromOffset(80, 80), ZIndex = 13, Parent = face })
+		local ring = new("Frame", { Name = "Ring", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(80, 80), ZIndex = 13, Parent = face })
+		Kit.snapEnd(ring, 16) -- the same gap to the row's left, top and bottom edges
 		Kit.pill(ring)
 		Kit.stroke(ring, 3, r.Color, 0)
 		local orb = new("Frame", { Name = "Orb", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(64, 64), ZIndex = 14, Parent = ring })

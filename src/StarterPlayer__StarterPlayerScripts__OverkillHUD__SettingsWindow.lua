@@ -44,13 +44,14 @@ return function(ctx: any)
 			Name = "Disc",
 			Parent = r,
 			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0, 14, 0.5, 0),
+			Position = UDim2.new(0, 13, 0.5, 0),
 			Size = UDim2.fromOffset(56, 56),
 			Radius = UDim.new(1, 0),
 			Stroke = 3.5,
 			ZIndex = 13,
 			Gradient = { Kit.lighten(color, 0.1), deep },
 		})
+		Kit.snapEnd(disc, 13) -- the same gap to the row's left, top and bottom edges
 		if icon then
 			Kit.image({ Image = icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(38, 38), ZIndex = 14, Parent = disc })
 		else
@@ -72,6 +73,11 @@ return function(ctx: any)
 			Parent = r,
 		})
 		return r, subLabel
+	end
+
+	-- "57%" (string.format's %d cuts 0.57 * 100 = 56.999... down to 56)
+	local function pct(v: number): string
+		return ("%d%%"):format(math.floor(v * 100 + 0.5))
 	end
 
 	local function valueLabel(parent: GuiObject): TextLabel
@@ -179,7 +185,7 @@ return function(ctx: any)
 		Value = settings.Music,
 		OnChanged = function(v)
 			settings.Music = math.floor(v * 100 + 0.5) / 100
-			musicVal.Text = ("%d%%"):format(settings.Music * 100)
+			musicVal.Text = pct(settings.Music)
 			apply()
 		end,
 		OnReleased = save,
@@ -197,7 +203,7 @@ return function(ctx: any)
 		Value = settings.Sfx,
 		OnChanged = function(v)
 			settings.Sfx = math.floor(v * 100 + 0.5) / 100
-			sfxVal.Text = ("%d%%"):format(settings.Sfx * 100)
+			sfxVal.Text = pct(settings.Sfx)
 			apply()
 		end,
 		OnReleased = function()
@@ -219,7 +225,7 @@ return function(ctx: any)
 		Value = (settings.Ui - 0.8) / 0.4,
 		OnChanged = function(v)
 			settings.Ui = math.floor((0.8 + v * 0.4) * 100 + 0.5) / 100
-			uiVal.Text = ("%d%%"):format(settings.Ui * 100)
+			uiVal.Text = pct(settings.Ui)
 		end,
 		OnReleased = function()
 			apply()
@@ -490,11 +496,11 @@ return function(ctx: any)
 
 	local function showAll()
 		musicSlider.Set(settings.Music, true)
-		musicVal.Text = ("%d%%"):format(settings.Music * 100)
+		musicVal.Text = pct(settings.Music)
 		sfxSlider.Set(settings.Sfx, true)
-		sfxVal.Text = ("%d%%"):format(settings.Sfx * 100)
+		sfxVal.Text = pct(settings.Sfx)
 		uiSlider.Set((settings.Ui - 0.8) / 0.4, true)
-		uiVal.Text = ("%d%%"):format(settings.Ui * 100)
+		uiVal.Text = pct(settings.Ui)
 		auraToggle.Set(settings.AuraOn, true)
 		othersToggle.Set(settings.OthersAuras, true)
 		for _, kr in ipairs(keyRows) do

@@ -204,17 +204,19 @@ for _, child in ipairs(portals:GetChildren()) do
 		add(child)
 	end
 end
+local refresh: () -> ()
 portals.ChildAdded:Connect(function(child)
 	if child.Name:sub(1, 12) == "PortalTitle_" then
 		task.wait()
 		add(child)
+		refresh() -- a sign that streams in late shows the live count straight away
 	end
 end)
 
 ---------------------------------------------------------------------------
 -- live state
 ---------------------------------------------------------------------------
-local function refresh()
+function refresh()
 	local mine = player:GetAttribute("OKQueue")
 	for id, s in pairs(signs) do
 		local m = Config.Modes[id]

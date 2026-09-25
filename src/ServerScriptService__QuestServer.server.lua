@@ -215,10 +215,10 @@ local function key(player: Player): string
 	return "u_" .. player.UserId
 end
 
-local function save(player: Player)
+local function save(player: Player): boolean
 	local prof = profiles[player]
 	if not prof or not prof.Loaded or not prof.CanSave or not store then
-		return
+		return false
 	end
 	prof.Data.Wallet.Coins = getStat(player, "Coins").Value
 	prof.Data.Wallet.XP = getStat(player, "XP").Value
@@ -231,6 +231,7 @@ local function save(player: Player)
 	if not ok then
 		warn("[Quests] save failed for", player.Name, err)
 	end
+	return ok
 end
 
 local function load(player: Player)
@@ -376,6 +377,39 @@ ClientReport.OnServerEvent:Connect(function(player: Player, kind: any)
 	end
 end)
 
+-- coin packs (ShopServer): the coins and the purchase id are saved together in one write, so a
+-- Robux purchase is granted exactly once, even when Roblox retries the receipt or the server
+-- stops right after. Returns (saved, fresh): fresh = false when this purchase was already paid out.
+local grant = ServerStorage:FindFirstChild("QuestGrantCoins") or Instance.new("BindableFunction")
+grant.Name = "QuestGrantCoins"
+grant.Parent = ServerStorage
+;(grant :: BindableFunction).OnInvoke = function(player: any, purchaseId: any, amount: any): (boolean, boolean)
+	if not (typeof(player) == "Instance" and player:IsA("Player")) or type(purchaseId) ~= "string" then
+		return false, false
+	end
+	local prof = waitLoaded(player)
+	if not prof then
+		return false, false
+	end
+	local receipts = prof.Data.Receipts
+	if type(receipts) ~= "table" then
+		receipts = {}
+		prof.Data.Receipts = receipts
+	end
+	local fresh = table.find(receipts, purchaseId) == nil
+	if fresh then
+		getStat(player, "Coins").Value += math.max(0, math.floor(tonumber(amount) or 0))
+		table.insert(receipts, purchaseId)
+		while #receipts > 50 do
+			table.remove(receipts, 1)
+		end
+	end
+	if not store then
+		return true, fresh -- no DataStore (Studio without API access): granted for this session
+	end
+	return save(player), fresh
+end
+
 -- other server scripts can report progress: ServerStorage.QuestProgress:Fire(player, "Kills", 1)
 local hook = ServerStorage:FindFirstChild("QuestProgress") or Instance.new("BindableEvent")
 hook.Name = "QuestProgress"
@@ -409,12 +443,21 @@ Players.PlayerRemoving:Connect(function(player)
 	profiles[player] = nil
 end)
 
+-- the server is shutting down: save everyone and wait until every save has finished (Roblox
+-- allows up to 30 seconds; a fixed 2 second wait could cut a slow save off)
 game:BindToClose(function()
-	local threads = {}
+	local left = 0
 	for player in pairs(profiles) do
-		table.insert(threads, task.spawn(save, player))
+		left += 1
+		task.spawn(function()
+			save(player)
+			left -= 1
+		end)
 	end
-	task.wait(2)
+	local t0 = os.clock()
+	while left > 0 and os.clock() - t0 < 25 do
+		task.wait(0.1)
+	end
 end)
 
 
