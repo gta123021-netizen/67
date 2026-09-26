@@ -182,9 +182,20 @@ function Env.heightAt(x: number, z: number): number
 	return if Env.groundAt then Env.groundAt(x, z) else Env.groundY
 end
 
-function Env.addBox(name, min, max, canCollide)
-	table.insert(boxes, { Name = name, Min = min, Max = max, CanCollide = canCollide ~= false })
+local function boxIsA(self, c)
+	return c == "BasePart" or c == "Part"
 end
+-- a solid box (a wall, a step, a crate...): opts.Transparency, opts.Material (for ray results)
+function Env.addBox(name, min, max, canCollide, opts)
+	opts = opts or {}
+	local b = { Name = name, Min = min, Max = max, CanCollide = canCollide ~= false, Transparency = opts.Transparency or 0, Material = opts.Material or roblox.Enum.Material.Plastic, IsA = boxIsA }
+	table.insert(boxes, b)
+	return b
+end
+local groundInst = { Name = "Ground", ClassName = "Terrain", Transparency = 0, CanCollide = true, IsA = function(_, c)
+	return c == "Terrain" or c == "BasePart"
+end }
+Env.groundInst = groundInst
 
 local function rayBox(o, d, b)
 	local tmin, tmax = 0, 1
@@ -215,7 +226,7 @@ local function rayBox(o, d, b)
 	return tmin, n or V3.new(0, 1, 0)
 end
 
-local workspace = { Name = "Workspace", _attrs = {} }
+local workspace = { Name = "Workspace", _attrs = {}, Gravity = 196.2 }
 function workspace:GetAttribute(k)
 	return self._attrs[k]
 end
@@ -288,7 +299,7 @@ function workspace:Raycast(o, d, params)
 	if gt then
 		local p = o + d * gt
 		if not inRegion(Env.voids, p) then
-			best, bestN, bestInst = gt, gn, { Name = "Ground" }
+			best, bestN, bestInst = gt, gn, groundInst
 			if inRegion(Env.waters, p) then
 				mat = roblox.Enum.Material.Water
 			end
@@ -305,8 +316,8 @@ function workspace:Raycast(o, d, params)
 	if not best then
 		return nil
 	end
-	if bestInst.Name ~= "Ground" then
-		mat = roblox.Enum.Material.Plastic
+	if bestInst ~= groundInst then
+		mat = bestInst.Material or roblox.Enum.Material.Plastic
 	end
 	return { Position = o + d * best, Normal = bestN, Instance = bestInst, Material = mat }
 end
@@ -529,6 +540,10 @@ local moduleFiles = {
 	["ReplicatedStorage/Combat/CombatPaths"] = "ReplicatedStorage__Combat__CombatPaths.lua",
 	["ReplicatedStorage/Combat/HitDetect"] = "ReplicatedStorage__Combat__HitDetect.lua",
 	["ReplicatedStorage/Combat/CombatChoreo"] = "ReplicatedStorage__Combat__CombatChoreo.lua",
+	["ReplicatedStorage/Combat/CombatBlood"] = "ReplicatedStorage__Combat__CombatBlood.lua",
+	["ReplicatedStorage/Combat/CombatShatter"] = "ReplicatedStorage__Combat__CombatShatter.lua",
+	["ReplicatedStorage/Combat/CombatVFX"] = "ReplicatedStorage__Combat__CombatVFX.lua",
+	["ReplicatedStorage/Combat/CombatFX"] = "ReplicatedStorage__Combat__CombatFX.lua",
 	["ServerScriptService/Combat/CombatService"] = "ServerScriptService__Combat__CombatService.lua",
 	["ReplicatedStorage/OverkillUI/Theme"] = "ReplicatedStorage__OverkillUI__Theme.lua",
 }
@@ -591,6 +606,9 @@ function game:GetService(name)
 	return services[name] or error("no service " .. name)
 end
 Env.game = game
+Env.services = services
+-- more globals for the modules (the client harness adds a real-ish Instance tree, TweenService...)
+Env.extraGlobals = {}
 
 local RaycastParams = {}
 function RaycastParams.new()
@@ -643,6 +661,11 @@ function loadModule(path)
 		os = setmetatable({ clock = function()
 			return clock
 		end }, { __index = os }),
+		NumberSequence = roblox.NumberSequence,
+		NumberSequenceKeypoint = roblox.NumberSequenceKeypoint,
+		ColorSequence = roblox.ColorSequence,
+		ColorSequenceKeypoint = roblox.ColorSequenceKeypoint,
+		NumberRange = roblox.NumberRange,
 		require = function(inst)
 			return loadModule(inst.__path)
 		end,
@@ -650,6 +673,9 @@ function loadModule(path)
 			print("[warn]", ...)
 		end,
 	}, { __index = _G })
+	for k, v in pairs(Env.extraGlobals) do
+		rawset(env, k, v)
+	end
 	local src = fs.readFile(SRC .. file)
 	local fn = luau.load(src, { debugName = path, environment = env })
 	local value = fn()

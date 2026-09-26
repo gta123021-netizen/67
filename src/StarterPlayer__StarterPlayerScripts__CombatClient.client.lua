@@ -55,6 +55,7 @@ local FX = require(CombatFolder:WaitForChild("CombatFX"))
 local Paths = require(CombatFolder:WaitForChild("CombatPaths"))
 local Choreo = require(CombatFolder:WaitForChild("CombatChoreo"))
 local HitDetect = require(CombatFolder:WaitForChild("HitDetect"))
+local Gore = require(CombatFolder:WaitForChild("CombatGore"))
 local Request = CombatFolder:WaitForChild("CombatRequest") :: RemoteEvent
 local Event = CombatFolder:WaitForChild("CombatEvent") :: RemoteEvent
 
@@ -656,6 +657,13 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	hitStop(a, hs)
 	if not guarded and not launched and a.Slot > 0 and def.Class ~= "Dash" then
 		startCarry(a, hs)
+	end
+	-- an NPC's body comes apart on the frame of the blow that earns it
+	if not guarded then
+		local hum = victim:FindFirstChildOfClass("Humanoid")
+		if hum then
+			Gore.Hit(victim, hum.Health - def.Damage, drive)
+		end
 	end
 end
 
@@ -1339,6 +1347,9 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			-- (the one thing this screen can get wrong: the guard went up just before the blow)
 			FX.Sound("GuardBreak", data.P, 1)
 		end
+		if type(data.H) == "number" and victim then
+			Gore.Hit(victim, data.H, if typeof(data.DV) == "Vector3" then data.DV else nil)
+		end
 		if not ctx then
 			return
 		end
@@ -1827,6 +1838,7 @@ local function setup(char: Model)
 end
 
 player.CharacterAdded:Connect(setup)
+Gore.Start()
 player.CharacterRemoving:Connect(function(char)
 	if ctx and ctx.Char == char then
 		teardown()

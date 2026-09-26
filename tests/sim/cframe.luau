@@ -80,6 +80,16 @@ function CF.Angles(rx, ry, rz)
 	return rotX(rx) * rotY(ry) * rotZ(rz)
 end
 
+-- a rotation of `angle` radians about the unit `axis` (Rodrigues)
+function CF.fromAxisAngle(axis, angle)
+	local u = axis.Unit
+	local c, s = math.cos(angle), math.sin(angle)
+	local function r(v)
+		return v * c + u:Cross(v) * s + u * (u:Dot(v) * (1 - c))
+	end
+	return make(V3.zero, r(X), r(Y), r(Z))
+end
+
 local function rot(self, v)
 	return self._x * v.X + self._y * v.Y + self._z * v.Z
 end

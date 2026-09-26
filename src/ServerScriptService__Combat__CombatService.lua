@@ -946,6 +946,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	if data.KT == 0 and data.KB.Y > 0 and not data.RD then
 		data.KT = 0.01 -- vertical-only kick still goes to the owner
 	end
+	data.H = vic.Hum.Health -- (what the blow left: the gore on an NPC's body follows it)
 	Event:FireAllClients("Hit", data)
 	return data
 end

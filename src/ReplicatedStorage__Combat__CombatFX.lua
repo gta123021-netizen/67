@@ -718,7 +718,7 @@ function FX.Connect(info: any)
 		local tier = if info.Launched and def.Id ~= "Sweep" then "Finisher" else def.Impact or "Light"
 		FX.Impact(at, tier, throw)
 		FX.Sound(IMPACT_SOUND[def.Id] or (if heavy then "HeavyHit" else "Hit"), at, if info.Immune then 0.97 else 1)
-		Blood.Spray(at, throw, def.Blood or "Light", info.Victim)
+		Blood.Spray(at, drive, def.Blood or "Light", info.Victim, info.DirSign)
 		if info.Launched then
 			local p = at
 			task.delay(hs + 0.35, function()
