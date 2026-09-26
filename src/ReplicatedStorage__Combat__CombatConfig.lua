@@ -552,7 +552,13 @@ Config.Blood = {
 }
 
 ---------------------------------------------------------------------------
--- gore (CombatGore): the damage an NPC has taken, on its body - never on a player
+-- gore (CombatGore + CombatService): the damage a fighter has taken, on its body - NPCs and players
+-- alike. A limb once lost stays lost until the fighter respawns (the server keeps the stage on the
+-- character as its GoreStage attribute), and losing arms matters:
+--   one arm    every blow hurts more (OneArm.DamageTaken), and a block stops much less of it
+--              (OneArm.GuardChip times the chip damage)
+--   no arms    no guard at all (a block can't go up; one already up drops), and blows hurt more still
+--   Players     false: only NPCs come apart
 --   Stages      health shares at which each stage plays, in order: the right arm torn off, the
 --               left arm, the head burst (the last one on the killing blow only)
 --   GibLife     seconds a severed arm / chunk lies on the ground before it fades away
@@ -563,7 +569,10 @@ Config.Blood = {
 ---------------------------------------------------------------------------
 Config.Gore = {
 	Enabled = true,
+	Players = true,
 	Stages = { 0.75, 0.5, 0 },
+	OneArm = { DamageTaken = 1.15, GuardChip = 2 },
+	NoArms = { DamageTaken = 1.25 },
 	GibLife = 10,
 	BleedTime = 4,
 	Stagger = 0.14,
@@ -782,6 +791,43 @@ for name, a in pairs(Config.Attacks) do
 	a.Rank = if a.Class == "Light" then 1 elseif a.Class == "Heavy" then 3 elseif a.Class == "Dash" then 4 else 5
 	-- how far a clean hit slides the victim (studs)
 	a.PushDistance = (a.Knock.Back or 0) * (a.KnockTime or 0) * Config.PushShare
+end
+
+-- the gore stage this much health has earned (0 whole .. #Stages the head; the last only at 0)
+function Config.GoreStageFor(health: number, max: number): number
+	if max <= 0 then
+		return 0
+	end
+	local stages = Config.Gore.Stages
+	local f = health / max
+	local n = 0
+	for i, st in ipairs(stages) do
+		if (i == #stages and health <= 0) or (i < #stages and f <= st) then
+			n = i
+		end
+	end
+	return n
+end
+
+-- arms a fighter still has at a gore stage (the right goes first, then the left)
+function Config.ArmsAt(stage: number?): number
+	return math.max(0, 2 - math.min(stage or 0, 2))
+end
+
+-- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the
+-- chip that gets through a guard). The server deals it; the attacker's screen predicts it the same way
+function Config.GoreDamage(base: number, stage: number?, blocked: boolean?): number
+	local G = Config.Gore
+	if not G.Enabled then
+		return base
+	end
+	local arms = Config.ArmsAt(stage)
+	if arms == 2 then
+		return base
+	elseif arms == 1 then
+		return base * G.OneArm.DamageTaken * (if blocked then G.OneArm.GuardChip else 1)
+	end
+	return base * G.NoArms.DamageTaken
 end
 
 -- how `to` enters after `from` (nil = from locomotion / outside a chain): (cross-fade, entry clip time)

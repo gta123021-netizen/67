@@ -237,7 +237,7 @@ end
 -- can overlap (a flurry of hits) and a new one takes the oldest voice. Each play gets a serial, so a
 -- voice re-used before its old envelope finished is never cut by that old envelope.
 local POOL = 5
-type Voice = { A: Attachment, S: Sound, Serial: number }
+type Voice = { A: Attachment, S: Sound, Serial: number, Fade: Tween? }
 local pools: { [string]: { Voices: { Voice }, Next: number } } = {}
 
 local function sfxGroup(): SoundGroup?
@@ -269,7 +269,7 @@ local function newVoice(layer: any): Voice
 		d.Parent = snd
 	end
 	snd.Parent = a
-	return { A = a, S = snd, Serial = 0 }
+	return { A = a, S = snd, Serial = 0, Fade = nil }
 end
 
 local function voice(key: string, layer: any): Voice
@@ -295,6 +295,15 @@ local function playLayer(key: string, layer: any, pos: Vector3, pitch: number)
 	v.Serial += 1
 	local serial = v.Serial
 	local snd = v.S
+	-- (a voice taken back mid-fade: its old fade would keep turning the new sound down)
+	if v.Fade then
+		v.Fade:Cancel()
+		v.Fade = nil
+	end
+	-- (the HUD's SFX group may only exist after the first sounds were made)
+	if not snd.SoundGroup then
+		snd.SoundGroup = sfxGroup()
+	end
 	v.A.WorldPosition = pos
 	local spread = layer.Var or 0.05
 	snd.PlaybackSpeed = (layer.Speed or 1) * pitch * (1 + (math.random() * 2 - 1) * spread)
@@ -308,6 +317,7 @@ local function playLayer(key: string, layer: any, pos: Vector3, pitch: number)
 			end
 			local fade = layer.Fade or 0.06
 			local tw = TweenService:Create(snd, TweenInfo.new(fade, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Volume = 0 })
+			v.Fade = tw
 			tw:Play()
 			task.delay(fade, function()
 				if v.Serial == serial then
@@ -496,6 +506,10 @@ function FX.LimbTrail(char: Model, limbName: string, duration: number, style: st
 	if not (limb and limb:IsA("BasePart")) then
 		return
 	end
+	-- (a limb that has been torn off leaves no trail)
+	if limb.Transparency >= 0.99 or limb.LocalTransparencyModifier >= 0.99 then
+		return
+	end
 	local a0 = Instance.new("Attachment")
 	a0.Name = "CombatTrail0"
 	a0.Position = Vector3.new(0, -0.35, 0)
@@ -548,14 +562,28 @@ function FX.GuardBreak(char: Model, at: Vector3, attacker: Model?)
 	end
 end
 
-function FX.Damage(victim: Model, amount: number, kind: string, attacker: Model?)
+local function callout(): any
 	if not Callout then
 		pcall(function()
 			Callout = require(CombatFolder:WaitForChild("CombatCallout", 10))
 		end)
 	end
-	if Callout and Callout.Damage then
-		Callout.Damage(victim, amount, kind, attacker)
+	return Callout
+end
+
+function FX.Damage(victim: Model, amount: number, kind: string, attacker: Model?)
+	local c = callout()
+	if c and c.Damage then
+		c.Damage(victim, amount, kind, attacker)
+	end
+end
+
+-- the server's number for a blow this screen already stamped on its own frame: only the difference
+-- (the total counts to it; no second punch)
+function FX.DamageCorrect(victim: Model?, delta: number)
+	local c = callout()
+	if victim and c and c.Correct then
+		c.Correct(victim, delta)
 	end
 end
 
@@ -569,6 +597,10 @@ end
 type Impulse = { Dir: Vector3, Kick: number, Up: number, Roll: number, Push: number, T0: number, Time: number, Rumble: number, RumbleTime: number, Seed: number }
 local impulses: { Impulse } = {}
 local camBound = false
+-- the view the camera scripts left this frame, and what the kick made of it: a camera the scripts
+-- don't rewrite every frame (a Fixed one) gets its own view back, so kicks never add up
+local camBase: CFrame? = nil
+local camSet: CFrame? = nil
 
 -- shift lock's over-the-shoulder offset (the impulses never touch it: they move the view itself)
 function FX.SetCameraBase(hum: Humanoid?, offset: Vector3)
@@ -593,12 +625,19 @@ local function cameraStep()
 			camBound = false
 			RunService:UnbindFromRenderStep("OverkillCombatCamera")
 		end
+		if cam and camSet and camBase and cam.CFrame == camSet then
+			cam.CFrame = camBase
+		end
+		camBase, camSet = nil, nil
 		return
 	end
 	if not cam or cam.CameraType == Enum.CameraType.Scriptable then
 		table.clear(impulses)
+		camBase, camSet = nil, nil
 		return
 	end
+	-- (untouched since our last kick: the scripts didn't rewrite it - start from their view again)
+	local base = if camSet and camBase and cam.CFrame == camSet then camBase else cam.CFrame
 	local move, roll, push = Vector3.zero, 0, 0
 	for i = #impulses, 1, -1 do
 		local im = impulses[i]
@@ -621,7 +660,9 @@ local function cameraStep()
 			end
 		end
 	end
-	cam.CFrame = CFrame.new(move) * cam.CFrame * CFrame.Angles(0, 0, math.rad(roll)) * CFrame.new(0, 0, -push)
+	local kicked = CFrame.new(move) * base * CFrame.Angles(0, 0, math.rad(roll)) * CFrame.new(0, 0, -push)
+	cam.CFrame = kicked
+	camBase, camSet = base, kicked
 end
 
 --[[ profile = a Config.Camera entry name; dir = the way the blow travels (world). The kick knocks

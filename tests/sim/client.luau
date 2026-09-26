@@ -25,7 +25,7 @@ return function(Env)
 		Folder = "Instance", PointLight = "Instance", Trail = "Instance", Beam = "Instance", Sound = "Instance",
 		EqualizerSoundEffect = "Instance", DistortionSoundEffect = "Instance", Camera = "Instance", Instance = nil,
 		UnionOperation = "BasePart", Weld = "JointInstance", Motor6D = "JointInstance", JointInstance = "Instance",
-		WeldConstraint = "Instance", BallSocketConstraint = "Instance", Humanoid = "Instance", Accessory = "Instance",
+		WeldConstraint = "Instance", BallSocketConstraint = "Constraint", RigidConstraint = "Constraint", Constraint = "Instance", Humanoid = "Instance", Accessory = "Instance",
 		Shirt = "Clothing", Pants = "Clothing", Clothing = "Instance", SurfaceAppearance = "Instance", Bone = "Attachment",
 	}
 	local DEFAULTS = {
@@ -143,6 +143,9 @@ return function(Env)
 		end
 	end
 	function proto:Clone()
+		if self._p.Archivable == false then
+			return nil -- (Roblox: an instance marked not Archivable is never copied)
+		end
 		local c = Client.new(self.ClassName)
 		for k, v in pairs(self._p) do
 			if k ~= "Parent" then
@@ -159,7 +162,21 @@ return function(Env)
 	end
 	function proto:SetAttribute(k, v)
 		self._p.Attributes = self._p.Attributes or {}
+		local was = self._p.Attributes[k]
 		self._p.Attributes[k] = v
+		local sig = self._p.AttrSignals and self._p.AttrSignals[k]
+		if sig and was ~= v then
+			sig:Fire()
+		end
+	end
+	function proto:GetAttributeChangedSignal(k)
+		self._p.AttrSignals = self._p.AttrSignals or {}
+		local sig = self._p.AttrSignals[k]
+		if not sig then
+			sig = Env.Signal.new()
+			self._p.AttrSignals[k] = sig
+		end
+		return sig
 	end
 	Client.emits = {}
 	function proto:Emit(n)

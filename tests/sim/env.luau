@@ -341,6 +341,7 @@ function Env.character(name, pos, look)
 	local attrs = {}
 	local char = { Name = name, ClassName = "Model", Parent = workspace, IsA = isA }
 	char.AncestryChanged = Signal.new()
+	char.ChildAdded = Signal.new()
 	char.DescendantAdded = Signal.new()
 	char._attrs = attrs
 	function char:SetAttribute(k, v)
@@ -352,12 +353,13 @@ function Env.character(name, pos, look)
 	function char:GetAttributeChangedSignal()
 		return Signal.new()
 	end
-	local hum = { Name = "Humanoid", ClassName = "Humanoid", Health = 100, MaxHealth = 100, Parent = char, Died = Signal.new(), AutoRotate = true, IsA = isA }
+	local hum = { Name = "Humanoid", ClassName = "Humanoid", Health = 100, MaxHealth = 100, Parent = char, Died = Signal.new(), HealthChanged = Signal.new(), AutoRotate = true, IsA = isA }
 	function hum:TakeDamage(d)
 		if self.Health <= 0 then
 			return
 		end
 		self.Health = math.max(0, self.Health - d)
+		self.HealthChanged:Fire(self.Health)
 		if self.Health <= 0 then
 			self.Died:Fire()
 		end
@@ -385,11 +387,51 @@ function Env.character(name, pos, look)
 	function root:SetNetworkOwner() end
 	char.Humanoid = hum
 	char.HumanoidRootPart = root
+	-- the R6 limbs (what the server's limb rules look at: their transparency, what hangs on them)
+	local limbs = {}
+	local function attributes(t)
+		t._a = {}
+		function t:GetAttribute(k)
+			return self._a[k]
+		end
+		function t:SetAttribute(k, v)
+			self._a[k] = v
+		end
+		return t
+	end
+	Env.withAttributes = attributes
+	for _, n in ipairs({ "Torso", "Head", "Right Arm", "Left Arm", "Right Leg", "Left Leg" }) do
+		local kids = {}
+		limbs[n] = attributes({ Name = n, ClassName = "Part", Parent = char, Transparency = 0, IsA = isA, GetChildren = function()
+			return kids
+		end, _kids = kids })
+	end
+	local face = attributes({ Name = "face", ClassName = "Decal", Transparency = 0, IsA = function(_, c)
+		return c == "Decal"
+	end })
+	table.insert(limbs.Head._kids, face)
+	char.Limbs = limbs
+	char.Accessories = {}
 	function char:FindFirstChildOfClass(c)
 		return if c == "Humanoid" then hum else nil
 	end
 	function char:FindFirstChild(n)
-		return if n == "HumanoidRootPart" then root elseif n == "Humanoid" then hum else nil
+		return if n == "HumanoidRootPart" then root elseif n == "Humanoid" then hum else limbs[n]
+	end
+	function char:GetChildren()
+		local out = { hum, root }
+		for _, p in pairs(limbs) do
+			table.insert(out, p)
+		end
+		for _, a in ipairs(self.Accessories) do
+			table.insert(out, a)
+		end
+		for _, t in ipairs(self.Tools or {}) do
+			if t.Parent == self then
+				table.insert(out, t)
+			end
+		end
+		return out
 	end
 	function char:GetDescendants()
 		return { hum, root }
@@ -406,6 +448,9 @@ function Env.player(name, ping, char)
 	local p = { Name = name, ClassName = "Player", UserId = #Players._list + 1, Character = char, _ping = ping or 0.05, IsA = isA }
 	function p:GetNetworkPing()
 		return self._ping
+	end
+	function p:FindFirstChildOfClass()
+		return nil
 	end
 	table.insert(Players._list, p)
 	return p

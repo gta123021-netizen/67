@@ -35,6 +35,8 @@
   - `lune run tests/gore_test.luau` - the NPC gore: thresholds, order, NPC-only, heal restore, every piece's
     seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
   - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout
+  - `lune run tests/limbs_test.luau` - the server's limb rules: stages kept until respawn, lost limbs hidden,
+    one-arm damage and guard chip, no guard without arms, players too, tools stowed
   - `lune run tests/shatter_test.luau` - the Ground Smash visuals on flat ground, slopes, bumps, platforms,
     steps, walls, ledges, water; the place's effects only, smoke rolling outward; pools, overlap, the descent
   - `python3 tests/gore_kit_check.py <place.rbxl>` - CombatGore's measured kit offsets against the place
@@ -76,13 +78,24 @@
 - The gore's bleeding uses the same effects; its droplets are gone where they land. (Floor splatters and
   pools still exist behind `Config.Blood.Stains`, off by default.)
 
-### NPC gore (`CombatGore`) - NPCs only, never players
-- As an R6 NPC's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
-  (50%), and the killing blow bursts the head in a thick red mist.
+### Limbs and gore (`CombatGore`, `CombatService`) - NPCs and players
+- As a fighter's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
+  (50%), and the killing blow bursts the head in a thick red mist. Players too (`Config.Gore.Players`).
+- A lost limb stays lost until the fighter respawns. The server keeps the stage (the character's
+  `GoreStage` attribute, and on every Hit) and hides the lost limb for everyone; every client plays it on
+  the blow's own frame (the attacker from its own impact frame) with the torn limb thrown, the wounds and
+  the blood. A body already missing limbs when a client first sees it (a late join) just has its wounds.
+- Losing arms matters (`Config.Gore.OneArm` / `NoArms`, one shared rule `Config.GoreDamage`):
+  - one arm: every blow does x1.15, and a block lets through twice the chip
+  - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25
+  - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
+- Damage numbers are stamped on the attacker's own impact frame by the same rule the server deals
+  damage by; the server's number only corrects it if it differs (a blow it never confirms is taken back).
 - Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the
   shoulders keep the kit's stumps, pumping blood. The burst leaves the neck stump and skull base, with
   droplets, chunks and a fountain. The kit's torso hole and the smashed-jaw model are not used.
-- Works on any R6 NPC: every piece is fitted to that body's own part sizes and pose.
+- The HUD's portraits (profile, avatar previews) always show the fighter whole.
+- Works on any R6 body: every piece is fitted to that body's own part sizes and pose.
 
 ### HUD
 - The Ground Smash's slot and cooldown badge are gone from the hotbar: the smash is part of the basic

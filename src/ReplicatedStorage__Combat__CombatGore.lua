@@ -1,16 +1,21 @@
 --[[
 	CombatGore  (ReplicatedStorage.Combat.CombatGore)
-	Damage you can SEE on NPC fighters (never on players): as an NPC's health falls through
-	Config.Gore.Stages its body comes apart, in this order and never out of it -
+	Damage you can SEE on a fighter - NPCs and players alike (Config.Gore.Players): as its health
+	falls through Config.Gore.Stages its body comes apart, in this order and never out of it -
 	  1  the right arm is torn off at the shoulder (health <= 75%)
 	  2  the left arm (<= 50%)
 	  3  the killing blow bursts the head in a huge bloody mist (0)
-	A blow that takes several stages at once plays each of them in turn (a beat apart), in order.
+	A blow that takes several stages at once plays each of them in turn (a beat apart), in order. A
+	lost limb stays lost until the fighter respawns - and it matters: the server keeps the stage
+	(the character's GoreStage attribute), hides the lost limb for everyone and makes a one-armed
+	fighter easier to hurt and an armless one unable to block (Config.GoreDamage, CombatService).
 
-	Client-side and cosmetic: every client builds its own, from the same health every client sees
-	(the attacker from its own impact frame, everyone else from the server's Hit), so it costs the
-	server nothing and looks the same everywhere. Works for ANY R6 NPC: everything is found by the
-	R6 part names and fitted to that NPC's own part sizes, colours and clothing.
+	Here, on every client: the stage plays on the blow's own frame (the attacker from its own impact
+	frame, everyone else from the server's Hit, which carries the stage), with the torn limb thrown,
+	the wounds and the blood. A body that is already missing limbs when this client first sees it
+	(joining late, streamed in) just has its wounds, nothing replayed. Fighters outside the combat
+	(any other R6 NPC in the place) come apart by their own health the same way. Works for ANY R6
+	body: everything is found by the R6 part names and fitted to its own part sizes and clothing.
 
 	What each stage does
 	  ARM   the real arm is hidden (locally) and a copy of it - its colour, its sleeve (the NPC's
@@ -25,13 +30,12 @@
 	  (all the blood is the place's own blood effects - ReplicatedStorage.Combat.VFX Blood and
 	  BloodHeavy - through CombatBlood; the droplets are gone where they land)
 	  (the hole in the torso from the gore kit is never used)
-	The pieces thrown off fade out and are gone after Config.Gore.GibLife; an NPC healed back to
-	full is whole again.
+	The pieces thrown off fade out and are gone after Config.Gore.GibLife.
 
-	  Gore.Start()                      watch every NPC in the workspace (CombatClient calls it)
-	  Gore.Hit(npc, health, drive)      a blow just landed and left the NPC `health` (drive: the way
-	                                    it travels): its stage plays on the blow, not a round trip later
-	  Gore.StageOf(npc)                 how far that NPC has come apart (0..3)
+	  Gore.Start()                      watch every body in the workspace (CombatClient calls it)
+	  Gore.Hit(body, health, drive, stage?)  a blow just landed and left `health` (drive: the way it
+	                                    travels; stage: the server's word): its stage plays on the blow
+	  Gore.StageOf(body)                how far that body has come apart (0..3)
 ]]
 
 local Players = game:GetService("Players")
@@ -96,7 +100,7 @@ local function kitPiece(name: string, size: Vector3, color: Color3?): BasePart
 		p.Material = Enum.Material.Sand
 	end
 	for _, d in ipairs(p:GetChildren()) do
-		if d:IsA("JointInstance") or d:IsA("WeldConstraint") then
+		if d:IsA("JointInstance") or d:IsA("WeldConstraint") or d:IsA("Constraint") then
 			d:Destroy()
 		end
 	end
@@ -136,6 +140,8 @@ end
 local function fit(entry: any, host: BasePart, std: Vector3, color: Color3?): BasePart
 	local k = Vector3.new(host.Size.X / std.X, host.Size.Y / std.Y, host.Size.Z / std.Z)
 	local part = kitPiece(entry.Name, scaled(entry.Size, entry.Rot, k), color)
+	-- (a wound, not the body: a still copy of the fighter - the HUD's portraits - leaves it out)
+	part:SetAttribute("OverkillGore", true)
 	local pos = Vector3.new(entry.Pos.X * k.X, entry.Pos.Y * k.Y, entry.Pos.Z * k.Z)
 	weldTo(part, host, host.CFrame * CFrame.new(pos) * entry.Rot)
 	return part
@@ -232,12 +238,13 @@ type Body = {
 local bodies: { [Model]: Body } = {}
 Gore.Bodies = bodies
 
--- an R6 NPC: a model with a Humanoid and the R6 body parts, not a player's character
-function Gore.IsNpc(model: Instance?): boolean
+-- an R6 body this covers: a model with a Humanoid and the R6 body parts (a player's character too,
+-- unless Config.Gore.Players is off)
+function Gore.Covers(model: Instance?): boolean
 	if not (model and model:IsA("Model")) then
 		return false
 	end
-	if Players:GetPlayerFromCharacter(model) then
+	if not GC.Players and Players:GetPlayerFromCharacter(model) then
 		return false
 	end
 	local hum = model:FindFirstChildOfClass("Humanoid")
@@ -256,6 +263,11 @@ function Gore.IsNpc(model: Instance?): boolean
 	return true
 end
 
+-- an R6 NPC (a body not a player's)
+function Gore.IsNpc(model: Instance?): boolean
+	return Gore.Covers(model) and not Players:GetPlayerFromCharacter(model :: Model)
+end
+
 local function hide(b: Body, inst: Instance)
 	if inst:IsA("BasePart") or inst:IsA("Decal") then
 		(inst :: any).LocalTransparencyModifier = 1
@@ -264,7 +276,16 @@ local function hide(b: Body, inst: Instance)
 end
 
 -- everything hanging on a body part (clothing layers are the body part itself; accessories hang by
--- a weld to it)
+-- a weld to it, or - rigid accessories - by a constraint between an attachment on each)
+local function heldBy(j: Instance, part: BasePart): boolean
+	if j:IsA("JointInstance") or j:IsA("WeldConstraint") then
+		return (j :: any).Part0 == part or (j :: any).Part1 == part
+	elseif j:IsA("Constraint") then
+		local a0, a1 = (j :: any).Attachment0, (j :: any).Attachment1
+		return (a0 ~= nil and a0.Parent == part) or (a1 ~= nil and a1.Parent == part)
+	end
+	return false
+end
 local function accessoriesOn(model: Model, part: BasePart): { BasePart }
 	local out = {}
 	for _, acc in ipairs(model:GetChildren()) do
@@ -272,8 +293,9 @@ local function accessoriesOn(model: Model, part: BasePart): { BasePart }
 			local handle = acc:FindFirstChild("Handle")
 			if handle and handle:IsA("BasePart") then
 				for _, j in ipairs(handle:GetDescendants()) do
-					if (j:IsA("JointInstance") or j:IsA("WeldConstraint")) and ((j :: any).Part0 == part or (j :: any).Part1 == part) then
+					if heldBy(j, part) then
 						table.insert(out, handle)
+						break
 					end
 				end
 			end
@@ -282,10 +304,19 @@ local function accessoriesOn(model: Model, part: BasePart): { BasePart }
 	return out
 end
 
+-- a copy of an instance even when it is marked not to be copied (Archivable off)
+local function copyOf<T>(inst: T & Instance): T
+	local was = inst.Archivable
+	inst.Archivable = true
+	local c = inst:Clone()
+	inst.Archivable = was
+	return c :: any
+end
+
 ---------------------------------------------------------------------------
 -- the stages
 ---------------------------------------------------------------------------
-local function tearArm(b: Body, side: string)
+local function tearArm(b: Body, side: string, quiet: boolean?)
 	local arm = if side == "Right" then b.Right else b.Left
 	if not (arm and arm.Parent) then
 		return
@@ -294,6 +325,17 @@ local function tearArm(b: Body, side: string)
 	local drive = b.Drive
 	local right = torso.CFrame.RightVector
 	local out = if side == "Right" then right else -right
+	if quiet then
+		-- (lost before this client saw the body: the wound, nothing replayed)
+		hide(b, arm)
+		for _, h in ipairs(accessoriesOn(b.Model, arm)) do
+			hide(b, h)
+		end
+		local stump = fit(if side == "Right" then KIT.RightStump else KIT.LeftStump, torso, STD.Torso)
+		stump.Parent = b.Model
+		table.insert(b.Added, stump)
+		return
+	end
 	-- the torn-off arm: a copy of it (with its sleeve), thrown with the blow
 	local gib = Instance.new("Model")
 	gib.Name = "GoreArm"
@@ -306,15 +348,17 @@ local function tearArm(b: Body, side: string)
 	gh.Parent = gib
 	local shirt = b.Model:FindFirstChildOfClass("Shirt")
 	if shirt then
-		shirt:Clone().Parent = gib
+		copyOf(shirt).Parent = gib
 	end
-	local copy = arm:Clone()
+	local copy = copyOf(arm)
+	-- (no joint or constraint comes along: a ragdoll's socket would tie the copy to the live torso)
 	for _, d in ipairs(copy:GetDescendants()) do
-		if d:IsA("JointInstance") or d:IsA("WeldConstraint") then
+		if d:IsA("JointInstance") or d:IsA("WeldConstraint") or d:IsA("Constraint") then
 			d:Destroy()
 		end
 	end
 	copy.LocalTransparencyModifier = 0
+	copy.Transparency = 0 -- (the server may already have hidden the real one)
 	copy.Anchored = false
 	copy.CanCollide = true
 	copy.CanQuery = false
@@ -380,7 +424,7 @@ local function tearArm(b: Body, side: string)
 	give(b.Model, { Roll = if side == "Right" then -14 else 14, Yaw = if side == "Right" then 10 else -10, NeckYaw = if side == "Right" then -18 else 18 }, 12)
 end
 
-local function burstHead(b: Body)
+local function burstHead(b: Body, quiet: boolean?)
 	local head = b.Head
 	local torso = b.Torso
 	local s = head.Size.Y / STD.Head.Y
@@ -402,6 +446,9 @@ local function burstHead(b: Body)
 	local skull = fit(KIT.SkullBase, torso, STD.Torso, BONE)
 	skull.Parent = b.Model
 	table.insert(b.Added, skull)
+	if quiet then
+		return -- (burst before this client saw the body: what is left, nothing replayed)
+	end
 	-- THE MIST: the place's own blood effects (VFX BloodHeavy, Blood) burst big: a thick red cloud
 	-- blown up and out with the blow, a second one driven along it, the splash inside them
 	local up = (Vector3.new(0, 1, 0) + b.Drive * 0.6).Unit
@@ -457,6 +504,7 @@ local function burstHead(b: Body)
 	-- the fountain from the neck, dying down
 	local a = Instance.new("Attachment")
 	a.Name = "GoreBleed"
+	a:SetAttribute("OverkillGore", true)
 	a.CFrame = CFrame.new(0, torso.Size.Y * 0.5, 0)
 	a.Parent = torso
 	table.insert(b.Added, a)
@@ -474,30 +522,18 @@ local function burstHead(b: Body)
 	end
 end
 
-local STAGE_FN = {
-	function(b: Body)
-		tearArm(b, "Right")
+local STAGE_FN: { (Body, boolean?) -> () } = {
+	function(b: Body, quiet: boolean?)
+		tearArm(b, "Right", quiet)
 	end,
-	function(b: Body)
-		tearArm(b, "Left")
+	function(b: Body, quiet: boolean?)
+		tearArm(b, "Left", quiet)
 	end,
 	burstHead,
 }
 
--- the stage this much health has earned (0..3)
-function Gore.StageFor(health: number, max: number): number
-	if max <= 0 then
-		return 0
-	end
-	local f = health / max
-	local n = 0
-	for i, st in ipairs(GC.Stages) do
-		if (i == #GC.Stages and health <= 0) or (i < #GC.Stages and f <= st) then
-			n = i
-		end
-	end
-	return n
-end
+-- the stage this much health has earned (0..3; the same rule the server keeps)
+Gore.StageFor = Config.GoreStageFor
 
 local restore: (b: Body) -> ()
 
@@ -510,10 +546,10 @@ local function forget(b: Body)
 	end
 end
 
--- (a player's model can reach this client before its Player.Character does: checked again on
--- every blow, never trusted from the first look)
+-- (with Config.Gore.Players off: a player's model can reach this client before its
+-- Player.Character does - checked again on every blow, never trusted from the first look)
 local function isPlayers(b: Body): boolean
-	if Players:GetPlayerFromCharacter(b.Model) then
+	if not GC.Players and Players:GetPlayerFromCharacter(b.Model) then
 		if b.Stage > 0 then
 			restore(b)
 		end
@@ -525,12 +561,26 @@ local function isPlayers(b: Body): boolean
 end
 
 -- play every stage up to `target`, each in turn, a beat apart (never out of order, never twice; a
--- body made whole again part-way through stops the rest)
-local function advance(b: Body, target: number)
+-- body made whole again part-way through stops the rest). quiet: the body was already like this
+-- when this client first saw it - its wounds at once, nothing replayed
+local function advance(b: Body, target: number, quiet: boolean?)
 	if target <= b.Stage or isPlayers(b) then
 		return
 	end
 	b.Target = math.max(b.Target, math.min(target, #STAGE_FN))
+	if quiet then
+		while b.Stage < b.Target do
+			b.Stage += 1
+			local fn = STAGE_FN[b.Stage]
+			local ok, err = pcall(function()
+				fn(b, true)
+			end)
+			if not ok then
+				warn("[Combat] gore:", err)
+			end
+		end
+		return
+	end
 	if b.Busy then
 		return
 	end
@@ -556,7 +606,7 @@ local function advance(b: Body, target: number)
 	end)
 end
 
--- whole again (a practice dummy healed back to full)
+-- whole again (the server made it whole: its stage went back)
 function restore(b: Body)
 	for _, inst in ipairs(b.Hidden) do
 		if inst.Parent then
@@ -575,7 +625,7 @@ function restore(b: Body)
 end
 
 local function track(model: Model)
-	if bodies[model] or not Gore.IsNpc(model) then
+	if bodies[model] or not Gore.Covers(model) then
 		return
 	end
 	local hum = model:FindFirstChildOfClass("Humanoid") :: Humanoid
@@ -585,15 +635,35 @@ local function track(model: Model)
 		Stage = 0, Target = 0, Gen = 0, Busy = false, Hidden = {}, Added = {}, Drive = Vector3.new(0, 0, -1), Conns = {},
 	}
 	bodies[model] = b
-	local last = hum.Health
+	Blood.Ignore(model)
+	-- a fighter in the combat: the server's stage (it never goes back - a limb doesn't grow back
+	-- - unless the server makes the body whole again)
+	local function serverStage(): number?
+		local st = model:GetAttribute("GoreStage")
+		return if type(st) == "number" then st else nil
+	end
+	local st0 = serverStage()
+	if GC.Enabled and st0 and st0 > 0 then
+		advance(b, st0, true)
+	end
+	table.insert(b.Conns, model:GetAttributeChangedSignal("GoreStage"):Connect(function()
+		-- (a beat later: the server sends the blow itself - its direction - right after the stage)
+		task.defer(function()
+			local st = serverStage()
+			if not GC.Enabled or not st or bodies[model] ~= b then
+				return
+			end
+			if st < b.Stage then
+				restore(b)
+			end
+			advance(b, st)
+		end)
+	end))
+	-- anything else comes apart by its own health (and stays that way)
 	table.insert(b.Conns, hum.HealthChanged:Connect(function(h: number)
-		if not GC.Enabled then
+		if not GC.Enabled or serverStage() ~= nil then
 			return
 		end
-		if h > last and h >= hum.MaxHealth * 0.999 and b.Stage > 0 and h > 0 then
-			restore(b)
-		end
-		last = h
 		advance(b, Gore.StageFor(h, hum.MaxHealth))
 	end))
 	table.insert(b.Conns, model.AncestryChanged:Connect(function(_, parent)
@@ -604,8 +674,8 @@ local function track(model: Model)
 end
 
 -- a blow just landed on `model` and left it `health` (the attacker's own impact frame, or the
--- server's Hit): the stage it earns plays now, on the blow, not a round trip later
-function Gore.Hit(model: Instance?, health: number, drive: Vector3?)
+-- server's Hit with its `stage`): the stage it earns plays now, on the blow, not a round trip later
+function Gore.Hit(model: Instance?, health: number, drive: Vector3?, stage: number?)
 	if not GC.Enabled or not (model and model:IsA("Model")) then
 		return
 	end
@@ -617,7 +687,7 @@ function Gore.Hit(model: Instance?, health: number, drive: Vector3?)
 	if drive and Vector3.new(drive.X, 0, drive.Z).Magnitude > 1e-3 then
 		b.Drive = Vector3.new(drive.X, 0, drive.Z).Unit
 	end
-	advance(b, Gore.StageFor(math.max(0, health), b.Hum.MaxHealth))
+	advance(b, if type(stage) == "number" then stage else Gore.StageFor(math.max(0, health), b.Hum.MaxHealth))
 end
 
 function Gore.StageOf(model: Model): number

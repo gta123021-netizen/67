@@ -963,6 +963,16 @@ function Callout.Damage(victim: Model, amount: number, kind: string?, attacker: 
 	closeAfter(t, if k == "Finisher" or k == "Break" or t.Title then 1.6 else 1.1)
 end
 
+-- the server's number for a blow already stamped (predicted on the attacker's own impact frame):
+-- the total moves by the difference and counts to it - no punch, no new hit in the string
+function Callout.Correct(victim: Model, delta: number)
+	local t = tags[victim]
+	if not (t and t.HasNum and t.Gui.Parent) or math.abs(delta) < 1e-3 then
+		return
+	end
+	t.Total = math.max(0, t.Total + delta)
+end
+
 ---------------------------------------------------------------------------
 -- guard break (everyone): the same tag; GUARD BREAK! drops in letter by letter above the number.
 -- The number itself is the attacker's Damage("Break") for the same blow (it lands right after):

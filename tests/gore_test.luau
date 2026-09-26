@@ -195,6 +195,9 @@ local function rig(name, opts)
 	if opts.Watch and parts["Right Arm"] then
 		parts.Watch = accessory("Watch", parts["Right Arm"])
 	end
+	for k, v in pairs(opts.Attrs or {}) do
+		m:SetAttribute(k, v)
+	end
 	m.Parent = ws
 	-- (the engine: everything that enters the workspace fires DescendantAdded)
 	ws.DescendantAdded:Fire(m)
@@ -295,36 +298,45 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("2  only R6 NPCs")
+section("2  who comes apart: any R6 body - NPCs and players")
 ---------------------------------------------------------------------------
 do
 	local npc = rig("NPC")
-	check("an R6 NPC qualifies", Gore.IsNpc(npc))
+	check("an R6 NPC is covered (and is an NPC)", Gore.Covers(npc) and Gore.IsNpc(npc))
 	local pc = rig("PlayerChar")
 	Env.player("Someone", 0.05, pc)
-	check("a player's character never does", not Gore.IsNpc(pc))
+	check("a player's character is covered too (Config.Gore.Players), not as an NPC", Gore.Covers(pc) and not Gore.IsNpc(pc))
 	resetLogs()
-	Gore.Hit(pc, 0, V3.new(0, 0, -1))
-	setHealth(pc:FindFirstChildOfClass("Humanoid"), 0)
+	Gore.Hit(pc, 60, V3.new(0, 0, -1))
+	Env.run(0.3)
+	check("... a player loses an arm like anyone", Gore.StageOf(pc) == 1 and soundNames() == "GoreTear", soundNames())
+	-- with Config.Gore.Players off, players keep their limbs (even one first seen as an NPC)
+	GC.Players = false
+	local pc2 = rig("PlayerChar2")
+	Env.player("Other", 0.05, pc2)
+	resetLogs()
+	Gore.Hit(pc2, 0, V3.new(0, 0, -1))
 	Env.run(0.5)
-	check("... and a player's character takes a killing blow with no gore at all", Gore.StageOf(pc) == 0 and #fxLog.Sound == 0 and Gore.Bodies[pc] == nil and pc:FindFirstChild("Head").LocalTransparencyModifier == 0)
+	check("Players off: a player's character takes a killing blow with no gore at all", Gore.StageOf(pc2) == 0 and #fxLog.Sound == 0 and Gore.Bodies[pc2] == nil and pc2:FindFirstChild("Head").LocalTransparencyModifier == 0)
+	GC.Players = true
 	local r15 = rig("R15", { RigType = Enum.HumanoidRigType.R15 })
-	check("an R15 rig does not", not Gore.IsNpc(r15))
+	check("an R15 rig is not", not Gore.Covers(r15))
 	local noArm = rig("NoArm", { Missing = "Left Arm" })
-	check("a model missing a limb does not", not Gore.IsNpc(noArm))
+	check("a model missing a limb is not", not Gore.Covers(noArm))
 	local noHead = rig("NoHead", { Missing = "Head" })
-	check("a model missing its head does not", not Gore.IsNpc(noHead))
+	check("a model missing its head is not", not Gore.Covers(noHead))
 	local plain = Client.new("Model")
 	plain.Parent = ws
-	check("a model without a Humanoid does not", not Gore.IsNpc(plain))
-	check("nil / a part does not", not Gore.IsNpc(nil) and not Gore.IsNpc(Client.new("Part")))
+	check("a model without a Humanoid is not", not Gore.Covers(plain))
+	check("nil / a part is not", not Gore.Covers(nil) and not Gore.Covers(Client.new("Part")))
+	resetLogs()
 	Gore.Hit(r15, 0, V3.new(0, 0, -1))
 	Gore.Hit(noArm, 0, V3.new(0, 0, -1))
 	check("hits on the others do nothing", Gore.StageOf(r15) == 0 and Gore.StageOf(noArm) == 0 and #fxLog.Sound == 0)
-	for _, m in ipairs({ npc, pc, r15, noArm, noHead, plain }) do
+	for _, m in ipairs({ npc, pc, pc2, r15, noArm, noHead, plain }) do
 		remove(m)
 	end
-	check("removed NPCs are forgotten", Gore.Bodies[npc] == nil)
+	check("removed bodies are forgotten", Gore.Bodies[npc] == nil and Gore.Bodies[pc] == nil)
 end
 
 ---------------------------------------------------------------------------
@@ -399,7 +411,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("4  healed to full: whole again, and it comes apart again")
+section("4  a lost limb stays lost; the server's stage rules the combat's fighters")
 ---------------------------------------------------------------------------
 do
 	resetLogs()
@@ -409,42 +421,56 @@ do
 	check("down to 20%: both arms gone, the head whole", Gore.StageOf(m) == 2 and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 1 and P.Head.LocalTransparencyModifier == 0)
 	check("the watch on the torn arm went with it", P.Watch.LocalTransparencyModifier == 1)
 	setHealth(hum, 100)
-	Env.run(0.1)
-	local shown = true
-	for _, n in ipairs({ "Right Arm", "Left Arm", "Head", "Watch", "Hat" }) do
-		if P[n].LocalTransparencyModifier ~= 0 then
-			shown = false
-		end
-	end
-	check("healed to full: every hidden part shown again", shown)
-	check("... the face too", P.Head:FindFirstChild("face").LocalTransparencyModifier == 0)
+	Env.run(0.3)
+	check("healed back to full: the arms never grow back", Gore.StageOf(m) == 2 and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 1)
+	remove(m)
+end
+do
+	-- a fighter in the combat: the server's stage (the GoreStage attribute), whatever its health says
+	resetLogs()
+	local m, hum, P = rig("Fighter")
+	m:SetAttribute("CombatEntity", true)
+	m:SetAttribute("GoreStage", 0)
+	setHealth(hum, 40) -- (its own health alone never moves a fighter the server keeps)
+	Env.run(0.3)
+	check("a combat fighter follows the server's stage, not its own health", Gore.StageOf(m) == 0 and #fxLog.Sound == 0)
+	m:SetAttribute("GoreStage", 1)
+	Env.run(0.3)
+	check("the server's stage 1: the right arm, animated", Gore.StageOf(m) == 1 and soundNames() == "GoreTear" and #gibs("Model", "GoreArm") >= 1)
+	Gore.Hit(m, 10, V3.new(1, 0, 0), 2)
+	Env.run(0.4)
+	check("the server's Hit carries stage 2: the left arm", Gore.StageOf(m) == 2 and soundNames() == "GoreTear,GoreTear")
+	m:SetAttribute("GoreStage", 2)
+	Env.run(0.3)
+	check("... and the attribute arriving after it replays nothing", #fxLog.Sound == 2)
+	-- the server makes the body whole again (its stage goes back)
+	m:SetAttribute("GoreStage", 0)
+	Env.run(0.3)
 	local leftovers = 0
 	for _, c in ipairs(m:GetDescendants()) do
 		if not c._p.Destroyed and (string.match(c.Name, "^Gore") or table.find(KIT_NAMES, c.Name)) then
 			leftovers += 1
 		end
 	end
-	check("... every stump, jaw and strand removed from the body", leftovers == 0, leftovers)
-	check("... stage 0", Gore.StageOf(m) == 0)
-	resetLogs()
-	setHealth(hum, 70)
-	Env.run(0.3)
-	check("... and it comes apart again from the start", Gore.StageOf(m) == 1 and soundNames() == "GoreTear")
-
-	-- healed to full in the middle of a staggered sequence: the rest never plays
-	resetLogs()
-	setHealth(hum, 100)
-	Env.run(0.05)
-	setHealth(hum, 5)
-	Env.step(1 / 60)
-	setHealth(hum, 100) -- (before the second stage's beat)
-	Env.run(0.8)
-	check("healed mid-sequence: the sequence stops, the body is whole", Gore.StageOf(m) == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and P["Right Arm"].LocalTransparencyModifier == 0, "stage " .. Gore.StageOf(m) .. " sounds " .. soundNames())
-	resetLogs()
-	setHealth(hum, 49)
-	Env.run(0.5)
-	check("... and the next beating plays from the first stage again", soundNames() == "GoreTear,GoreTear" and Gore.StageOf(m) == 2, soundNames())
+	check("the server's stage back to 0: whole again, every stump gone", Gore.StageOf(m) == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and leftovers == 0, leftovers)
 	remove(m)
+end
+do
+	-- first seen already missing limbs (a late join, streamed in): its wounds at once, nothing replayed
+	resetLogs()
+	local gibs0 = #gibs("Model", "GoreArm")
+	-- (a body this client has never seen, arriving with the stage already set)
+	local late, _, LP = rig("LateJoin", { Attrs = { CombatEntity = true, GoreStage = 2 } })
+	Env.run(0.3)
+	local stumps = 0
+	for _, c in ipairs(late:GetChildren()) do
+		if (c.Name == "right.shoulder" or c.Name == "left.shoulder") and not c._p.Destroyed then
+			stumps += 1
+		end
+	end
+	check("a body first seen at stage 2: both arms hidden, both stumps on", Gore.StageOf(late) == 2 and LP["Right Arm"].LocalTransparencyModifier == 1 and LP["Left Arm"].LocalTransparencyModifier == 1 and stumps == 2, stumps)
+	check("... nothing replayed: no arm thrown, no sound, no blood", #gibs("Model", "GoreArm") == gibs0 and #fxLog.Sound == 0)
+	remove(late)
 end
 
 ---------------------------------------------------------------------------
@@ -515,6 +541,7 @@ local function armCase(label, opts, drive, side)
 		local w = stump:FindFirstChildOfClass("Weld")
 		check(label .. ": ... welded to the torso (follows every pose)", w and w.Part0 == torso and sameFrame(torso.CFrame * w.C0, stump.CFrame))
 		check(label .. ": ... sized for this body", near(stump.Size, V3.new(KIT.RightStump.Size.X * k.X, KIT.RightStump.Size.Y * k.Y, KIT.RightStump.Size.Z * k.Z), 1e-3))
+		check(label .. ": ... tagged as a wound (a portrait of the fighter leaves it out)", stump:GetAttribute("OverkillGore") == true)
 		check(label .. ": ... the kit's own joint never came along", stump:FindFirstChildOfClass("Weld") == w and #childNamed(stump, "Weld") == 1)
 		local att = stump:FindFirstChild("GoreBleed")
 		local spurts = 0
@@ -537,6 +564,50 @@ armCase("left arm", { Shirt = true, CFrame = CF.new(-3, 3, 5) * CF.Angles(0, -0.
 armCase("giant x1.8", { Scale = 1.8, CFrame = CF.new(0, 5.4, 0) }, V3.new(0, 0, 1), "Right")
 armCase("tiny x0.5", { Scale = 0.5, CFrame = CF.new(0, 1.5, 0) }, V3.new(1, 0, 0), "Left")
 armCase("stretched", { Stretch = V3.new(1.3, 0.8, 1.6) }, V3.new(0.3, 0, -1), "Right")
+
+do
+	-- a ragdolled NPC (a ball socket from its arm to its torso), an arm marked not to be copied, and a
+	-- rigid accessory (held by a constraint, not a weld) on that arm
+	resetLogs()
+	local m, hum, P = rig("Ragdolled")
+	local arm, torso = P["Right Arm"], P.Torso
+	local a0 = Client.new("Attachment")
+	a0.Parent = arm
+	local a1 = Client.new("Attachment")
+	a1.Parent = torso
+	local sock = Client.new("BallSocketConstraint")
+	sock.Attachment0 = a0
+	sock.Attachment1 = a1
+	sock.Parent = arm
+	arm.Archivable = false
+	local acc = Client.new("Accessory")
+	local handle = Client.new("Part")
+	handle.Name = "Handle"
+	handle.Parent = acc
+	local ha = Client.new("Attachment")
+	ha.Parent = handle
+	local rigid = Client.new("RigidConstraint")
+	rigid.Attachment0 = ha
+	rigid.Attachment1 = a0
+	rigid.Parent = handle
+	acc.Parent = m
+	setHealth(hum, 70)
+	Env.run(0.2)
+	local list = gibs("Model", "GoreArm")
+	local gib = list[#list]
+	local copy = gib and gib:FindFirstChild("Right Arm")
+	check("an arm marked not to be copied is still torn off (a copy is made anyway)", copy ~= nil and #warns == 0, table.concat(warns, " | "))
+	local tied = 0
+	for _, d in ipairs(copy and copy:GetDescendants() or {}) do
+		if d:IsA("Constraint") or d:IsA("JointInstance") then
+			tied += 1
+		end
+	end
+	check("... no ragdoll socket comes along to tie the torn arm to the live torso", copy ~= nil and tied == 0, tied)
+	check("... the original keeps its own Archivable setting", arm.Archivable == false)
+	check("a rigid accessory (held by a constraint) goes with the arm", handle.LocalTransparencyModifier == 1)
+	remove(m)
+end
 
 ---------------------------------------------------------------------------
 section("6  no jaw: the head stays whole until the killing blow")

@@ -71,6 +71,8 @@ export type Entity = {
 
 local entities: { [Model]: Entity } = {}
 Service.Entities = entities
+local updateGore: (Entity) -> () -- (the limbs a fighter has lost: see below)
+local stowTools: (Entity) -> ()
 
 local STUDIO = RunService:IsStudio()
 local SB = Config.StunBudget
@@ -243,6 +245,7 @@ function Service.Register(char: Model, player: Player?): Entity?
 		LastHitBy = nil,
 		LastHitAt = 0,
 		AirPending = false,
+		GoreStage = 0,
 		Locks = {},
 		Conns = {},
 	}
@@ -252,6 +255,7 @@ function Service.Register(char: Model, player: Player?): Entity?
 	table.insert(e.Conns, fighterParts(char))
 	char:SetAttribute("CombatState", "Idle")
 	char:SetAttribute("CombatEntity", true)
+	char:SetAttribute("GoreStage", 0)
 	if e.Npc then
 		for _, p in ipairs(char:GetDescendants()) do
 			if p:IsA("BasePart") and not p.Anchored then
@@ -264,6 +268,20 @@ function Service.Register(char: Model, player: Player?): Entity?
 	end
 	table.insert(e.Conns, hum.Died:Connect(function()
 		Service._onDied(e)
+	end))
+	-- (damage from anything else - a fall, a script - takes limbs too)
+	table.insert(e.Conns, hum.HealthChanged:Connect(function()
+		updateGore(e)
+	end))
+	-- a tool equipped while the right arm is gone goes straight back
+	table.insert(e.Conns, char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and (e.GoreStage or 0) >= 1 then
+			task.defer(function()
+				if child.Parent == char then
+					stowTools(e)
+				end
+			end)
+		end
 	end))
 	table.insert(e.Conns, char.AncestryChanged:Connect(function(_, parent)
 		if parent == nil then
@@ -765,6 +783,102 @@ local function resetLocked(att: Entity, vic: Entity, t: number): boolean
 	return vic.LastStunBy == att and vic.LastStunChain ~= att.ChainId and controlFor(vic, t) < Config.Combo.ResetGrace
 end
 
+---------------------------------------------------------------------------
+-- limbs (Config.Gore): how far a fighter's body has come apart - the right arm, the left arm, the
+-- head - worked out from its health and kept until it respawns (a limb never grows back). A lost
+-- limb is hidden for everyone here; every client adds the torn wounds, the blood and the thrown
+-- limb itself (CombatGore). Fewer arms: more damage taken, a weaker guard, then no guard at all
+---------------------------------------------------------------------------
+local dropGuard: (Entity) -> ()
+local LIMBS = { "Right Arm", "Left Arm", "Head" }
+
+local function goreFor(e: Entity): boolean
+	return Config.Gore.Enabled and (e.Npc or Config.Gore.Players == true)
+end
+
+-- an accessory hangs on `part`: by a weld to it, or (rigid accessories) a constraint to it
+local function heldBy(j: Instance, part: BasePart): boolean
+	if j:IsA("JointInstance") or j:IsA("WeldConstraint") then
+		return (j :: any).Part0 == part or (j :: any).Part1 == part
+	elseif j:IsA("Constraint") then
+		local a0, a1 = (j :: any).Attachment0, (j :: any).Attachment1
+		return (a0 ~= nil and a0.Parent == part) or (a1 ~= nil and a1.Parent == part)
+	end
+	return false
+end
+
+-- a lost limb is gone for everyone: the part, the face on it, whatever is worn on it. What each
+-- looked like before is kept on it (GoreHidden): a still copy of the fighter - the HUD's portraits -
+-- shows it whole
+local function vanish(obj: any)
+	if obj:GetAttribute("GoreHidden") == nil then
+		obj:SetAttribute("GoreHidden", obj.Transparency)
+	end
+	obj.Transparency = 1
+end
+local function hideLimb(char: Model, part: BasePart)
+	vanish(part)
+	for _, d in ipairs(part:GetChildren()) do
+		if d:IsA("Decal") then
+			vanish(d)
+		end
+	end
+	for _, acc in ipairs(char:GetChildren()) do
+		local h = acc:IsA("Accessory") and acc:FindFirstChild("Handle")
+		if h and h:IsA("BasePart") then
+			for _, j in ipairs(h:GetDescendants()) do
+				if heldBy(j, part) then
+					vanish(h)
+					break
+				end
+			end
+		end
+	end
+end
+
+-- a tool is held in the right hand: with that arm gone it goes back in the backpack (never held
+-- by a hand that isn't there)
+function stowTools(e: Entity)
+	local bag = e.Player and e.Player:FindFirstChildOfClass("Backpack")
+	if not bag then
+		return -- (nowhere to put it: never thrown away)
+	end
+	for _, t in ipairs(e.Char:GetChildren()) do
+		if t:IsA("Tool") then
+			t.Parent = bag
+		end
+	end
+end
+Service.StowTools = stowTools
+
+-- the body catches up with the health it has left (never back: only a respawn makes it whole)
+function updateGore(e: Entity)
+	if not goreFor(e) or not e.Char.Parent then
+		return
+	end
+	local was = e.GoreStage or 0
+	local st = math.max(was, Config.GoreStageFor(e.Hum.Health, e.Hum.MaxHealth))
+	if st == was then
+		return
+	end
+	e.GoreStage = st
+	e.Char:SetAttribute("GoreStage", st)
+	for i = was + 1, st do
+		local part = e.Char:FindFirstChild(LIMBS[i])
+		if part and part:IsA("BasePart") then
+			hideLimb(e.Char, part)
+		end
+	end
+	-- no right arm, nothing held; no arms, no guard
+	if st >= 1 then
+		stowTools(e)
+	end
+	if Config.ArmsAt(st) == 0 and e.State == "Blocking" then
+		dropGuard(e)
+	end
+end
+Service.UpdateGore = updateGore
+
 local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, job: any)
 	local t = now()
 	local class = def.ClassDef
@@ -813,6 +927,11 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	else
 		dmg = def.Damage
 	end
+	-- a body missing arms takes more, and a one-armed guard stops less (Config.GoreDamage: the
+	-- attacker's screen predicts the same number on its own impact frame)
+	if goreFor(vic) then
+		dmg = Config.GoreDamage(dmg, vic.GoreStage, data.B)
+	end
 	-- damage. The blow that knocks them out throws the body: the strike's own launch (the sweep,
 	-- the stomp), or the KO throw straight back from the attacker for any other blow - after the
 	-- hit-stop, so the knockout lands on the blow's frame
@@ -821,6 +940,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		vic.KOLaunch = { Att = att, Launch = def.Launch or Config.KOLaunch, Delay = data.HS }
 	end
 	vic.Hum:TakeDamage(dmg)
+	updateGore(vic)
 	vic.LastHitBy = att.Player or att.Char
 	vic.LastHitAt = t
 	if att.Player and vic.Char ~= att.Char then
@@ -946,7 +1066,8 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	if data.KT == 0 and data.KB.Y > 0 and not data.RD then
 		data.KT = 0.01 -- vertical-only kick still goes to the owner
 	end
-	data.H = vic.Hum.Health -- (what the blow left: the gore on an NPC's body follows it)
+	data.H = vic.Hum.Health -- (what the blow left)
+	data.GS = vic.GoreStage or 0 -- (and how far the body has come apart: every client shows it on the blow)
 	Event:FireAllClients("Hit", data)
 	return data
 end
@@ -1601,7 +1722,7 @@ function Service.RequestDash(char: Model, dir: string): boolean
 	return true
 end
 
-local function dropGuard(ent: Entity)
+function dropGuard(ent: Entity)
 	ent.ReleaseQueued = false
 	if ent.State == "Blocking" then
 		setState(ent, "Idle", nil, true)
@@ -1624,6 +1745,10 @@ function Service.RequestBlock(char: Model, on: boolean): boolean
 			return true
 		end
 		if not States.Allows(ent.State, "Block") or locked(ent, "Block") or t < ent.ReblockAt then
+			return false
+		end
+		-- no arms, no guard
+		if goreFor(ent) and Config.ArmsAt(ent.GoreStage) == 0 then
 			return false
 		end
 		endChain(ent)

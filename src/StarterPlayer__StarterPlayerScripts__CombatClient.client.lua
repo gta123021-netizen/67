@@ -632,6 +632,15 @@ local function hitStop(a: any, d: number)
 end
 
 -- my limb met a body on this frame: everything a landed blow is happens now
+-- how a blow's damage number is stamped (its colours and punch)
+local function damageKind(def: any, brk: boolean, blocked: boolean, launched: boolean): string
+	return if brk then "Break"
+		elseif blocked then "Block"
+		elseif launched or def.Class == "Finisher" then "Finisher"
+		elseif def.Rank >= 3 then "Heavy"
+		else "Light"
+end
+
 local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	local def = a.Def
 	local class = def.ClassDef
@@ -658,12 +667,17 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	if not guarded and not launched and a.Slot > 0 and def.Class ~= "Dash" then
 		startCarry(a, hs)
 	end
-	-- an NPC's body comes apart on the frame of the blow that earns it
-	if not guarded then
-		local hum = victim:FindFirstChildOfClass("Humanoid")
-		if hum then
-			Gore.Hit(victim, hum.Health - def.Damage, drive)
-		end
+	-- your damage, stamped on the blow's own frame by the same rules the server deals it by (a body
+	-- missing arms takes more: Config.GoreDamage) - the server's number only corrects it if it
+	-- differs - and the body coming apart with it
+	local base = if brk then (def.GuardBreakDamage or def.Damage * 0.5) elseif blocked then def.Damage * Config.Guard.DamageScale else def.Damage
+	local stage = victim:GetAttribute("GoreStage")
+	local dmg = if type(stage) == "number" then Config.GoreDamage(base, stage, blocked) else base
+	a.Impact.D = dmg
+	FX.Damage(victim, dmg, damageKind(def, brk, blocked, launched), ctx.Char)
+	local hum = victim:FindFirstChildOfClass("Humanoid")
+	if hum then
+		Gore.Hit(victim, hum.Health - dmg, drive)
 	end
 end
 
@@ -1145,8 +1159,13 @@ end
 ---------------------------------------------------------------------------
 -- block
 ---------------------------------------------------------------------------
+-- no arms, no guard (Config.Gore: the server refuses it too)
+local function armless(): boolean
+	return ctx ~= nil and Config.ArmsAt(ctx.Char:GetAttribute("GoreStage")) == 0
+end
+
 local function tryBlock()
-	if inputBlocked() or (ctx.State ~= "Idle" and ctx.State ~= "ComboWindow") or now() < ctx.BlockRetryAt or now() < ctx.ReblockAt then
+	if inputBlocked() or (ctx.State ~= "Idle" and ctx.State ~= "ComboWindow") or now() < ctx.BlockRetryAt or now() < ctx.ReblockAt or armless() then
 		return
 	end
 	ctx.Seq += 1
@@ -1159,6 +1178,16 @@ local function tryBlock()
 	setLocal("Blocking")
 	ctx.AC:Play("Block", { Fade = 0.1 })
 	Request:FireServer("Block", { Seq = ctx.Seq, On = true })
+end
+
+-- the guard is gone with the last arm: down at once, whatever held it
+local function dropGuardLocal()
+	if not ctx or ctx.State ~= "Blocking" then
+		return
+	end
+	ctx.ReleaseQueued = false
+	setLocal("Idle")
+	ctx.AC:Stop("Block", 0.12)
 end
 
 local function releaseBlock()
@@ -1348,7 +1377,11 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			FX.Sound("GuardBreak", data.P, 1)
 		end
 		if type(data.H) == "number" and victim then
-			Gore.Hit(victim, data.H, if typeof(data.DV) == "Vector3" then data.DV else nil)
+			Gore.Hit(victim, data.H, if typeof(data.DV) == "Vector3" then data.DV else nil, data.GS)
+		end
+		-- my last arm just went: no guard (the server has already dropped it)
+		if ctx and victim == ctx.Char and type(data.GS) == "number" and Config.ArmsAt(data.GS) == 0 then
+			dropGuardLocal()
 		end
 		if not ctx then
 			return
@@ -1363,8 +1396,16 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 					startCarry(a, data.HS or 0)
 				end
 			end
-			-- your damage, stamped beside the victim's head (one per victim, re-stamped each hit)
-			if victim and (data.D or 0) > 0 then
+			-- your damage, stamped beside the victim's head (one per victim, re-stamped each hit): already
+			-- there from this screen's own impact frame, only corrected if the server's number differs
+			local p = if shown then ctx.Predicted[data.Seq] else nil
+			if p and p.D then
+				p.Confirmed = true
+				local delta = (data.D or 0) - p.D
+				if math.abs(delta) > 1e-3 then
+					FX.DamageCorrect(victim, delta)
+				end
+			elseif victim and (data.D or 0) > 0 then
 				local dk = if data.G then "Break"
 					elseif data.B then "Block"
 					elseif data.RD or def.Class == "Finisher" then "Finisher"
@@ -1540,11 +1581,14 @@ local function updateLocomotion(dt: number)
 	end
 
 	alignStep(dt)
-	-- predictions the server never confirmed are forgotten
+	-- predictions the server never confirmed are forgotten (and the number they stamped taken back)
 	if next(ctx.Predicted) ~= nil then
 		for seq, p in pairs(ctx.Predicted) do
 			if t - p.T > 2 then
 				ctx.Predicted[seq] = nil
+				if not p.Confirmed and p.D and p.Victim then
+					FX.DamageCorrect(p.Victim, -p.D)
+				end
 			end
 		end
 	end
@@ -1826,6 +1870,12 @@ local function setup(char: Model)
 			cancelActions()
 			endChain()
 			setLocal("Dead")
+		end
+	end))
+	-- the last arm lost to anything (a fall, a script - not only a blow): no guard
+	table.insert(c.Conns, char:GetAttributeChangedSignal("GoreStage"):Connect(function()
+		if ctx == c and armless() then
+			dropGuardLocal()
 		end
 	end))
 

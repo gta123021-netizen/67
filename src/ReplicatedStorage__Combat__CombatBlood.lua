@@ -92,6 +92,13 @@ rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = false
 rayParams.RespectCanCollide = true -- bushes, flowers and effects aren't surfaces blood lands on
 local filterAt = -math.huge
+-- bodies blood never lands on besides the players and the practice dummies (the gore's NPCs: their
+-- own stumps bleed from inside them); weak, so a removed body is simply dropped
+local ignored: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+function Blood.Ignore(body: Instance)
+	ignored[body] = true
+	filterAt = -math.huge
+end
 local function refreshFilter(force: boolean?)
 	local t = os.clock()
 	if not force and t - filterAt < 0.25 then
@@ -104,10 +111,15 @@ local function refreshFilter(force: boolean?)
 			table.insert(list, p.Character)
 		end
 	end
-	for _, name in ipairs({ "PracticeDummies", "CombatFX", "CombatShatter", "CombatDebugDraw" }) do
+	for _, name in ipairs({ "PracticeDummies", "CombatFX", "CombatShatter", "CombatGore", "CombatDebugDraw" }) do
 		local f = workspace:FindFirstChild(name)
 		if f then
 			table.insert(list, f)
+		end
+	end
+	for body in pairs(ignored) do
+		if body.Parent then
+			table.insert(list, body)
 		end
 	end
 	rayParams.FilterDescendantsInstances = list
@@ -142,13 +154,15 @@ Blood.CastSolid = castSolid
 ---------------------------------------------------------------------------
 -- the spray: the place's own blood effects (ReplicatedStorage.Combat.VFX), aimed and cut short
 ---------------------------------------------------------------------------
---[[ how long a particle thrown from `pos` along a cone round `dir` (half-angle `spread` deg) at up
-	to `speed` can live before ANY of them could meet a surface. Their real curved paths - down the
+--[[ how long a particle thrown from `pos` along a cone round `dir` at up to `speed` can live before
+	ANY of them could meet a surface. `spread` / `spreadY` are the emitter's SpreadAngle: a particle
+	is turned up to that far about each of two axes at once, so the cone that holds them all is the
+	one through its corners (cos = cos X * cos Y: 50 x 50 degrees reaches 66 degrees). Their real curved paths - down the
 	cone's axis and all round its rim - are traced through the world in short chords; the soonest
 	contact wins. `accel` / `drag` are the emitter's own (a ParticleEmitter's Drag halves the speed
 	every 1/Drag seconds); without them the particles move like the droplets. `life` is the longest
 	they would live anyway. ]]
-function Blood.ParticleClearance(pos: Vector3, dir: Vector3, spread: number, speed: number, accel: Vector3?, drag: number?, life: number?): number
+function Blood.ParticleClearance(pos: Vector3, dir: Vector3, spread: number, speed: number, accel: Vector3?, drag: number?, life: number?, spreadY: number?): number
 	refreshFilter()
 	local LIFE = life or 0.6
 	local STEP = 0.05 -- (each chord is ray-cast whole: gravity bends it by a hair)
@@ -168,7 +182,10 @@ function Blood.ParticleClearance(pos: Vector3, dir: Vector3, spread: number, spe
 	right = right.Unit
 	local fwd = right:Cross(d).Unit
 	local soonest = LIFE
-	local a = math.rad(math.min(spread, 179))
+	local sx, sy = math.abs(spread), math.abs(spreadY or spread)
+	local a = if sx >= 90 or sy >= 90
+		then math.rad(179)
+		else math.acos(math.clamp(math.cos(math.rad(sx)) * math.cos(math.rad(sy)), -1, 1))
 	local dirs = { d }
 	-- the rim all round, a ring half way out, and the steepest paths up and down the cone can take
 	-- (a floor or a ceiling is met first along those, wherever the cone is tilted)
@@ -664,7 +681,7 @@ function Blood.Burst(pos: Vector3, dir: Vector3, name: string, scale: number?, c
 			if speed < 1 then
 				return nil -- (a splash that stays where it burst)
 			end
-			return Blood.ParticleClearance(pos, aim, e.SpreadAngle.X, speed, e.Acceleration, e.Drag, e.Lifetime.Max)
+			return Blood.ParticleClearance(pos, aim, e.SpreadAngle.X, speed, e.Acceleration, e.Drag, e.Lifetime.Max, e.SpreadAngle.Y)
 		end,
 	})
 	Blood.Stats.Bursts += 1

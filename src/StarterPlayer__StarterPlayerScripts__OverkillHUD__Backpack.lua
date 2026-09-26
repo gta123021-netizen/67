@@ -478,6 +478,11 @@ return function(ctx: any)
 		if tool.Parent == character then
 			humanoid:UnequipTools()
 		elseif tool.Enabled then
+			-- (a tool is held in the right hand: with that arm lost in a fight, nothing is held)
+			local stage = character and character:GetAttribute("GoreStage")
+			if type(stage) == "number" and stage >= 1 then
+				return
+			end
 			humanoid:EquipTool(tool)
 		end
 	end

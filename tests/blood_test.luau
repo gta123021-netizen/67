@@ -373,16 +373,16 @@ end
 section("6. The particle bursts never reach a surface")
 local function particleWorst(e, maxT)
 	-- the emitter's own motion (Roblox: Drag halves the speed every 1/Drag s; acceleration added)
+	-- Roblox turns each particle up to SpreadAngle.X about one axis and up to .Y about the other, at
+	-- once: every combination on a 7 x 7 grid, the four corners (the widest paths) included
 	local cf = e.CFrame
 	local up = cf.UpVector
-	local spreadDeg = e.Spread.X
+	local rx, rz = cf.RightVector, cf.LookVector
 	local worstFloor, worstWall = math.huge, math.huge
-	for i = 0, 24 do
-		local ang = math.rad(spreadDeg) * (i % 5) / 4
-		local rot = (i // 5) / 5 * math.pi * 2
-		local axis = up:Cross(V3.new(0, 1, 0))
-		axis = if axis.Magnitude > 1e-3 then axis.Unit else V3.new(1, 0, 0)
-		local d = CF.fromAxisAngle(up, rot) * (CF.fromAxisAngle(axis, ang) * up)
+	for i = 0, 48 do
+		local ax = math.rad(e.Spread.X) * ((i % 7) / 3 - 1)
+		local az = math.rad(e.Spread.Y) * ((i // 7) / 3 - 1)
+		local d = CF.fromAxisAngle(rz, az) * (CF.fromAxisAngle(rx, ax) * up)
 		local p, v = cf.Position, d * e.Speed.Max
 		local t = 0
 		while t < e.Lifetime.Max - 1e-9 do

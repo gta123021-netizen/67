@@ -88,7 +88,12 @@ function AvatarRig.clone(char: Model?): Rig?
 	local model = copy :: Model
 	model.Name = "AvatarPreview"
 	for _, d in ipairs(model:GetDescendants()) do
-		if (STRIP[d.ClassName] or d:GetAttribute("OverkillAura")) and d.Parent then
+		-- (a limb the fight took is shown as it was: a portrait is the fighter whole)
+		local lost = d:GetAttribute("GoreHidden")
+		if type(lost) == "number" and (d:IsA("BasePart") or d:IsA("Decal")) then
+			(d :: any).Transparency = lost
+		end
+		if (STRIP[d.ClassName] or d:GetAttribute("OverkillAura") or d:GetAttribute("OverkillGore")) and d.Parent then
 			d:Destroy()
 		elseif d:IsA("BasePart") then
 			d.LocalTransparencyModifier = 0
