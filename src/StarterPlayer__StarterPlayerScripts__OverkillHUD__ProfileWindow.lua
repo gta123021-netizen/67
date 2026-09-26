@@ -399,7 +399,10 @@ return function(ctx: any)
 	local right = new("Frame", { Name = "Right", BackgroundTransparency = 1, Position = UDim2.fromOffset(340, 14), Size = UDim2.new(1, -340, 1, -14), ZIndex = 12, Parent = content })
 	Kit.heading({ Text = "STATS", Parent = right, Size = UDim2.new(1, 0, 0, 30), ZIndex = 12 })
 	local grid = new("Frame", { Name = "Tiles", BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 42), Size = UDim2.new(1, 0, 0, 262), ZIndex = 12, Parent = right })
-	new("UIGridLayout", { CellSize = UDim2.new(1 / 3, -11, 0, 124), CellPadding = UDim2.fromOffset(16, 14), SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid })
+	-- three tiles to a row, each a whole number of units wide (a scale-sized cell is rounded tile by
+	-- tile and the gaps between them come out a pixel apart): (948 content - 340 left - 2 gaps) / 3
+	local TILE_W = math.floor((W - 52 - 340 - 16 * 2) / 3)
+	new("UIGridLayout", { CellSize = UDim2.fromOffset(TILE_W, 124), CellPadding = UDim2.fromOffset(16, 14), SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid })
 
 	local tiles: { [string]: TextLabel } = {}
 	local counters: { [string]: (number, boolean?) -> () } = {}

@@ -133,18 +133,22 @@ return function(ctx: any)
 	local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, Size = UDim2.fromScale(1 / FIT, 1 / FIT), ZIndex = 16, Parent = plate })
 	new("UIScale", { Name = "Fit", Scale = FIT, Parent = content })
 
+	-- the badge's glow lives in the clipped skin: it lights the card, never the gap round it
+	local function fit(v: number): number
+		return math.floor(v * FIT + 0.5)
+	end
 	local badgeGlow = Kit.image({
 		Name = "Glow",
 		Image = Theme.Icon.Glow,
 		ImageColor3 = C.Blue,
 		ImageTransparency = 0.45,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(20 + 46, H / 2),
-		Size = UDim2.fromOffset(180, 180),
-		ZIndex = 16,
-		Parent = content,
+		Position = UDim2.fromOffset(fit(20 + 46), CARD_H / 2),
+		Size = UDim2.fromOffset(fit(180), fit(180)),
+		ZIndex = 16, -- over the stripes and the wash inside the skin
+		Parent = skin,
 	})
-	local glowLoop = TweenService:Create(badgeGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { ImageTransparency = 0.75, Size = UDim2.fromOffset(150, 150) })
+	local glowLoop = TweenService:Create(badgeGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { ImageTransparency = 0.75, Size = UDim2.fromOffset(fit(150), fit(150)) })
 	local badge = Q.Badge(content, "Duel", 92, 17)
 	badge.Frame.AnchorPoint = Vector2.new(0, 0.5)
 	badge.Frame.Position = UDim2.new(0, 20, 0.5, 0)

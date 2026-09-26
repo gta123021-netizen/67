@@ -113,6 +113,9 @@
   any two neighbours is identical (13.925 layout units x the HUD scale). The party frames and the portal
   card can no longer overlap. On phones the party frames stand beside the column.
 - The dock tiles' name tags no longer hang below the tiles' outline.
+- Repeated rows use whole-unit sizes so their gaps are identical: the dock tiles, the party rows, the
+  queue card's search segments and the profile window's stat tiles (a 1/3-scale cell was rounded tile
+  by tile). The portal and queue cards' badge glows are clipped to their cards (they bled into the gaps).
 - Portal card: drawn at the column's width with **one outline of the HUD's weight on top, no drop
   shadow** - the same on all four sides (the old one had a 10-unit shadow under it and a scaled 7.5
   stroke half hidden by its skin). The bottom-right queue card got the same treatment and its search

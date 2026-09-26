@@ -191,6 +191,7 @@ return function(ctx: any)
 	-- badge with a soft glow and a comet ring running around it
 	local BADGE = 84
 	local bc = Vector2.new(20 + BADGE / 2, 20 + BADGE / 2)
+	-- (in the clipped skin: the glow lights the card, never the stack's gap round it)
 	local glow = Kit.image({
 		Name = "BadgeGlow",
 		Image = Theme.Icon.Glow,
@@ -199,8 +200,8 @@ return function(ctx: any)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromOffset(bc.X, bc.Y),
 		Size = UDim2.fromOffset(176, 176),
-		ZIndex = 21,
-		Parent = plate,
+		ZIndex = 21, -- over the stripes and the band inside the skin
+		Parent = body.Skin,
 	})
 	table.insert(qLoops, TweenService:Create(glow, TweenInfo.new(1.1, Enum.EasingStyle.Sine, LOOP, -1, true), { ImageTransparency = 0.78, Size = UDim2.fromOffset(150, 150) }))
 	local ring = new("Frame", {

@@ -181,7 +181,13 @@ for pos = 1, 4 do
 		end
 	end
 	check(("uppercut at %d: %s"):format(pos, table.concat(names, " ")), table.concat(names, " ") == table.concat(want, " "), table.concat(want, " "))
-	check(("uppercut at %d: all 5 connect"):format(pos), #hits(A, B, from) == 5, #hits(A, B, from))
+	local h = hits(A, B, from)
+	check(("uppercut at %d: all 5 connect"):format(pos), #h == 5, #h)
+	local allStun = #h == 5
+	for i = 1, 4 do
+		allStun = allStun and h[i] ~= nil and h[i].S > 0 and not h[i].IM
+	end
+	check(("uppercut at %d: hits 1-4 all stun (the budget never cuts a real string)"):format(pos), allStun and h[5].RD == true)
 	remove(A)
 	remove(B)
 end
