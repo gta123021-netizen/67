@@ -4,6 +4,11 @@
 	its measured path through the attack's active frames (CombatPaths, from the pack's keyframes);
 	a fighter's body is a box in its own space. Between two frames the tip's swept path is tested
 	as well, so a limb that snaps a long way in one frame (the pack's punches do) can't skip a body.
+
+	The capsule ends AT the limb's own end: CombatPaths' tip is the end face of the arm or leg, and
+	a capsule of radius r reaching past it would connect r studs beyond the visible fist. So every
+	measured segment is pulled in by the attack's radius at the tip end (Shortened), and the rounded
+	end of the capsule lands exactly on the limb's end: visible hit = hit, visible miss = miss.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,7 +18,32 @@ local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local Paths = require(CombatFolder:WaitForChild("CombatPaths"))
 
 local HD = {}
-HD.Paths = Paths
+
+-- every attack's path with its segments pulled in at the tip by that attack's own radius
+local function shorten(a: Vector3, b: Vector3, r: number): Vector3
+	local d = b - a
+	local len = d.Magnitude
+	if len < 1e-6 then
+		return b
+	end
+	return a + d * (math.max(0, len - r) / len)
+end
+local shortened = {}
+for key, path in pairs(Paths) do
+	local def = Config.Attacks[key]
+	local r = if def then def.Hitbox or 0.5 else 0.5
+	local samples = {}
+	for i, smp in ipairs(path.Samples) do
+		local caps = {}
+		for li, cap in ipairs(smp[2]) do
+			caps[li] = { cap[1], shorten(cap[1], cap[2], r) }
+		end
+		samples[i] = { smp[1], caps }
+	end
+	shortened[key] = { From = path.From, To = path.To, Limbs = path.Limbs, Samples = samples }
+end
+HD.Paths = shortened
+HD.RawPaths = Paths
 
 local BODY = Config.Hitbox.Body
 
@@ -43,7 +73,7 @@ HD.SegmentBox = segmentBox
 
 -- the limb capsules at clip time tau (interpolated between the measured frames), attacker space
 function HD.CapsulesAt(key: string, tau: number): { { Vector3 } }?
-	local path = Paths[key]
+	local path = shortened[key]
 	if not path then
 		return nil
 	end
@@ -71,7 +101,7 @@ end
 
 -- the clip times to test between two moments: both ends plus every measured frame in between
 function HD.TimesBetween(key: string, fromTau: number, toTau: number): { number }
-	local path = Paths[key]
+	local path = shortened[key]
 	local list = { fromTau }
 	if path then
 		for _, smp in ipairs(path.Samples) do

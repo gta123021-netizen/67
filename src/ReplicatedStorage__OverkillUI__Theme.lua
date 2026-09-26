@@ -219,6 +219,34 @@ Theme.MaxScale = 1.35
 Theme.TouchBoost = 1.3 -- phones get chunkier buttons
 Theme.HotbarSlots = 5 -- ability-bar style: keys 1-5, everything else lives in the bag
 
+-- The HUD's shared measurements (layout units at the reference size). Every group stacked in the
+-- bottom-left column (party frames, the portal card, the dock, the hero / coin / level pills) is
+-- drawn with the SAME ink outline, centred on its own frame's edge, and the column lays the frames
+-- out GroupGap apart with one UIListLayout - so the visible gap between any two neighbours, ink
+-- edge to ink edge, is exactly GroupGap - Outline x 1.35 (the same number everywhere, whatever the
+-- screen, the HUD size setting, the party size or the queue state).
+Theme.Hud = {
+	Outline = 4.5, -- every HUD group's ink outline (Kit.stroke units; x1.35 on screen)
+	ThinOutline = 3.5, -- tags, chips and small badges on those groups
+	GroupGap = 20, -- HUD_GROUP_GAP: between stacked HUD groups (frame edge to frame edge)
+	IconGap = 12, -- between repeated tiles in a row (the dock)
+	RowGap = 12, -- between repeated rows inside a group (party members)
+	Margin = 30, -- the column's distance from the screen's left edge
+	Bottom = 24, -- ...from the bottom (desktop)
+	TouchTop = 84, -- ...from the top (phones: clear of Roblox's top bar)
+	ColumnWidth = 548, -- five dock tiles and four gaps: 5 x 100 + 4 x 12
+	PillHeight = 60, -- the hero / coin / level pills
+	TileWidth = 100, -- dock tiles
+	TileHeight = 116,
+	CardHeight = 100, -- the portal (queue) card, at the column's width
+	CardRadius = 28, -- ...its corners (the same as the dock tiles')
+	PartyWidth = 290, -- the party frames
+	PartyRowWidth = 270,
+	PartyRowHeight = 62,
+	PartyHeaderHeight = 32,
+}
+Theme.HUD_GROUP_GAP = Theme.Hud.GroupGap
+
 -- background music: add Sound ids here (they play in a loop, volume is in Settings)
 Theme.Music = {}
 

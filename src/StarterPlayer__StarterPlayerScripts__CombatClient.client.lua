@@ -11,10 +11,22 @@
 	  Dash        Q / gamepad B / touch DASH    direction = movement input (W/A/S/D, stick)
 	  Sprint      Shift (hold) / gamepad L3 (toggle)              also: keep moving and you break into a run
 	  Shift lock  Left Ctrl (toggle)   camera over the shoulder, you face where you aim
-	  Forward dash + M1 = dash strike, jump + M1 = stomp
+	  Forward dash + M1 = dash strike, jump + M1 = Ground Smash (never out of a live combo)
 
 	Timing comes from CombatConfig (measured from the animation pack); the server repeats the same
 	timing and has the final word (Ack corrections, Hit events, the CombatState attribute).
+
+	INPUT BUFFER. One press is remembered at a time (the newest): what it was, when, and which chain
+	it was meant for. A strike pressed a little before its chain point fires exactly on it; a press
+	(strike or dash) made a little before control comes back - the end of a stun, a dash, getting up -
+	fires the moment it does. A press is used once, only for the chain it was meant for, and never
+	after it has gone stale; anything that ends the chain or cancels the action drops it.
+
+	TARGET LOCK. When the server says the chain is locked onto a fighter (the "LK" of a Hit, the
+	Ack's Chain.Lock), the rest of the chain is spaced and faced on that fighter: a critically
+	damped turn toward them, the step-in and the follow after each connect keeping the next
+	strike's own distance, sliding along walls, never through them. No reticle, no snap, no camera
+	grab - the camera and the aim are free; the lock only decides where the strikes go.
 ]]
 
 local Players = game:GetService("Players")
@@ -53,10 +65,15 @@ end)
 
 AnimController.Preload()
 
+local STUDIO = RunService:IsStudio()
 local ATTACK_ANIMS = { "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep", "Downslam", "DashAttack" }
 local DASH_ANIMS = { "DashForward", "DashBackward", "DashLeft", "DashRight" }
 local REACTIONS = { "HitLeft", "HitRight" }
 local COMBO = Config.Combo
+local LOCK = Config.Lock
+
+-- the impact each strike sounds like (Config.Sounds)
+local IMPACT_SOUND = { Swing1 = "Hit", Swing2 = "Hit", Swing3 = "Hook", Uppercut = "Uppercut", Sweep = "Sweep", DashAttack = "DashHit", Downslam = "HeavyHit" }
 
 local DEFAULT_KEYS = { Dash = Enum.KeyCode.Q, Block = Enum.KeyCode.F, Sprint = Enum.KeyCode.LeftShift, ShiftLock = Enum.KeyCode.LeftControl }
 local function keyFor(action: string): Enum.KeyCode
@@ -70,7 +87,7 @@ end
 
 -- Studio tuning: player:SetAttribute("CombatDebug", true) prints the client's combat decisions
 local function dbg(...: any)
-	if player:GetAttribute("CombatDebug") == true then
+	if STUDIO and player:GetAttribute("CombatDebug") == true then
 		print("[CombatDbg]", string.format("%.3f", os.clock() % 1000), ...)
 	end
 end
@@ -99,16 +116,28 @@ local function charList(): { Instance }
 	return list
 end
 
+-- a fighter that can still be struck (alive, on its feet)
+local function standing(model: Instance?): BasePart?
+	if not (model and model:IsA("Model") and model.Parent) then
+		return nil
+	end
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	local r = model:FindFirstChild("HumanoidRootPart")
+	if hum and hum.Health > 0 and r and r:IsA("BasePart") and model:GetAttribute("Ragdolled") ~= true then
+		return r
+	end
+	return nil
+end
+
 -- every other fighter's root (dashes stop in front of them instead of passing through)
 local function fighterRoots(): { BasePart }
 	local list = {}
 	for _, m in ipairs(charList()) do
 		local models = if m:IsA("Folder") then m:GetChildren() else { m }
 		for _, c in ipairs(models) do
-			if c ~= ctx.Char and c:IsA("Model") and c:GetAttribute("Ragdolled") ~= true then
-				local hum = c:FindFirstChildOfClass("Humanoid")
-				local r = c:FindFirstChild("HumanoidRootPart")
-				if hum and hum.Health > 0 and r and r:IsA("BasePart") then
+			if c ~= ctx.Char then
+				local r = standing(c)
+				if r then
 					table.insert(list, r)
 				end
 			end
@@ -159,7 +188,30 @@ local function updateTurn()
 	end
 end
 
+---------------------------------------------------------------------------
+-- the input buffer (one press, used once, only for the chain it was meant for)
+---------------------------------------------------------------------------
+local BUFFER_DASH = 0.15 -- a dash pressed this long before control returns still goes
+
+local function bufferPress(kind: string)
+	ctx.Buffer = Rules.BufferPress(kind, now(), ctx.ChainNo)
+end
+
+-- the buffered press, if it is still good (then it is spent). kinds: which presses this spot may use
+local function takeBuffer(kinds: { [string]: boolean }, sameChain: boolean): string?
+	local kind, drop = Rules.BufferTake(ctx.Buffer, kinds, now(), if sameChain then ctx.ChainNo else nil, BUFFER_DASH)
+	if drop then
+		ctx.Buffer = nil
+	end
+	return kind
+end
+
+local ATTACKS = { Light = true, Heavy = true }
+local ANY_PRESS = { Light = true, Heavy = true, Dash = true }
+local DASH_ONLY = { Dash = true }
+
 local tryAttack: (string) -> ()
+local tryDash: () -> ()
 
 local function setLocal(s: string, duration: number?)
 	if not ctx then
@@ -177,16 +229,52 @@ local function setLocal(s: string, duration: number?)
 		ctx.AC:Stop("GroundRecovery", 0.25)
 	end
 	updateTurn()
-	-- a press made just before control came back goes off now
-	if (s == "Idle" or s == "ComboWindow") and ctx.Queued and now() - ctx.QueuedAt <= COMBO.Buffer + 0.1 and was ~= "Attacking" then
-		local k = ctx.Queued
-		ctx.Queued = nil
-		task.defer(function()
-			if ctx then
-				tryAttack(k)
-			end
-		end)
+	-- control is back: a press made just before it goes off now (once)
+	if (s == "Idle" or s == "ComboWindow") and ctx.Buffer then
+		local kinds = if was == "Attacking" then DASH_ONLY else ANY_PRESS
+		local k = takeBuffer(kinds, false)
+		if k then
+			local c = ctx
+			task.defer(function()
+				if ctx ~= c then
+					return
+				end
+				if k == "Dash" then
+					tryDash()
+				else
+					tryAttack(k)
+				end
+			end)
+		end
 	end
+end
+
+---------------------------------------------------------------------------
+-- target lock (the server decides; this side only faces and spaces on it)
+---------------------------------------------------------------------------
+local function setLock(model: Instance?)
+	if not ctx then
+		return
+	end
+	if model and standing(model) and model ~= ctx.Char then
+		if not (ctx.Lock and ctx.Lock.Model == model and ctx.Lock.Chain == ctx.ChainNo) then
+			dbg("lock", model.Name)
+		end
+		ctx.Lock = { Model = model, Chain = ctx.ChainNo }
+	end
+end
+
+-- the locked fighter's root while the lock still stands (this chain, fighter up and alive)
+local function lockRoot(): BasePart?
+	local l = ctx and ctx.Lock
+	if not l then
+		return nil
+	end
+	if l.Chain ~= ctx.ChainNo then
+		ctx.Lock = nil
+		return nil
+	end
+	return standing(l.Model)
 end
 
 local function cancelActions(keepBlock: boolean?)
@@ -195,9 +283,10 @@ local function cancelActions(keepBlock: boolean?)
 	end
 	ctx.AttackSerial += 1
 	ctx.Attack = nil
-	ctx.Queued = nil
+	ctx.Buffer = nil
 	ctx.Step = nil
 	ctx.Follow = nil
+	ctx.Align = nil
 	ctx.DashSerial += 1
 	ctx.ChainTick += 1
 	ctx.AC:StopMany(ATTACK_ANIMS, 0.08)
@@ -211,7 +300,9 @@ end
 local function endChain()
 	Rules.Reset(ctx.Chain)
 	ctx.ChainTick += 1
-	ctx.Queued = nil
+	ctx.ChainNo += 1 -- a new chain: presses buffered for the old one and its lock are gone
+	ctx.Buffer = nil
+	ctx.Lock = nil
 	if os.clock() >= ctx.CounterHoldUntil then
 		Counter.Drop()
 	end
@@ -232,17 +323,16 @@ local function aimDirection(): Vector3
 	return flat(ctx.Root.CFrame.LookVector)
 end
 
--- nearest fighter in front of the aim, for facing and the step-in
+-- nearest fighter in front of the aim, for facing and the step-in (an unlocked strike)
 local function findTarget(aim: Vector3): BasePart?
 	local best, bestD = nil, Config.AssistRange
 	local cosA = math.cos(math.rad(Config.AssistAngle))
 	for _, m in ipairs(charList()) do
 		local models = if m:IsA("Folder") then m:GetChildren() else { m }
 		for _, c in ipairs(models) do
-			if c ~= ctx.Char and c:IsA("Model") and c:GetAttribute("CombatEntity") and c:GetAttribute("Ragdolled") ~= true then
-				local hum = c:FindFirstChildOfClass("Humanoid")
-				local r = c:FindFirstChild("HumanoidRootPart")
-				if hum and hum.Health > 0 and r and r:IsA("BasePart") then
+			if c ~= ctx.Char and c:IsA("Model") and c:GetAttribute("CombatEntity") then
+				local r = standing(c)
+				if r then
 					local d = r.Position - ctx.Root.Position
 					local fd = Vector3.new(d.X, 0, d.Z)
 					local dist = fd.Magnitude
@@ -256,43 +346,81 @@ local function findTarget(aim: Vector3): BasePart?
 	return best
 end
 
-local function faceTo(dir: Vector3, duration: number)
-	local root = ctx.Root
-	local target = flat(dir)
-	ctx.FaceSerial += 1
-	local serial = ctx.FaceSerial
-	if duration <= 0 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + target)
+-- the ONE facing controller: a critically damped turn toward a body (or a fixed direction), with a
+-- top turn rate - smooth, never an instant 180. Runs every frame while ctx.Align is set; the
+-- strike (or dash) that set it owns it (Serial), so a cancelled action never turns the body again.
+--   align = { Target = BasePart?, Dir = Vector3?, Serial, Owner = "Attack" | "Dash" | "Hold",
+--             Until, Omega, MaxRate }
+local function alignTo(target: BasePart?, dir: Vector3?, owner: string, untilT: number, omega: number?, maxRate: number?)
+	ctx.Align = {
+		Target = target,
+		Dir = if dir then flat(dir) else nil,
+		Owner = owner,
+		Serial = if owner == "Dash" then ctx.DashSerial else ctx.AttackSerial,
+		Until = untilT,
+		Omega = omega or LOCK.Turn.Omega,
+		MaxRate = maxRate or LOCK.Turn.MaxRate,
+	}
+end
+
+local function yawOf(v: Vector3): number
+	return math.atan2(-v.X, -v.Z)
+end
+
+local function alignStep(dt: number)
+	local a = ctx.Align
+	if not a then
 		return
 	end
-	local start = flat(root.CFrame.LookVector)
-	local t0 = now()
-	local conn: RBXScriptConnection? = nil
-	conn = RunService.RenderStepped:Connect(function()
-		local k = math.min(1, (now() - t0) / duration)
-		if not ctx or ctx.FaceSerial ~= serial or not root.Parent then
-			if conn then
-				conn:Disconnect()
-			end
-			return
+	local serial = if a.Owner == "Dash" then ctx.DashSerial else ctx.AttackSerial
+	if a.Serial ~= serial or now() > a.Until or ctx.State == "Ragdolled" or ctx.State == "Dead" then
+		ctx.Align = nil
+		ctx.YawVel = 0
+		return
+	end
+	local root = ctx.Root
+	local dir = a.Dir
+	if a.Target and a.Target.Parent then
+		local d = a.Target.Position - root.Position
+		if Vector3.new(d.X, 0, d.Z).Magnitude > 0.3 then
+			dir = flat(d)
 		end
-		local d = start:Lerp(target, 1 - (1 - k) ^ 2)
-		if d.Magnitude > 1e-3 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + d.Unit)
-		end
-		if k >= 1 and conn then
-			conn:Disconnect()
-		end
-	end)
+	end
+	if not dir then
+		return
+	end
+	-- a critically damped turn (Motion.Turn): no overshoot, never faster than MaxRate
+	local cur = yawOf(flat(root.CFrame.LookVector))
+	local y = (cur - yawOf(dir) + math.pi) % (2 * math.pi) - math.pi
+	local step, vel = Motion.Turn(y, ctx.YawVel, a.Omega, a.MaxRate, dt)
+	ctx.YawVel = vel
+	if math.abs(step) < 1e-5 and math.abs(y) < 1e-3 then
+		return
+	end
+	local pos = root.Position
+	root.CFrame = CFrame.new(pos) * CFrame.Angles(0, cur + step, 0)
 end
 
 -- The attack mover: one drive on the root carrying two parts that add up -
 --   the step-in: close in on the target during the strike's load-up so the limb lands on the body.
 --     It follows the target while it happens and eases out as the gap reaches the strike's Ideal
 --     distance; it never travels more than MaxLunge.
---   the follow: after a clean chain hit, slide along with the victim's knockback (a share of it),
---     so the next strike of the chain is still in reach. A new strike never cancels it.
+--   the follow: after a clean chain hit, move with the victim's knockback. Locked: keep the next
+--     strike's own distance from the victim (a damped pull toward that spot, capped, only while
+--     they are in range); unlocked: slide a share of their knockback.
 -- Whichever starts, the drive is (re)started with both parts, so neither cuts the other off.
+local function nextIdeal(): number
+	local list = Rules.Followups(ctx.Chain)
+	local best = nil
+	for _, name in ipairs(list) do
+		local d = Config.Attacks[name]
+		if d and (not best or d.Ideal < best) then
+			best = d.Ideal
+		end
+	end
+	return best or Config.Attacks.Swing1.Ideal
+end
+
 local function followVelocity(): Vector3
 	local f = ctx.Follow
 	if not f then
@@ -303,7 +431,24 @@ local function followVelocity(): Vector3
 		return Vector3.zero
 	end
 	local k = 1 - t / f.Dur
-	return f.Vec * (0.35 + 0.65 * k * k)
+	local profile = f.Vec * (0.35 + 0.65 * k * k)
+	local target = f.Target
+	if target and target.Parent then
+		-- locked: stay at the next strike's distance from where this screen has the victim
+		local d = target.Position - ctx.Root.Position
+		local fd = Vector3.new(d.X, 0, d.Z)
+		local dist = fd.Magnitude
+		if dist > LOCK.Keep.Range or dist < 0.05 then
+			return Vector3.zero
+		end
+		local want = dist - f.Ideal
+		local speed = math.clamp(want * LOCK.Keep.Gain, -6, LOCK.Keep.MaxSpeed)
+		if want < 0 and -want > LOCK.Keep.BackOff then
+			speed = 0 -- far too close: let the knockback open the gap, never scoot backwards
+		end
+		return fd.Unit * speed + profile * 0.25
+	end
+	return profile
 end
 
 local function stepVelocity(dt: number): Vector3
@@ -323,13 +468,18 @@ local function stepVelocity(dt: number): Vector3
 		local fd = Vector3.new(d.X, 0, d.Z)
 		if fd.Magnitude > 0.05 then
 			dir = fd.Unit
-			-- keep facing the body being stepped into
-			local look = flat(root.CFrame.LookVector):Lerp(dir, 0.35)
-			if look.Magnitude > 1e-3 then
-				root.CFrame = CFrame.lookAt(root.Position, root.Position + look.Unit)
-			end
 		end
-		want = math.max(0, fd.Magnitude - s.Ideal)
+		want = fd.Magnitude - s.Ideal
+		if want < 0 then
+			-- already inside the strike's distance: a small, eased step back (never more than BackOff)
+			if s.Locked and -want > 0.2 and s.Back < LOCK.Keep.BackOff then
+				local back = math.min(-want, LOCK.Keep.BackOff - s.Back)
+				local speed = math.min(back / math.max(s.Dur - t, 1 / 60), 8)
+				s.Back += speed * dt
+				return -dir * speed
+			end
+			return Vector3.zero
+		end
 	end
 	want = math.min(want, s.Budget - s.Travelled)
 	local remaining = math.max(s.Dur - t, 1 / 60)
@@ -364,7 +514,7 @@ local function driveAttack()
 	end, { StopAtWalls = true, Ignore = charList() })
 end
 
-local function stepIn(def: any, target: BasePart?, serial: number)
+local function stepIn(def: any, target: BasePart?, serial: number, locked: boolean)
 	if def.MaxLunge <= 0 then
 		return
 	end
@@ -375,7 +525,7 @@ local function stepIn(def: any, target: BasePart?, serial: number)
 			return
 		end
 		local root = ctx.Root
-		dbg("step-in", def.Id, target and target.Parent and target.Parent.Name, target and (target.Position - root.Position).Magnitude)
+		dbg("step-in", def.Id, target and target.Parent and target.Parent.Name, target and (target.Position - root.Position).Magnitude, if locked then "locked" else "")
 		ctx.Step = {
 			Serial = serial,
 			T0 = now(),
@@ -384,6 +534,8 @@ local function stepIn(def: any, target: BasePart?, serial: number)
 			Ideal = def.Ideal,
 			Budget = if target then def.MaxLunge else 0.5, -- no target: just a small weight shift
 			Travelled = 0,
+			Back = 0,
+			Locked = locked,
 			Fallback = flat(root.CFrame.LookVector),
 		}
 		driveAttack()
@@ -415,6 +567,16 @@ local function m1StillHeld(): boolean
 	elseif src == "Gamepad" then
 		return UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonR2)
 			or UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonX)
+	elseif src == "Touch" then
+		-- the finger that pressed ATTACK: slid off the button and lifted still counts as let go
+		local input = ctx.M1Input
+		if input then
+			local st = input.UserInputState
+			if st == Enum.UserInputState.End or st == Enum.UserInputState.Cancel then
+				ctx.M1Held = false
+				return false
+			end
+		end
 	end
 	return true
 end
@@ -436,13 +598,12 @@ local function scheduleChain()
 			task.delay(wait, tick)
 			return
 		end
-		dbg("tick", c.State, c.Queued, m1StillHeld())
 		if c.State ~= "Attacking" and c.State ~= "ComboWindow" then
 			return
 		end
-		if c.Queued then
-			local k = c.Queued
-			c.Queued = nil
+		local k = takeBuffer(ATTACKS, true)
+		dbg("tick", c.State, k, m1StillHeld())
+		if k then
 			tryAttack(k)
 		elseif m1StillHeld() then
 			tryAttack("Light")
@@ -470,6 +631,29 @@ local function reportFrame(seq: number, land: boolean?)
 	})
 end
 
+-- a non-looping clip ending by itself drops its weight to nothing on one frame (a pop back to the
+-- idle pose): a strike whose clip runs out with nothing after it fades out over its last moment
+local function tailFade(track: AnimationTrack?, def: any, serial: number)
+	if not track then
+		return
+	end
+	local length = def.Length
+	local function check()
+		if not ctx or ctx.AttackSerial ~= serial or not track.IsPlaying then
+			return
+		end
+		local left = (length - track.TimePosition) / math.max(def.Speed, 0.05)
+		if track.Speed < 0.05 or left > 0.2 then
+			-- frozen (hit-stop, the stomp's hang) or not there yet: look again
+			task.delay(math.max(0.03, left - 0.16), check)
+			return
+		end
+		-- faded out just as the clip reaches its last frame
+		track:Stop(math.max(0.05, left * 0.9))
+	end
+	task.delay(math.max(0, def.LengthReal - 0.2), check)
+end
+
 -- replaySeq: re-showing a strike the server already started (no new request)
 local function playAttack(name: string, slot: number, replaySeq: number?)
 	local def = Config.Attacks[name]
@@ -486,8 +670,8 @@ local function playAttack(name: string, slot: number, replaySeq: number?)
 	local prevName = if prev and ctx.AttackTrack and ctx.AttackTrack.IsPlaying then prev.Name else nil
 	ctx.AttackSerial += 1
 	local serial = ctx.AttackSerial
-	ctx.Attack = { Name = name, Slot = slot, T0 = t, Serial = serial, Seq = seq, Def = def, Stopped = false }
-	ctx.Queued = nil
+	ctx.Attack = { Name = name, Slot = slot, T0 = t, Serial = serial, Seq = seq, Def = def, Stopped = false, SentAt = workspace:GetServerTimeNow() }
+	ctx.Buffer = if ctx.Buffer and ctx.Buffer.Kind == "Dash" then ctx.Buffer else nil
 	setLocal("Attacking", busyTime(def))
 	ctx.IdleTime = 0
 	local fade = Config.BlendInto(prevName, name)
@@ -496,9 +680,11 @@ local function playAttack(name: string, slot: number, replaySeq: number?)
 			ctx.AC:Stop(k, fade)
 		end
 	end
-	ctx.AC:StopMany(DASH_ANIMS, 0.06)
+	ctx.AC:StopMany(DASH_ANIMS, math.max(fade, 0.06))
 	ctx.AC:StopMany(REACTIONS, 0.08)
+	ctx.AC:StopMany({ "Jump", "Fall" }, 0.1)
 	ctx.AttackTrack = ctx.AC:Play(def.Anim, { Fade = fade, Speed = def.Speed, Restart = true })
+	tailFade(ctx.AttackTrack, def, serial)
 	-- the whoosh lands with the snap of the limb, not the start of the wind-up
 	local heavy = def.Rank >= 3
 	task.delay(math.max(0, def.HitReal - 0.07), function()
@@ -506,15 +692,19 @@ local function playAttack(name: string, slot: number, replaySeq: number?)
 			FX.Sound(if heavy then "HeavySwing" else "Swing", ctx.Root.Position, 1)
 		end
 	end)
-	-- face the target (or the aim) and step in
+	-- face and space: the locked fighter (the chain's own), else the nearest one in the aim
 	if name ~= "Downslam" then
-		local aim = aimDirection()
-		local target = findTarget(aim)
-		local faceDir = if target then (target.Position - ctx.Root.Position) else aim
-		faceTo(faceDir, if name == "DashAttack" then 0 elseif heavy then 0.1 else 0.07)
-		if name ~= "DashAttack" then
-			stepIn(def, target, serial)
+		local lr = if slot > 0 then lockRoot() else nil
+		local target = lr or findTarget(aimDirection())
+		local untilT = t + def.HitReal + 0.12
+		if name == "DashAttack" then
+			alignTo(target, if target then nil else aimDirection(), "Attack", untilT, 34, 26)
+		else
+			alignTo(target, if target then nil else aimDirection(), "Attack", untilT)
+			stepIn(def, target, serial, lr ~= nil)
 		end
+		ctx.StrikeTarget = target
+		ctx.StrikeIdeal = def.Ideal
 	end
 	if not replaySeq then
 		Request:FireServer("Attack", {
@@ -556,8 +746,9 @@ end
 
 local function startDownslam()
 	local def = Config.Attacks.Downslam
+	ctx.DownslamBefore = ctx.DownslamUntil
 	ctx.DownslamUntil = now() + def.LengthReal + def.Cooldown
-	Rules.Reset(ctx.Chain)
+	endChain()
 	Motion.Stop(ctx.Root)
 	ctx.AirHeight = heightAboveGround(ctx.Root)
 	playAttack("Downslam", 0)
@@ -600,6 +791,14 @@ local function startDownslam()
 		if grounded or e > def.Hang + def.MaxFall then
 			done()
 			root.AssemblyLinearVelocity = Vector3.new(0, math.min(root.AssemblyLinearVelocity.Y, 0), 0)
+			if not grounded then
+				-- the fall never ended (off a ledge, into the void): no smash - the server agrees
+				if c.Attack and c.Attack.Serial == serial then
+					cancelActions(true)
+					setLocal("Idle")
+				end
+				return
+			end
 			if c.Attack and c.Attack.Serial == serial then
 				reportFrame(c.Attack.Seq, true)
 			end
@@ -609,13 +808,15 @@ local function startDownslam()
 				end
 				track:AdjustSpeed(def.Speed)
 			end
-			-- the attacker's own stomp lands on its own screen at once (everyone else: the server's FX)
+			-- the attacker's own smash lands on its own screen at once (everyone else: the server's FX)
 			task.delay(def.StompDelay, function()
 				if ctx == c and c.AttackSerial == serial then
-					local p = root.CFrame:PointToWorldSpace(Vector3.new(-0.5, -2.9, -1.1))
+					local p = root.CFrame:PointToWorldSpace(def.Contact)
 					FX.Stomp(p, c.Char)
 					FX.Sound("Slam", p, 1)
-					FX.Shake(c.Hum, 0.5, 0.18)
+					FX.Sound("SlamSub", p, 1)
+					FX.Sound("SlamDebris", p, 1)
+					FX.Shake(c.Hum, 0.55, 0.22)
 				end
 			end)
 			c.StateUntil = now() + math.max(0.05, (def.Length - def.StompAt) / def.Speed)
@@ -634,23 +835,21 @@ local function startDashAttack()
 	local def = Config.Attacks.DashAttack
 	ctx.DashAttackUntil = now() + def.LengthReal + def.Cooldown
 	ctx.DashSerial += 1
-	Rules.Reset(ctx.Chain)
+	endChain()
 	local v = ctx.Root.AssemblyLinearVelocity
 	local speed = math.max(Vector3.new(v.X, 0, v.Z).Magnitude, Config.Dash.Forward.TopSpeed * 0.6)
 	local dir = flat(ctx.Root.CFrame.LookVector)
 	playAttack("DashAttack", 0)
-	-- momentum carries straight into the strike, then bleeds off (stopping short of a body)
+	FX.Sound("Step", ctx.Root.Position, 1)
+	-- momentum carries straight into the strike, then bleeds off - stopping where the extended arm
+	-- meets a body (its Ideal), never through it
 	local dur = 0.24
 	Motion.Drive(ctx.Root, dur, function(t)
 		return dir * speed * (1 - t / dur) ^ 1.3
-	end, { StopAtWalls = true, Ignore = charList(), Fighters = fighterRoots(), Gap = Config.Dash.StopGap - 0.2, Width = Config.Dash.StopWidth })
+	end, { StopAtWalls = true, Ignore = charList(), Fighters = fighterRoots(), Gap = def.Ideal - 0.6, Width = Config.Dash.StopWidth })
 end
 
-local function queue(kind: string)
-	ctx.Queued = kind
-	ctx.QueuedAt = now()
-end
-
+-- a strike on the way in: M1 / M2 pressed (or fired from the buffer)
 function tryAttack(kind: string)
 	if inputBlocked() then
 		dbg("try blocked", kind)
@@ -671,13 +870,13 @@ function tryAttack(kind: string)
 			end
 		end
 		if ctx.StateUntil and ctx.StateUntil - t <= COMBO.Buffer then
-			queue(kind)
+			bufferPress(kind)
 		end
 		return
 	end
 	if s == "Stunned" or s == "GuardBroken" or s == "Recovering" then
 		if ctx.StateUntil and ctx.StateUntil - t <= COMBO.Buffer then
-			queue(kind)
+			bufferPress(kind)
 		end
 		return
 	end
@@ -685,31 +884,37 @@ function tryAttack(kind: string)
 		dbg("try state", kind, s)
 		return
 	end
-	-- jump + M1 is the stomp. Only a real jump counts: a body that leaves the ground for a moment
-	-- (the slide along with a knocked-back victim running over a bump or off a kerb) keeps its
-	-- ground combo - a mashed M1 must never vanish there
-	if s ~= "Attacking" and airborne() and t - ctx.LastJumpAt < 1.6 then
+	local live = Rules.Live(ctx.Chain, t)
+	-- jump + M1 is the Ground Smash - a standalone move: only from a real jump, only while no combo
+	-- is live (a body that leaves the ground for a moment mid-string - the slide along with a
+	-- knocked-back victim over a kerb - keeps its ground combo: a mashed M1 never vanishes there)
+	if s == "Idle" and not live and airborne() and t - ctx.LastJumpAt < 1.6 then
 		dbg("try air", kind, s)
 		if kind == "Light" and t >= ctx.DownslamUntil then
 			startDownslam()
 		end
 		return
 	end
-	if s == "Attacking" and not Rules.Live(ctx.Chain, t) then
+	if s == "Attacking" and not live then
 		return -- a finisher / dash strike / stomp owns the character to its end
 	end
 	local verdict, name, slot, heavy, lights = Rules.Decide(ctx.Chain, kind, t)
 	dbg("try", kind, s, verdict, name, slot, t - ctx.Chain.OpenAt)
 	if verdict == "early" then
-		-- pressed before the chain point: kept if close enough, fired exactly on it
+		-- pressed before the chain point: kept if close enough, fired exactly on it (once)
 		if t >= ctx.Chain.OpenAt - COMBO.Buffer then
-			queue(kind)
+			bufferPress(kind)
 			scheduleChain()
 		end
 		return
 	end
 	if verdict ~= "go" or not name then
 		return
+	end
+	if (slot :: number) <= 1 then
+		-- a strike that opens a new chain: nothing of the last one (its lock, its presses) carries over
+		ctx.ChainNo += 1
+		ctx.Lock = nil
 	end
 	Rules.Commit(ctx.Chain, name, slot :: number, heavy :: boolean, lights :: number, t)
 	playAttack(name, slot :: number)
@@ -786,12 +991,19 @@ local function resolveDash(): (string, Vector3, Vector3)
 	return "Left", -R, F
 end
 
-local function tryDash()
+function tryDash()
 	if inputBlocked() then
 		return
 	end
 	local t = now()
-	if not States.Allows(ctx.State, "Dash") or t < ctx.DashCooldownUntil or airborne() then
+	if not States.Allows(ctx.State, "Dash") then
+		-- a dash pressed just before control comes back goes off the moment it does
+		if ctx.StateUntil and ctx.StateUntil - t <= BUFFER_DASH and ctx.State ~= "Blocking" then
+			bufferPress("Dash")
+		end
+		return
+	end
+	if t < ctx.DashCooldownUntil or airborne() then
 		return
 	end
 	local dirName, dir, face = resolveDash()
@@ -806,8 +1018,10 @@ local function tryDash()
 	endChain()
 	ctx.IdleTime = 0
 	setLocal("Dashing", def.Lock)
-	faceTo(face, 0)
+	-- turn to face the dash's frame fast but smoothly (never a one-frame flip)
+	alignTo(nil, face, "Dash", t + def.Lock, 30, 24)
 	ctx.AC:StopMany(ATTACK_ANIMS, 0.05)
+	ctx.AC:StopMany({ "Jump", "Fall" }, 0.08)
 	ctx.AC:Play(def.Anim, { Fade = 0.05, Speed = def.Speed, Restart = true })
 	FX.Sound("Dash", ctx.Root.Position, 1)
 	local delay = def.Delay or 0
@@ -854,6 +1068,7 @@ local function tryBlock()
 	ctx.IdleTime = 0
 	ctx.ReleaseQueued = false
 	endChain()
+	ctx.Align = nil
 	ctx.AC:StopMany(ATTACK_ANIMS, 0.1)
 	setLocal("Blocking")
 	ctx.AC:Play("Block", { Fade = 0.1 })
@@ -893,9 +1108,13 @@ local function holdReaction(track: AnimationTrack?, speed: number, stunSerial: n
 	end)
 end
 
--- the reaction clip, held on its impact frame through the hit-stop, then played at `speed`
+-- the reaction clip, held on its impact frame through the hit-stop, then played at `speed`. A
+-- reaction that lands on top of another cross-fades from the pose it is in (PlayFresh), so a flurry
+-- of blows reads as one body taking them, not a clip restarting on every hit
 local function react(key: string, speed: number, hitstop: number, fade: number?): AnimationTrack?
-	local tr = ctx.AC:Play(key, { Fade = fade or 0.04, Speed = 0, Restart = true })
+	local tr = ctx.AC:PlayFresh(key, { Fade = fade or 0.06, Speed = 0 })
+	local other = if key == "HitLeft" then "HitRight" else "HitLeft"
+	ctx.AC:Stop(other, fade or 0.06)
 	local serial = ctx.StateSerial
 	local c = ctx
 	task.delay(hitstop, function()
@@ -930,8 +1149,9 @@ local function onHitMe(data: any, def: any)
 		react(data.R, data.RS, hs, 0.05)
 		if data.KT > 0 then
 			local kb, kt = data.KB, data.KT
+			local serial = ctx.StateSerial
 			task.delay(hs, function()
-				if ctx and ctx.State == "GuardBroken" then
+				if ctx and ctx.State == "GuardBroken" and ctx.StateSerial == serial then
 					Motion.Push(root, kb, kt, charList())
 				end
 			end)
@@ -966,6 +1186,7 @@ local function onHitMe(data: any, def: any)
 			react(data.R, data.RS, hs)
 		end
 	end
+	-- (data.IM: in the escape window the blow still pushes, but the body keeps control)
 	if data.KT > 0 then
 		local kb, kt = data.KB, data.KT
 		task.delay(hs, function()
@@ -976,10 +1197,9 @@ local function onHitMe(data: any, def: any)
 	elseif data.KB.Y > 0 then
 		Motion.Push(root, data.KB, 0)
 	end
-	FX.Shake(hum, class.VictimShake, if def.Rank >= 3 then 0.18 else 0.12)
+	FX.Shake(hum, class.VictimShake * (if data.IM then 0.6 else 1), if def.Rank >= 3 then 0.18 else 0.12)
 end
 
--- the attacker's side of the hit-stop: the clip freezes on contact, the chain waits for it
 -- where a landed blow's effect goes and which way it is thrown. The server's contact point is
 -- mapped onto the body as THIS screen shows it (its height and side on the body, just in front of
 -- the surface the attacker hit), so the burst always sits on the fighter it came from; it is thrown
@@ -1008,6 +1228,7 @@ local function impactOn(data: any, def: any): (Vector3, Vector3)
 	return at, dir.Unit
 end
 
+-- the attacker's side of the hit-stop: the clip freezes on contact, the chain waits for it
 local function hitStop(data: any, def: any)
 	local a = ctx.Attack
 	local track = ctx.AttackTrack
@@ -1026,6 +1247,9 @@ local function hitStop(data: any, def: any)
 	if ctx.State == "Attacking" and ctx.StateUntil then
 		ctx.StateUntil += d
 	end
+	if ctx.Align and ctx.Align.Serial == a.Serial then
+		ctx.Align.Until += d
+	end
 	if track and track.IsPlaying then
 		local serial = a.Serial
 		track:AdjustSpeed(0.02)
@@ -1037,8 +1261,29 @@ local function hitStop(data: any, def: any)
 	end
 end
 
+-- another fighter's strike: the air it cuts (their own client already played it for them)
+local function otherSwing(model: Model, key: string)
+	local def = Config.Attacks[key]
+	if not def then
+		return
+	end
+	local heavy = def.Rank >= 3
+	task.delay(math.max(0, def.HitReal - 0.07), function()
+		local r = model.Parent and model:FindFirstChild("HumanoidRootPart")
+		if r and r:IsA("BasePart") then
+			FX.Sound(if heavy then "HeavySwing" else "Swing", r.Position, 1)
+		end
+	end)
+end
+
+local debugHit: (data: any) -> () = function() end
+local debugAck: (data: any) -> () = function() end
+
 Event.OnClientEvent:Connect(function(kind: string, data: any)
 	if kind == "Hit" then
+		if type(data) ~= "table" then
+			return
+		end
 		local def = Config.Attacks[data.K]
 		if not def then
 			return
@@ -1064,7 +1309,6 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 		end
 		if data.G then
 			FX.Sound("GuardBreak", data.P, 1)
-			FX.Sound("GuardBreakThud", data.P, 1)
 			if victim then
 				local at = impactOn(data, def)
 				FX.GuardBreak(victim, at, data.A)
@@ -1072,10 +1316,13 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 		elseif data.B then
 			FX.Sound(if heavy then "HeavyBlock" else "Block", data.P, 1)
 		elseif data.RD then
-			FX.Sound("HeavyHit", data.P, 0.9)
-			FX.Sound("Knockdown", data.P, 1)
+			FX.Sound(IMPACT_SOUND[def.Id] or "HeavyHit", data.P, 1)
+			local p = data.P
+			task.delay((data.HS or 0) + 0.35, function()
+				FX.Sound("Knockdown", p, 1)
+			end)
 		else
-			FX.Sound(if heavy then "HeavyHit" else "Hit", data.P, 1)
+			FX.Sound(IMPACT_SOUND[def.Id] or (if heavy then "HeavyHit" else "Hit"), data.P, if data.IM then 0.97 else 1)
 		end
 		if victim then
 			if data.B then
@@ -1088,16 +1335,24 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			return
 		end
 		if data.A == ctx.Char then
+			debugHit(data)
+			-- the server says this chain is locked onto that fighter: space and face the rest on them
+			if data.LK and (data.Slot or 0) > 0 and ctx.Attack and ctx.Chain.Slot > 0 then
+				setLock(data.LK)
+			end
 			hitStop(data, def)
 			-- a clean chain strike carries the attacker along with the victim's slide
 			if not data.B and not data.G and not data.RD and (data.KT or 0) > 0.02 and def.Class ~= "Dash" then
+				local lr = if data.LK == victim then lockRoot() else nil
 				local f = {
 					Vec = Vector3.new(data.KB.X, 0, data.KB.Z) * Config.Hitbox.Follow,
 					T0 = now() + (data.HS or 0),
-					Dur = data.KT,
+					Dur = data.KT + (if lr then 0.12 else 0),
+					Target = lr,
+					Ideal = nextIdeal(),
 				}
 				ctx.Follow = f
-				dbg("follow", data.K, f.Vec.Magnitude, f.Dur)
+				dbg("follow", data.K, f.Vec.Magnitude, f.Dur, if lr then "locked" else "")
 				local c = ctx
 				task.delay(data.HS or 0, function()
 					if ctx == c and c.Follow == f and (c.State == "Attacking" or c.State == "ComboWindow") then
@@ -1129,18 +1384,30 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			onHitMe(data, def)
 		end
 	elseif kind == "FX" then
-		if data.Kind == "Dash" and typeof(data.A) == "Instance" and data.A:IsA("Model") and not (ctx and data.A == ctx.Char) then
-			FX.Dash(data.A, data.Dir)
+		if type(data) ~= "table" then
+			return
 		end
-		if data.Kind == "Slam" and not (ctx and data.A == ctx.Char) and typeof(data.P) == "Vector3" then
-			FX.Stomp(data.P, if typeof(data.A) == "Instance" and data.A:IsA("Model") then data.A else nil)
+		local mine = ctx ~= nil and data.A == ctx.Char
+		local model = if typeof(data.A) == "Instance" and data.A:IsA("Model") then data.A else nil
+		if data.Kind == "Dash" and model and not mine then
+			FX.Dash(model, data.Dir)
+			local r = model:FindFirstChild("HumanoidRootPart")
+			if r and r:IsA("BasePart") then
+				FX.Sound("Dash", r.Position, 1)
+			end
+		elseif data.Kind == "Swing" and model and not mine and type(data.K) == "string" then
+			otherSwing(model, data.K)
+		elseif data.Kind == "Slam" and not mine and typeof(data.P) == "Vector3" then
+			FX.Stomp(data.P, model)
 			FX.Sound("Slam", data.P, 1)
-			if ctx and (data.P - ctx.Root.Position).Magnitude < 20 then
-				FX.Shake(ctx.Hum, 0.5, 0.18)
+			FX.Sound("SlamSub", data.P, 1)
+			FX.Sound("SlamDebris", data.P, 1)
+			if ctx and (data.P - ctx.Root.Position).Magnitude < 24 then
+				FX.Shake(ctx.Hum, 0.5 * (1 - (data.P - ctx.Root.Position).Magnitude / 30), 0.2)
 			end
 		end
 	elseif kind == "Ack" then
-		if not ctx then
+		if not ctx or type(data) ~= "table" then
 			return
 		end
 		if data.Kind == "Attack" then
@@ -1148,12 +1415,16 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			if not (a and a.Seq == data.Seq) then
 				return
 			end
+			debugAck(data)
 			if data.Ok then
 				-- the server's count stands (it only differs right at a window edge)
 				if type(data.Chain) == "table" then
 					ctx.Chain.Slot = data.Chain.Slot
 					ctx.Chain.Heavy = data.Chain.Heavy
 					ctx.Chain.Lights = data.Chain.Lights
+					if data.Chain.Lock then
+						setLock(data.Chain.Lock)
+					end
 				end
 				if data.Action and data.Action ~= a.Name then
 					-- the server started a different strike: show that one instead
@@ -1177,6 +1448,9 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			else
 				-- refused: roll back to where the server has us
 				dbg("refused", a.Name, a.Slot)
+				if a.Name == "Downslam" and ctx.DownslamBefore then
+					ctx.DownslamUntil = ctx.DownslamBefore -- the server spent no cooldown
+				end
 				cancelActions(true)
 				endChain()
 				if ctx.State == "Attacking" then
@@ -1192,6 +1466,15 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 			ctx.AC:Stop("Block", 0.1)
 			setLocal("Idle")
 			ctx.BlockRetryAt = now() + 0.1
+		end
+	elseif kind == "Cancel" then
+		-- the server dropped a strike it had started (a Ground Smash with no real jump or no landing)
+		if ctx and type(data) == "table" and ctx.Attack and ctx.Attack.Seq == data.Seq then
+			dbg("cancelled", ctx.Attack.Name)
+			cancelActions(true)
+			if ctx.State == "Attacking" then
+				setLocal("Idle")
+			end
 		end
 	elseif kind == "Play" then
 		if ctx and type(data) == "table" and type(data.Key) == "string" then
@@ -1234,16 +1517,29 @@ local function updateLocomotion(dt: number)
 		s = ctx.State
 	end
 
-	-- a combo whose window closed is over (the counter goes with it)
+	-- a combo whose window closed is over (the counter and the lock go with it)
 	if ctx.Chain.Slot > 0 and not Rules.Live(ctx.Chain, t) and s ~= "Attacking" then
 		endChain()
 	end
 	if Counter.Shown() and ctx.Chain.Slot == 0 and s ~= "Attacking" and t >= ctx.CounterHoldUntil then
 		Counter.Drop()
 	end
-	if ctx.Queued and t - ctx.QueuedAt > 0.6 then
-		ctx.Queued = nil -- a stale press never fires late
+	if ctx.Buffer and t - ctx.Buffer.At > 0.5 then
+		ctx.Buffer = nil -- a stale press never fires late
 	end
+
+	-- between the strikes of a locked chain the body keeps facing its fighter (while standing still;
+	-- walking off turns it freely again)
+	if s == "ComboWindow" and not wantsMove then
+		local lr = lockRoot()
+		if lr and not ctx.Align then
+			alignTo(lr, nil, "Attack", t + 0.1)
+		elseif lr and ctx.Align and ctx.Align.Owner == "Attack" then
+			ctx.Align.Target = lr
+			ctx.Align.Until = math.max(ctx.Align.Until, t + 0.1)
+		end
+	end
+	alignStep(dt)
 
 	-- a strike's tail never plays under walking legs
 	if (s == "Idle" or s == "ComboWindow") and wantsMove and ctx.AttackTrack and ctx.AttackTrack.IsPlaying then
@@ -1322,7 +1618,7 @@ local function updateLocomotion(dt: number)
 		ac:Stop("Climb", 0.15)
 	end
 	local stomping = s == "Attacking" and ctx.Attack ~= nil and ctx.Attack.Name == "Downslam"
-	if hs == Enum.HumanoidStateType.Freefall and t - ctx.FreefallAt > 0.2 and not stomping then
+	if hs == Enum.HumanoidStateType.Freefall and t - ctx.FreefallAt > 0.2 and not stomping and s ~= "Attacking" then
 		if not ac:IsPlaying("Fall") then
 			ac:Play("Fall", { Fade = 0.2 })
 		end
@@ -1360,7 +1656,9 @@ local function updateLocomotion(dt: number)
 	if hum.WalkSpeed ~= ctx.Speed then
 		hum.WalkSpeed = ctx.Speed
 	end
-	local jump = if s == "Idle" or s == "ComboWindow" then Config.JumpHeight else 0
+	-- no jumping out of a live combo: the chain's window is for its next strike (a jump there was the
+	-- way to reset a string into a Ground Smash)
+	local jump = if s == "Idle" then Config.JumpHeight else 0
 	if hum.JumpHeight ~= jump then
 		hum.JumpHeight = jump
 	end
@@ -1370,6 +1668,8 @@ end
 ---------------------------------------------------------------------------
 -- character lifecycle
 ---------------------------------------------------------------------------
+local debugCharacter: (c: any) -> () = function() end
+
 local function teardown()
 	if not ctx then
 		return
@@ -1405,19 +1705,25 @@ local function setup(char: Model)
 		StateUntil = nil,
 		Chain = Rules.New(),
 		ChainTick = 0,
+		ChainNo = 0,
+		Lock = nil,
+		Align = nil,
+		YawVel = 0,
 		Attack = nil,
 		AttackTrack = nil,
 		AttackSerial = 0,
 		AirHeight = 0,
 		Step = nil,
 		Follow = nil,
+		StrikeTarget = nil,
+		StrikeIdeal = nil,
 		Seq = 0,
 		DashSeq = 0,
 		BlockSeq = 0,
-		Queued = nil,
-		QueuedAt = 0,
+		Buffer = nil,
 		M1Held = false,
 		M1Source = nil,
+		M1Input = nil,
 		BlockHeld = false,
 		BlockRetryAt = 0,
 		BlockLockUntil = 0,
@@ -1433,7 +1739,7 @@ local function setup(char: Model)
 		DashCooldownUntil = 0,
 		DashAttackUntil = 0,
 		DownslamUntil = 0,
-		FaceSerial = 0,
+		DownslamBefore = nil,
 		IdleTime = 0,
 		LastJumpAt = -10,
 		FreefallAt = 0,
@@ -1448,15 +1754,18 @@ local function setup(char: Model)
 	hum.JumpHeight = Config.JumpHeight
 	c.AC:Play("NeutralIdle", { Fade = 0 })
 
-	table.insert(c.Conns, hum.StateChanged:Connect(function(_, new)
+	table.insert(c.Conns, hum.StateChanged:Connect(function(old, new)
 		if new == Enum.HumanoidStateType.Jumping then
 			c.LastJumpAt = now()
 			c.IdleTime = 0
-			if c.State == "Idle" or c.State == "ComboWindow" then
+			if c.State == "Idle" then
 				c.AC:Play("Jump", { Fade = 0.08, Restart = true })
 			end
 		elseif new == Enum.HumanoidStateType.Freefall then
 			c.FreefallAt = now()
+		elseif new == Enum.HumanoidStateType.Landed and old == Enum.HumanoidStateType.Freefall and c.State ~= "Attacking" and now() - c.FreefallAt > 0.35 then
+			-- feet back down after a real fall (a smash has its own landing)
+			FX.Sound("Land", root.Position - Vector3.new(0, 2.8, 0), 1)
 		end
 	end))
 
@@ -1519,6 +1828,7 @@ local function setup(char: Model)
 			updateLocomotion(dt)
 		end
 	end))
+	debugCharacter(c)
 end
 
 player.CharacterAdded:Connect(setup)
@@ -1538,7 +1848,8 @@ end
 -- shift lock: Overkill's own (a rebindable key, default Left Ctrl; Roblox's Shift toggle is off so
 -- Shift can sprint). The mouse locks to the centre, the camera sits over the right shoulder and the
 -- fighter faces where the camera looks whenever its state lets it turn (never mid-strike, never
--- while guarding - the guard keeps its facing).
+-- while guarding - the guard keeps its facing - and never between the strikes of a locked chain:
+-- the lock keeps the body on its fighter while the camera stays free).
 ---------------------------------------------------------------------------
 local shiftLock = false
 local lockApplied = false
@@ -1568,7 +1879,7 @@ RunService:BindToRenderStep("OverkillShiftLock", Enum.RenderPriority.Camera.Valu
 			UserInputService.MouseIcon = LOCK_ICON
 			FX.SetCameraBase(ctx.Hum, LOCK_OFFSET)
 		end
-		if States.Allows(ctx.State, "Turn") then
+		if States.Allows(ctx.State, "Turn") and not ctx.Align then
 			ctx.Hum.AutoRotate = false
 			local cam = workspace.CurrentCamera
 			local root = ctx.Root
@@ -1590,17 +1901,19 @@ RunService:BindToRenderStep("OverkillShiftLock", Enum.RenderPriority.Camera.Valu
 	end
 end)
 
-local function m1Down(source: string?)
+local function m1Down(source: string?, input: InputObject?)
 	if not ctx then
 		return
 	end
 	ctx.M1Held = true
 	ctx.M1Source = source or "Touch"
+	ctx.M1Input = input
 	tryAttack("Light")
 end
 local function m1Up()
 	if ctx then
 		ctx.M1Held = false
+		ctx.M1Input = nil
 	end
 end
 local function heavyPress()
@@ -1624,7 +1937,7 @@ local function blockUp()
 end
 
 -- M2 is a click, not a camera drag: it fires on release unless the mouse travelled (shift lock:
--- the camera never drags, so it fires on press)
+-- the camera never drags, so it fires on press). One press is one heavy, whichever way it fires.
 local m2 = { Down = false, At = 0, Travel = 0, Fired = false }
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
@@ -1700,6 +2013,7 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 		m1Up()
 	elseif ut == Enum.UserInputType.MouseButton2 then
 		if m2.Down and not m2.Fired and now() - m2.At <= 0.35 and m2.Travel <= 8 then
+			m2.Fired = true
 			heavyPress()
 		end
 		m2.Down = false
@@ -1709,6 +2023,11 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 		elseif kc == Enum.KeyCode.ButtonL2 then
 			blockUp()
 		end
+	elseif ut == Enum.UserInputType.Touch then
+		-- the finger holding ATTACK lifted somewhere off the button
+		if ctx.M1Input == input then
+			m1Up()
+		end
 	end
 end)
 
@@ -1716,19 +2035,22 @@ end)
 player:GetAttributeChangedSignal("UIWindow"):Connect(function()
 	if ctx and player:GetAttribute("UIWindow") ~= nil then
 		ctx.M1Held = false
+		ctx.Buffer = nil
 		blockUp()
 	end
 end)
 player:GetAttributeChangedSignal("UIOverlay"):Connect(function()
 	if ctx and player:GetAttribute("UIOverlay") ~= nil then
 		ctx.M1Held = false
+		ctx.Buffer = nil
 		blockUp()
 	end
 end)
 
 -- Studio play-tests: a BindableEvent that presses the same buttons with exact timing
--- (game.Players.LocalPlayer.CombatDebug:Fire("Light" | "Heavy" | "BlockOn" | "BlockOff" | "Dash", dir?))
-if RunService:IsStudio() then
+-- (game.Players.LocalPlayer.CombatDebug:Fire("Light" | "HoldLight" | "ReleaseLight" | "Heavy" |
+--  "BlockOn" | "BlockOff" | "Dash", dir?))
+if STUDIO then
 	local hook = Instance.new("BindableEvent")
 	hook.Name = "CombatDebug"
 	hook.Event:Connect(function(cmd: string, arg: any)
@@ -1764,8 +2086,8 @@ local touch = script:FindFirstChild("TouchControls")
 if touch then
 	task.spawn(function()
 		require(touch).Start({
-			M1Down = function()
-				m1Down("Touch")
+			M1Down = function(input: InputObject?)
+				m1Down("Touch", input)
 			end,
 			M1Up = m1Up,
 			Heavy = heavyPress,
@@ -1777,5 +2099,201 @@ if touch then
 				end
 			end,
 		})
+	end)
+end
+
+---------------------------------------------------------------------------
+-- STUDIO ONLY: the combat debug overlay (F7, or player attribute CombatDebug = true)
+-- Everything the fight is deciding, live: the local and the server state, the chain, the lock, the
+-- stun budget and the escape window, cooldowns, the strike's ideal vs actual range, the network
+-- timing; in the world a tether to the locked fighter, the ideal distance round the target and each
+-- contact point. Server-side capsules: workspace:SetAttribute("CombatDebugDraw", true) from the
+-- server's command bar. None of this exists in a live game.
+---------------------------------------------------------------------------
+if STUDIO then
+	local shown = false
+	local gui: ScreenGui? = nil
+	local label: TextLabel? = nil
+	local tether: Beam? = nil
+	local ring: Part? = nil
+	local a0: Attachment? = nil
+	local a1: Attachment? = nil
+	local lastAck = { Delta = 0, Rtt = 0, Ok = true, Action = "" }
+	local lastHit = ""
+
+	debugAck = function(data: any)
+		local a = ctx and ctx.Attack
+		if a and a.SentAt and type(data.At) == "number" then
+			lastAck.Delta = data.At - a.SentAt
+			lastAck.Rtt = now() - a.T0
+		end
+		lastAck.Ok = data.Ok == true
+		lastAck.Action = tostring(data.Action or "-")
+	end
+	debugHit = function(data: any)
+		if not shown then
+			return
+		end
+		lastHit = string.format("%s #%d -> %s  %s dmg %.1f  stun %.2f  hs %.3f%s%s", tostring(data.K), data.Slot or 0,
+			if typeof(data.V) == "Instance" then data.V.Name else "?", if data.B then "BLOCK" elseif data.G then "BREAK" elseif data.RD then "LAUNCH" elseif data.IM then "IMMUNE" else "CLEAN",
+			data.D or 0, data.S or 0, data.HS or 0, if data.LK then "  [LOCK]" else "", if data.PR then "" else "  (no restart)")
+		-- the contact point, for half a second
+		if typeof(data.P) == "Vector3" then
+			local p = Instance.new("Part")
+			p.Name = "CombatDebugContact"
+			p.Shape = Enum.PartType.Ball
+			p.Size = Vector3.one * 0.45
+			p.Anchored = true
+			p.CanCollide = false
+			p.CanQuery = false
+			p.CanTouch = false
+			p.Material = Enum.Material.Neon
+			p.Color = if data.B then Color3.fromRGB(90, 170, 255) elseif data.IM then Color3.fromRGB(255, 220, 90) else Color3.fromRGB(255, 70, 70)
+			p.CFrame = CFrame.new(data.P)
+			p.Parent = workspace
+			game:GetService("Debris"):AddItem(p, 0.5)
+		end
+	end
+	debugCharacter = function(_c: any) end
+
+	local function build()
+		local g = Instance.new("ScreenGui")
+		g.Name = "CombatDebugOverlay"
+		g.ResetOnSpawn = false
+		g.DisplayOrder = 100
+		g.Parent = player:WaitForChild("PlayerGui")
+		local l = Instance.new("TextLabel")
+		l.BackgroundColor3 = Color3.new(0, 0, 0)
+		l.BackgroundTransparency = 0.35
+		l.TextColor3 = Color3.new(1, 1, 1)
+		l.Font = Enum.Font.Code
+		l.TextSize = 14
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextYAlignment = Enum.TextYAlignment.Top
+		l.Position = UDim2.new(1, -470, 0, 60)
+		l.Size = UDim2.fromOffset(460, 300)
+		l.Parent = g
+		local pad = Instance.new("UIPadding")
+		pad.PaddingLeft = UDim.new(0, 8)
+		pad.PaddingTop = UDim.new(0, 6)
+		pad.Parent = l
+		gui, label = g, l
+		local b = Instance.new("Beam")
+		b.Width0, b.Width1 = 0.12, 0.12
+		b.FaceCamera = true
+		b.LightEmission = 1
+		b.Color = ColorSequence.new(Color3.fromRGB(255, 80, 80))
+		b.Enabled = false
+		tether = b
+		local r = Instance.new("Part")
+		r.Name = "CombatDebugIdeal"
+		r.Shape = Enum.PartType.Cylinder
+		r.Anchored = true
+		r.CanCollide = false
+		r.CanQuery = false
+		r.CanTouch = false
+		r.CastShadow = false
+		r.Material = Enum.Material.ForceField
+		r.Color = Color3.fromRGB(120, 255, 140)
+		r.Transparency = 0.2
+		ring = r
+	end
+
+	local function attr(model: Instance?, name: string): any
+		return if model then model:GetAttribute(name) else nil
+	end
+	local function cd(key: string): string
+		local c = ctx and ctx.Char
+		local untilT = attr(c, "CombatCD_" .. key)
+		if type(untilT) ~= "number" then
+			return "ready"
+		end
+		local left = untilT - workspace:GetServerTimeNow()
+		return if left > 0 then string.format("%.2fs", left) else "ready"
+	end
+
+	local function refresh()
+		if not (shown and ctx and label) then
+			return
+		end
+		local char = ctx.Char
+		local lr = lockRoot()
+		local tgt = lr or ctx.StrikeTarget
+		local range = if tgt and tgt.Parent then Vector3.new(tgt.Position.X - ctx.Root.Position.X, 0, tgt.Position.Z - ctx.Root.Position.Z).Magnitude else nil
+		local lines = {
+			"COMBAT DEBUG (Studio only)  [F7]",
+			string.format("state      local %-11s server %s", ctx.State, tostring(attr(char, "CombatState"))),
+			string.format("chain      local slot %d heavy %s  #%d   server %s", ctx.Chain.Slot, tostring(ctx.Chain.Heavy), ctx.ChainNo, tostring(attr(char, "Dbg_Chain") or "-")),
+			string.format("lock       local %-12s server %s   streak %s", if lr then lr.Parent.Name else "-", tostring(attr(char, "Dbg_Lock") or "-"), tostring(attr(char, "Dbg_Streak") or "-")),
+			string.format("stun       budget %s  immune %ss  control %ss", tostring(attr(char, "Dbg_Budget") or "?"), tostring(attr(char, "Dbg_Immune") or "?"), tostring(attr(char, "Dbg_Control") or "?")),
+			string.format("cooldown   dash %s   ground smash %s", cd("Dash"), cd("Downslam")),
+			string.format("range      ideal %s  actual %s  (%s)", if ctx.StrikeIdeal then string.format("%.2f", ctx.StrikeIdeal) else "-", if range then string.format("%.2f", range) else "-", if tgt and tgt.Parent then tgt.Parent.Name else "no target"),
+			string.format("network    ack %s %s  rtt %.0f ms  server-client %.0f ms", lastAck.Action, if lastAck.Ok then "ok" else "REFUSED", lastAck.Rtt * 1000, lastAck.Delta * 1000),
+			string.format("buffer     %s", if ctx.Buffer then string.format("%s (%.2fs ago)", ctx.Buffer.Kind, now() - ctx.Buffer.At) else "-"),
+			"last hit   " .. lastHit,
+		}
+		-- the victim's side: is the fighter you're hitting still stunnable?
+		if tgt and tgt.Parent then
+			lines[#lines + 1] = string.format("target     %s state %s  budget %s  immune %ss", tgt.Parent.Name, tostring(attr(tgt.Parent, "CombatState")), tostring(attr(tgt.Parent, "Dbg_Budget") or "?"), tostring(attr(tgt.Parent, "Dbg_Immune") or "?"))
+		end
+		label.Text = table.concat(lines, "\n")
+		-- tether + ideal ring
+		if tether and ring then
+			if lr then
+				a0 = a0 or Instance.new("Attachment")
+				a1 = a1 or Instance.new("Attachment")
+				;(a0 :: Attachment).Parent = ctx.Root
+				;(a1 :: Attachment).Parent = lr
+				tether.Attachment0 = a0
+				tether.Attachment1 = a1
+				tether.Parent = ctx.Root
+				tether.Enabled = true
+			else
+				tether.Enabled = false
+			end
+			if tgt and tgt.Parent and ctx.StrikeIdeal then
+				local d = ctx.StrikeIdeal * 2
+				ring.Size = Vector3.new(0.05, d, d)
+				ring.CFrame = CFrame.new(tgt.Position - Vector3.new(0, 2.95, 0)) * CFrame.Angles(0, 0, math.rad(90))
+				ring.Parent = workspace
+			else
+				ring.Parent = nil
+			end
+		end
+	end
+
+	local function setShown(on: boolean)
+		shown = on
+		if on and not gui then
+			build()
+		end
+		if gui then
+			gui.Enabled = on
+		end
+		if not on then
+			if tether then
+				tether.Enabled = false
+			end
+			if ring then
+				ring.Parent = nil
+			end
+		end
+	end
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if not processed and input.KeyCode == Enum.KeyCode.F7 then
+			setShown(not shown)
+		end
+	end)
+	player:GetAttributeChangedSignal("CombatDebug"):Connect(function()
+		setShown(player:GetAttribute("CombatDebug") == true)
+	end)
+	if player:GetAttribute("CombatDebug") == true then
+		setShown(true)
+	end
+	RunService.Heartbeat:Connect(function()
+		if shown then
+			refresh()
+		end
 	end)
 end

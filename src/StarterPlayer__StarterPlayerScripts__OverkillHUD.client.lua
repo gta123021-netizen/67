@@ -620,43 +620,54 @@ dim.Activated:Connect(function()
 end)
 
 ---------------------------------------------------------------------------
--- corner cluster: dock buttons + coins + level.
--- bottom-left on desktop (clear of the chat window), top-left on phones (clear of the thumbstick)
+-- the HUD column: party frames, the portal card, the dock buttons and the hero / coin / level
+-- pills, one stack. Bottom-left on desktop (clear of the chat window), top-left on phones (clear
+-- of the thumbstick; the party frames stand beside it there).
+-- EVERY group in it has the HUD's one outline (Theme.Hud.Outline) centred on its own frame's edge,
+-- and every frame is exactly as tall as the shape it draws (no spare rows, no drop shadows), so
+-- one UIListLayout with Theme.Hud.GroupGap makes the ink-to-ink gap between any two neighbours the
+-- same number, to the pixel: level-coins, coins-hero, hero-dock, dock-portal card, card-party.
 ---------------------------------------------------------------------------
-local CORNER_W = 548 -- five dock buttons (100 + 12 gap)
+local HUD = Theme.Hud
+local GAP = HUD.GroupGap
+local CORNER_W = HUD.ColumnWidth -- five dock buttons (5 x 100 + 4 x 12)
 local function cornerPos(off: boolean): UDim2
-	local x = if off then -CORNER_W - 30 else 30
+	local x = if off then -CORNER_W - HUD.Margin else HUD.Margin
 	if isTouch then
-		return UDim2.fromOffset(x, 84)
+		return UDim2.fromOffset(x, HUD.TouchTop)
 	end
-	return UDim2.new(0, x, 1, -24)
+	return UDim2.new(0, x, 1, -HUD.Bottom)
 end
 local corner = new("Frame", {
 	Name = "Corner",
 	BackgroundTransparency = 1,
 	AnchorPoint = if isTouch then Vector2.new(0, 0) else Vector2.new(0, 1),
 	Position = cornerPos(false),
-	Size = UDim2.fromOffset(CORNER_W, 382),
+	Size = UDim2.fromOffset(CORNER_W, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
 	Parent = hudLayer,
 })
--- the dock's tiles sit as far from the status pills as the pills sit from each other (20 edge to
--- edge: desktop = the dock row's spare 10 under its tiles + 5 + the pill row's 5; phones, where the
--- pills come first, = the pill row's 5 + 15)
-local CORNER_PAD = if isTouch then 15 else 5
-Kit.list(corner, Enum.FillDirection.Vertical, CORNER_PAD, Enum.HorizontalAlignment.Left, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
+Kit.list(corner, Enum.FillDirection.Vertical, GAP, Enum.HorizontalAlignment.Left, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
+-- where each group goes in the column (top to bottom): the party frames and the portal card come
+-- from their own modules (PartyWindow, PortalSigns) through ctx.Column / ctx.ColumnOrder
+ctx.Column = corner
+ctx.ColumnOrder = if isTouch then { Status = 1, Dock = 2, Portal = 3, Party = 4 } else { Party = 1, Portal = 2, Dock = 3, Status = 4 }
 local status = new("Frame", {
 	Name = "Status",
 	BackgroundTransparency = 1,
-	Size = UDim2.fromOffset(CORNER_W, 230), -- three pills: hero (HeroSelect adds it), coins, level
-	LayoutOrder = 2,
+	Size = UDim2.fromOffset(CORNER_W, 0), -- three pills: hero (HeroSelect adds it), coins, level
+	AutomaticSize = Enum.AutomaticSize.Y,
+	LayoutOrder = ctx.ColumnOrder.Status,
 	Parent = corner,
 })
-Kit.list(status, Enum.FillDirection.Vertical, 10)
+Kit.list(status, Enum.FillDirection.Vertical, GAP)
 
 -- the status pills: one shape for all three. A badge (portrait / coin / star) sits on the left
 -- cap, a small caption over the value, an action on the right. Every badge centre, caption,
--- value and right edge lines up from pill to pill.
-local PILL_H, HOLDER_H = 60, 70
+-- value and right edge lines up from pill to pill. A pill's row is exactly the pill's height (the
+-- badges may overhang it; the pills' own outlines are what the column spaces).
+local PILL_H = HUD.PillHeight
+local HOLDER_H = PILL_H
 local BADGE_X = 38 -- badge centre, holder space
 local PILL_X = 30 -- pill left edge, holder space
 local TEXT_X = 57 -- captions and values, pill space (clear of the badge)
@@ -666,12 +677,12 @@ ctx.PillMetrics = { Height = PILL_H, BadgeX = BADGE_X, BadgeY = HOLDER_H / 2, Te
 -- the column; desktop: TileTop = the tiles' top edge above the screen's bottom; phones: TileFoot =
 -- the tiles' bottom edge below the top; Gap = the space between neighbours in the column
 ctx.DockMetrics = {
-	Left = 30,
+	Left = HUD.Margin,
 	Width = CORNER_W,
-	TileTop = 24 + 230 + CORNER_PAD + 126,
-	TileFoot = 84 + 230 + CORNER_PAD + 116,
-	Gap = (70 - PILL_H) + 10,
-	Stroke = 4.5,
+	TileTop = HUD.Bottom + (PILL_H * 3 + GAP * 2) + GAP + HUD.TileHeight,
+	TileFoot = HUD.TouchTop + (PILL_H * 3 + GAP * 2) + GAP + HUD.TileHeight,
+	Gap = GAP,
+	Stroke = HUD.Outline,
 }
 
 -- the pills' background textures: little silhouettes (shurikens, coins or stars) scattered at
@@ -763,13 +774,14 @@ local function statusPill(name: string, order: number, caption: string?, accent:
 		Radius = UDim.new(1, 0),
 		Stroke = false, -- drawn by the Outline layer on top (below)
 	})
+	pill.Size = UDim2.new(1, -PILL_X, 1, 0) -- the pill IS its row
 	Kit.gradient(pill, C.Navy700, C.Night, 90)
 	pill.BackgroundColor3 = Color3.new(1, 1, 1)
 	-- the ink outline is its own layer above the pill's texture and the action socket (children
 	-- draw over their parent's stroke), same rect as the pill so it lines up to the pixel
 	local outline = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = pill.ZIndex + 2, Parent = pill })
 	Kit.pill(outline)
-	Kit.stroke(outline, 4.5, C.Ink, 0, true)
+	Kit.stroke(outline, HUD.Outline, C.Ink, 0, true)
 	-- the windows' dress: faint stripes and the pill's own colour glowing in from the left
 	local skin = new("CanvasGroup", { Name = "Skin", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = pill.ZIndex, Parent = pill })
 	Kit.pill(skin)
@@ -833,7 +845,7 @@ local function faceSeq(c: Color3, d: Color3): ColorSequence
 		ColorSequenceKeypoint.new(1, Kit.lighten(d, 0.1)),
 	})
 end
-local PILL_LINE = 4.5 * 1.35 -- the pill's outline (Kit.stroke border width)
+local PILL_LINE = HUD.Outline * 1.35 -- the pill's outline (Kit.stroke border width)
 local ACTION_LINE = 3 * 1.35 -- a button's own outline
 local function pillAction(pill: GuiObject, o: { [string]: any })
 	local w = o.Width or ACTION_H
@@ -981,26 +993,27 @@ local xpBar = Kit.bar({
 local dock = new("Frame", {
 	Name = "Dock",
 	BackgroundTransparency = 1,
-	Size = UDim2.fromOffset(CORNER_W, 126),
-	LayoutOrder = if isTouch then 3 else 1,
+	Size = UDim2.fromOffset(CORNER_W, HUD.TileHeight), -- exactly the tiles' height
+	LayoutOrder = ctx.ColumnOrder.Dock,
 	Parent = corner,
 })
-Kit.list(dock, Enum.FillDirection.Horizontal, 12, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Bottom)
+-- five tiles, HUD.IconGap apart (every tile the same width and outline: every gap the same)
+Kit.list(dock, Enum.FillDirection.Horizontal, HUD.IconGap, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Bottom)
 
 ctx.Dock = {}
 local function dockButton(o: { [string]: any })
 	local accent = o.Accent[1]
-	local holder = new("Frame", { Name = o.Name, BackgroundTransparency = 1, Size = UDim2.fromOffset(100, 126), LayoutOrder = o.Order, Parent = dock })
+	local holder = new("Frame", { Name = o.Name, BackgroundTransparency = 1, Size = UDim2.fromOffset(HUD.TileWidth, HUD.TileHeight), LayoutOrder = o.Order, Parent = dock })
 	local api: any
 	api = Kit.button({
 		Name = "Button",
 		Parent = holder,
-		Size = UDim2.fromOffset(100, 116),
+		Size = UDim2.fromOffset(HUD.TileWidth, HUD.TileHeight),
 		Color = C.Navy600,
 		Deep = C.Navy800,
-		Radius = 28,
+		Radius = HUD.CardRadius,
 		Depth = 0, -- flat tile, no 3D lip
-		Stroke = 4.5,
+		Stroke = HUD.Outline,
 		HoverScale = 1.08,
 		OnClick = o.OnClick,
 		OnHover = function(on: boolean)
@@ -1024,25 +1037,28 @@ local function dockButton(o: { [string]: any })
 		{ 6 - ringW / 2, C.Navy600 },
 	}, z + 1)
 	Kit.outlineOnTop(api.Face, z + 5)
+	-- the icon between the accent ring (inner edge 7.7 down) and the name tag (ink top 79.6): about
+	-- 3 clear above and below it, the same on every tile
 	local icon = Kit.image({
 		Name = "Icon",
 		Image = o.Icon,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.4, 0),
-		Size = UDim2.fromOffset(68, 68), -- same gap to the accent ring above and the name tag below
+		Position = UDim2.new(0.5, 0, 0, 44),
+		Size = UDim2.fromOffset(66, 66),
 		ZIndex = z + 3,
 		Parent = api.Face,
 	})
-	-- name tag across the bottom edge
+	-- name tag on the bottom edge: its foot sits on the tile's own bottom edge, so the tag never
+	-- hangs below the tile's outline (the tile's outline is the dock's edge in the column)
 	local tag = Kit.plate({
 		Name = "Tag",
 		Parent = api.Body,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 1, -12),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, 0),
 		Size = UDim2.new(0, 0, 0, 34),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Radius = UDim.new(1, 0),
-		Stroke = 3.5,
+		Stroke = HUD.ThinOutline,
 		ZIndex = z + 6,
 		Color = accent, -- flat, like the tile
 	})
@@ -1328,3 +1344,86 @@ end
 -- intro: slide the HUD in once
 corner.Position = cornerPos(true)
 task.delay(0.6, applyQuestState)
+
+---------------------------------------------------------------------------
+-- Studio: measure the column on screen (AbsolutePosition / AbsoluteSize) and print every gap,
+-- ink edge to ink edge, in screen pixels - they must all be the same. Runs whenever the column
+-- changes (a group shows or hides, the party changes, the screen or HUD size changes).
+---------------------------------------------------------------------------
+if game:GetService("RunService"):IsStudio() then
+	local pending = false
+	local lastReport = ""
+	local function measure()
+		pending = false
+		local ink = HUD.Outline * 1.35 * ctx.Scale / 2 -- the outline's reach past a frame's edge
+		local rows: { { Name: string, Top: number, Bottom: number } } = {}
+		local function add(name: string, g: GuiObject)
+			if g.Visible and g.AbsoluteSize.Y > 0.5 then
+				table.insert(rows, { Name = name, Top = g.AbsolutePosition.Y - ink, Bottom = g.AbsolutePosition.Y + g.AbsoluteSize.Y + ink })
+			end
+		end
+		for _, g in ipairs(corner:GetChildren()) do
+			if g:IsA("GuiObject") and g.Visible then
+				if g == status then
+					for _, pillRow in ipairs(status:GetChildren()) do
+						if pillRow:IsA("GuiObject") then
+							add(pillRow.Name, pillRow)
+						end
+					end
+				else
+					add(g.Name, g)
+				end
+			end
+		end
+		table.sort(rows, function(a, b)
+			return a.Top < b.Top
+		end)
+		local parts, gaps = {}, {}
+		for i = 2, #rows do
+			local gap = rows[i].Top - rows[i - 1].Bottom
+			table.insert(gaps, gap)
+			table.insert(parts, string.format("%s|%s %.3fpx", rows[i - 1].Name, rows[i].Name, gap))
+		end
+		local even = true
+		for _, gp in ipairs(gaps) do
+			if math.abs(gp - gaps[1]) > 0.01 then
+				even = false
+			end
+		end
+		-- the dock's tiles, left to right
+		local tiles = {}
+		for _, t in ipairs(dock:GetChildren()) do
+			if t:IsA("GuiObject") then
+				table.insert(tiles, t)
+			end
+		end
+		table.sort(tiles, function(a, b)
+			return a.AbsolutePosition.X < b.AbsolutePosition.X
+		end)
+		local tileGaps = {}
+		for i = 2, #tiles do
+			table.insert(tileGaps, string.format("%.3f", tiles[i].AbsolutePosition.X - (tiles[i - 1].AbsolutePosition.X + tiles[i - 1].AbsoluteSize.X)))
+		end
+		local report = string.format("[HUD] column gaps (ink to ink, screen px, scale %.3f): %s  -> %s | dock tile gaps: %s",
+			ctx.Scale, table.concat(parts, ", "), if even then "EVEN" else "UNEVEN", table.concat(tileGaps, " "))
+		if report ~= lastReport then
+			lastReport = report
+			if even then
+				print(report)
+			else
+				warn(report)
+			end
+		end
+	end
+	local function soon()
+		if not pending then
+			pending = true
+			task.delay(0.8, measure)
+		end
+	end
+	corner:GetPropertyChangedSignal("AbsoluteSize"):Connect(soon)
+	corner.ChildAdded:Connect(soon)
+	ctx.On("Scale", soon)
+	ctx.MeasureHud = measure
+	soon()
+end

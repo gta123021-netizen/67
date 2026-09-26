@@ -46,6 +46,15 @@ rule("UsingAbility", { Attack = false, Dash = false, Block = false, Move = false
 rule("Dead", { Attack = false, Dash = false, Block = false, Move = false, Jump = false, Turn = false, Hittable = false, Reacts = false })
 States.Rules = R
 
+-- the states in which the fighter is in control of itself (free, striking, guarding, dashing). Time
+-- spent in them is what refills the stun budget (CombatService): stun, guard break, knockdown,
+-- getting up and abilities that own the body are not control.
+local CONTROL = { Idle = true, Attacking = true, ComboWindow = true, Blocking = true, Dashing = true }
+States.Control = CONTROL
+function States.HasControl(state: string): boolean
+	return CONTROL[state] == true
+end
+
 -- legal transitions (from -> set of to). Anything not listed is refused (unless forced by the
 -- server's own bookkeeping, e.g. death).
 local T = {

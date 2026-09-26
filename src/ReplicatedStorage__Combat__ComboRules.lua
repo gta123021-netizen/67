@@ -161,4 +161,27 @@ function Rules.CoverStun(c: Chain, def: any): number
 	return best + C.StunMargin
 end
 
+-- THE INPUT BUFFER (the attacking client): one press remembered at a time - the newest - with
+-- when it was made and the chain it was meant for.
+export type Buffered = { Kind: string, At: number, Chain: number }
+function Rules.BufferPress(kind: string, t: number, chain: number): Buffered
+	return { Kind = kind, At = t, Chain = chain }
+end
+
+--[[ may this spot use the buffered press? kinds = the presses it takes ({ Light = true, ... }),
+	chain = the chain it must have been meant for (nil: any). A strike press is good for
+	Config.Combo.Buffer + 0.1 s, a dash press for dashLimit. Returns (kind or nil, drop):
+	drop = true means the press is spent or stale and must be forgotten; a press of a kind this spot
+	doesn't take is kept for the one that does. ]]
+function Rules.BufferTake(b: Buffered?, kinds: { [string]: boolean }, t: number, chain: number?, dashLimit: number): (string?, boolean)
+	if not b or not kinds[b.Kind] then
+		return nil, false
+	end
+	local limit = if b.Kind == "Dash" then dashLimit else C.Buffer + 0.1
+	if t - b.At > limit or (chain ~= nil and b.Chain ~= chain) then
+		return nil, true
+	end
+	return b.Kind, true
+end
+
 return Rules

@@ -6,7 +6,9 @@
 	  Impact(pos, kind, dir)     the effect for a landed blow at the contact point, thrown the way
 	                             the blow drove (dir). kind = Hit | Heavy | Finisher | Block |
 	                             HeavyBlock | Ground
-	  Sound(name, pos, pitch)    positional one-shot (through the HUD's SFX volume group)
+	  Sound(name, pos, pitch)    a layered, positional one-shot (Config.Sounds: each layer pitched,
+	                             enveloped and EQ'd, a random variant each time) through the HUD's
+	                             SFX volume group. Voices are pooled: nothing is created per hit
 	  Give(char, angles, time)   the body giving with a blow, layered on top of whatever clip plays:
 	                             the whole body pivots at the FEET (so the stance stays planted) through
 	                             the RootJoint's C0, the head turns through the Neck's C0. Always
@@ -26,6 +28,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
 
 local CombatFolder = ReplicatedStorage:WaitForChild("Combat")
 local Config = require(CombatFolder:WaitForChild("CombatConfig"))
@@ -152,38 +155,110 @@ function FX.Dash(char: Model, dir: string?, scale: number?)
 end
 
 ---------------------------------------------------------------------------
--- sounds
+-- sounds: layered one-shots from pooled voices
 ---------------------------------------------------------------------------
+-- A voice is an Attachment (moved to where the sound happens) holding a Sound and the layer's
+-- effects, made once and reused round-robin: POOL voices per layer, so up to POOL of the same sound
+-- can overlap (a flurry of hits) and a new one takes the oldest voice. Each play gets a serial, so a
+-- voice re-used before its old envelope finished is never cut by that old envelope.
+local POOL = 5
+type Voice = { A: Attachment, S: Sound, Serial: number }
+local pools: { [string]: { Voices: { Voice }, Next: number } } = {}
+
+local function sfxGroup(): SoundGroup?
+	local g = SoundService:FindFirstChild("SFX")
+	return if g and g:IsA("SoundGroup") then g else nil
+end
+
+local function newVoice(layer: any): Voice
+	local a = Instance.new("Attachment")
+	a.Name = "CombatVoice"
+	a.Parent = holder()
+	local snd = Instance.new("Sound")
+	snd.SoundId = layer.Id
+	snd.RollOffMode = Enum.RollOffMode.InverseTapered
+	snd.RollOffMinDistance = 6
+	snd.RollOffMaxDistance = layer.Reach or 100
+	snd.SoundGroup = sfxGroup()
+	if layer.Eq then
+		local eq = Instance.new("EqualizerSoundEffect")
+		eq.LowGain = layer.Eq[1] or 0
+		eq.MidGain = layer.Eq[2] or 0
+		eq.HighGain = layer.Eq[3] or 0
+		eq.Parent = snd
+	end
+	if layer.Drive and layer.Drive > 0 then
+		local d = Instance.new("DistortionSoundEffect")
+		d.Level = math.clamp(layer.Drive, 0, 1)
+		d.Priority = 1 -- after the EQ
+		d.Parent = snd
+	end
+	snd.Parent = a
+	return { A = a, S = snd, Serial = 0 }
+end
+
+local function voice(key: string, layer: any): Voice
+	local pool = pools[key]
+	if not pool then
+		pool = { Voices = {}, Next = 0 }
+		pools[key] = pool
+	end
+	pool.Next = pool.Next % POOL + 1
+	local v = pool.Voices[pool.Next]
+	if not v or not v.A.Parent then
+		v = newVoice(layer)
+		pool.Voices[pool.Next] = v
+	end
+	return v
+end
+
+local function playLayer(key: string, layer: any, pos: Vector3, pitch: number)
+	local v = voice(key, layer)
+	v.Serial += 1
+	local serial = v.Serial
+	local snd = v.S
+	v.A.WorldPosition = pos
+	local spread = layer.Var or 0.05
+	snd.PlaybackSpeed = (layer.Speed or 1) * pitch * (1 + (math.random() * 2 - 1) * spread)
+	snd.Volume = layer.Volume or 0.6
+	snd.TimePosition = layer.Start or 0
+	snd:Play()
+	if layer.Len then
+		task.delay(layer.Len, function()
+			if v.Serial ~= serial then
+				return
+			end
+			local fade = layer.Fade or 0.06
+			local tw = TweenService:Create(snd, TweenInfo.new(fade, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Volume = 0 })
+			tw:Play()
+			task.delay(fade, function()
+				if v.Serial == serial then
+					snd:Stop()
+				end
+			end)
+		end)
+	end
+end
+
+-- pos: where it happens (nil = at the camera). pitch: an extra pitch factor on every layer
 function FX.Sound(name: string, pos: Vector3?, pitch: number?)
 	local def = SOUNDS[name]
 	if not def then
 		return
 	end
-	local s = Instance.new("Sound")
-	s.SoundId = def.Id
-	s.Volume = def.Volume or 0.6
-	s.PlaybackSpeed = (pitch or 1) * (def.Speed or 1) * (1 + (math.random() - 0.5) * 0.08)
-	s.RollOffMaxDistance = 90
-	s.RollOffMinDistance = 8
-	local group = SoundService:FindFirstChild("SFX")
-	if group and group:IsA("SoundGroup") then
-		s.SoundGroup = group
+	local at = pos
+	if not at then
+		local cam = workspace.CurrentCamera
+		at = if cam then cam.CFrame.Position else Vector3.zero
 	end
-	if pos then
-		local a = Instance.new("Attachment")
-		a.WorldPosition = pos
-		a.Parent = holder()
-		s.Parent = a
-		s:Play()
-		task.delay(3, function()
-			a:Destroy()
-		end)
-	else
-		s.Parent = SoundService
-		s:Play()
-		task.delay(3, function()
-			s:Destroy()
-		end)
+	local p = pitch or 1
+	for i, layer in ipairs(def) do
+		local key = name .. "#" .. i
+		if layer.Delay and layer.Delay > 0 then
+			task.delay(layer.Delay, playLayer, key, layer, at :: Vector3, p)
+		else
+			playLayer(key, layer, at :: Vector3, p)
+		end
 	end
 end
 

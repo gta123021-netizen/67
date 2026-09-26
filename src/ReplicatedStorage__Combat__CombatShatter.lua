@@ -4,8 +4,9 @@
 	when it hears about a stomp).
 
 	The ground breaks like a circular quake round the foot: two rings of breaks, evenly spaced (a
-	tight inner ring of 8, then a wider outer ring of 12 whose rim is the stomp's own hit radius,
-	Config.Attacks.Downslam.StompRadius), with the ground split radially between them. In every
+	tight inner ring of 8, then a wider outer ring of 12), with the ground split radially between
+	them. The outer ring's broken plates END on the stomp's own reach (Config.Attacks.Downslam.
+	StompRadius): what you see broken is exactly the ground the smash hits. In every
 	break a plate of the ground itself (the floor's own material and colour on top, packed earth
 	under it) heaves up, its outer edge lifted like a crater's rim, and jagged spikes of rock punch
 	up through it, leaning away from the foot. The rings are symmetrical but never uniform: the
@@ -45,7 +46,12 @@ local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local Shatter = {}
 
 local STOMP = Config.Attacks and Config.Attacks.Downslam
-local RADIUS: number = (STOMP and STOMP.StompRadius) or 7
+-- the layout below was drawn round a 7-stud ring whose outer plates end 7.75 out on average (ring at
+-- 0.9 x 7 = 6.3, plus the plate's outer half, ~1.45): everything is scaled by K so those outer edges
+-- land on the gameplay rim
+local RIM: number = (STOMP and STOMP.StompRadius) or 7.2
+local K = RIM / 7.75
+local RADIUS: number = 7 * K
 
 -- the two rings. N = breaks (even: they alternate big and small all the way round), R = ring
 -- radius (share of the hit radius), W/H = a spike's width and height, Tilt = how far the spikes
@@ -381,8 +387,8 @@ local function build(ground: Vector3, attacker: Model?, rng: Random): (Model?, {
 			local dir = Vector3.new(math.cos(a), 0, math.sin(a))
 			-- big and small in turn round the ring, and no two alike
 			local k = (if i % 2 == 0 then SMALL else 1) * rng:NextNumber(0.94, 1.04)
-			local w = between(rng, ring.W) * k
-			local h = between(rng, ring.H) * k
+			local w = between(rng, ring.W) * k * K
+			local h = between(rng, ring.H) * k * K
 			local tilt = math.rad(between(rng, ring.Tilt))
 			local across = math.min(w * PLATE.Across, spacing * PLATE.Room) * rng:NextNumber(0.93, 1)
 			local along = w * PLATE.Along * rng:NextNumber(0.92, 1.05)

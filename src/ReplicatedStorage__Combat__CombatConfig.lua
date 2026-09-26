@@ -94,8 +94,10 @@ Config.ComboWalkSpeed = 8 -- between strikes of a live combo
 -- attack classes: how strong a strike FEELS (shared by every attack of that class)
 ---------------------------------------------------------------------------
 --   Hitstop        both fighters freeze this long on a clean connect (the attacker's clip pauses,
---                  the victim holds the impact pose; knockback starts after it)
---   BlockHitstop   the same on a blocked connect
+--                  the victim holds the impact pose; knockback starts after it). Light to heavy:
+--                  light 0.045 < dash strike 0.075 < uppercut 0.085 < sweep 0.1 < stomp 0.11;
+--                  a guard break is the heaviest freeze of all (Config.Guard.BreakHitstop)
+--   BlockHitstop   the same on a blocked connect (a blocked blow gives a shorter, duller freeze)
 --   Shake          camera kick for the attacker / the victim
 --   BlockPush      how far a blocked hit slides the defender back (studs) over BlockPushTime
 --   BlockTilt      the guard giving with the blow (degrees): Roll leans toward the side the blow
@@ -105,27 +107,27 @@ Config.ComboWalkSpeed = 8 -- between strikes of a live combo
 --   Ui             combo-counter emphasis
 Config.Classes = {
 	Light = {
-		Hitstop = 0.04, BlockHitstop = 0.03, Shake = 0.14, VictimShake = 0.28,
+		Hitstop = 0.045, BlockHitstop = 0.035, Shake = 0.14, VictimShake = 0.28,
 		BlockPush = 2.4, BlockPushTime = 0.18, BlockTilt = { Roll = 5, Yaw = 9, Pitch = 4 }, BlockStun = 0.18,
 		Ui = "Light",
 	},
 	Heavy = {
-		Hitstop = 0.09, BlockHitstop = 0.055, Shake = 0.42, VictimShake = 0.62,
+		Hitstop = 0.085, BlockHitstop = 0.06, Shake = 0.42, VictimShake = 0.62,
 		BlockPush = 4.6, BlockPushTime = 0.24, BlockTilt = { Roll = 11, Yaw = 17, Pitch = 9 }, BlockStun = 0.3,
 		Ui = "Heavy",
 	},
 	Finisher = {
-		Hitstop = 0.11, BlockHitstop = 0.11, Shake = 0.55, VictimShake = 0.85,
+		Hitstop = 0.1, BlockHitstop = 0.07, Shake = 0.55, VictimShake = 0.85,
 		BlockPush = 0, BlockPushTime = 0, BlockTilt = { Roll = 14, Yaw = 20, Pitch = 12 }, BlockStun = 0,
 		Ui = "Finisher",
 	},
 	Stomp = {
-		Hitstop = 0.1, BlockHitstop = 0.1, Shake = 0.5, VictimShake = 0.8,
+		Hitstop = 0.11, BlockHitstop = 0.07, Shake = 0.5, VictimShake = 0.8,
 		BlockPush = 0, BlockPushTime = 0, BlockTilt = { Roll = 8, Yaw = 10, Pitch = 16 }, BlockStun = 0,
 		Ui = "Heavy",
 	},
 	Dash = {
-		Hitstop = 0.07, BlockHitstop = 0.05, Shake = 0.35, VictimShake = 0.55,
+		Hitstop = 0.075, BlockHitstop = 0.055, Shake = 0.35, VictimShake = 0.55,
 		BlockPush = 5.2, BlockPushTime = 0.26, BlockTilt = { Roll = 6, Yaw = 10, Pitch = 12 }, BlockStun = 0.28,
 		Ui = "Heavy",
 	},
@@ -159,6 +161,42 @@ Config.Combo = {
 }
 
 ---------------------------------------------------------------------------
+-- combo target lock: after the SECOND consecutive connected strike of a chain on the same fighter,
+-- that fighter owns the rest of the chain (the server decides; CombatService). While a chain is
+-- locked its strikes only ever test that one body - a third fighter stepping in between, or the
+-- camera swinging onto someone else, never takes a blow meant for the locked one. The attacker's
+-- client uses the lock only to space and face the strikes (no reticle, no snapping):
+--   Hits         consecutive connected strikes that establish the lock
+--   Turn         facing: a critically damped turn toward the victim (natural frequency, rad/s)
+--                with a top turn rate (rad/s): a 180 degree turn never takes less than ~0.22 s
+--   Keep         distance keeping in a locked strike's step-in and after a connect: gain (1/s)
+--                toward the strike's Ideal distance, top speed, how far it may back off when too
+--                close, and how far away the victim may be before it stops following
+---------------------------------------------------------------------------
+Config.Lock = {
+	Hits = 2,
+	Turn = { Omega = 20, MaxRate = 14 },
+	Keep = { Gain = 9, MaxSpeed = 38, BackOff = 0.7, Range = 9 },
+}
+
+---------------------------------------------------------------------------
+-- stun budget: how much hitstun a fighter can be kept in before it gets a real chance to act.
+-- Every stun (from anyone) spends it; it refills only while the fighter actually has control (free,
+-- attacking, guarding or dashing) and only after Grace of unbroken control - a few frames of
+-- "free" between two strings never refill it. When it runs out, the stun in progress is the last
+-- one: then Config.StunImmunity - hits still hurt and push, but they neither stun nor interrupt -
+-- so the fighter always gets a real window to block, dash or hit back. Sized so the longest
+-- legitimate string (the uppercut chain into the sweep, hit-stops included, ~2.3 s of stun)
+-- always fits in a full budget.
+---------------------------------------------------------------------------
+Config.StunBudget = {
+	Max = 3.0,
+	Grace = 0.25,
+	Refill = 1.5, -- seconds of control to refill an empty budget
+	Min = 0.1, -- less than this left counts as empty
+}
+
+---------------------------------------------------------------------------
 -- attacks
 ---------------------------------------------------------------------------
 --[[ fields
@@ -176,8 +214,16 @@ Config.Combo = {
 	                        attacker's left (a right hand crossing), +1 = toward the attacker's right,
 	                        0 = straight in (the side it lands on is driven back)
 	React                   reaction clip speed (lower = heavier, more readable)
-	Ideal, MaxLunge         (pack) the attacker steps in to Ideal (root to root) during
-	                        LungeFrom..LungeTo, so the limb lands on the body at the Hit frame
+	Ideal, MaxLunge         the attacker steps in to Ideal (root to root) during LungeFrom..LungeTo,
+	                        so the limb lands on the body at the Hit frame. Ideal is MEASURED from
+	                        CombatPaths: the distance at which the striking limb's surface meets the
+	                        victim's body surface on the Hit frame (R6: torso 1 deep, arms out to 1.5
+	                        each side), less 0.12 so the blow visibly presses in. Straights 3.4-3.45,
+	                        hook 3.33 (the torso lunges ~2 studs forward and the lead arm crosses the
+	                        front), uppercut and sweep 3.21, dash strike 4.5
+	MaxTargets              how many bodies one strike may connect with while its chain is not
+	                        locked (a punch stops on the first body in its path); a locked chain only
+	                        ever tests its locked fighter
 	Tilt                    extra give in the victim's body (degrees): Pitch, Roll, NeckYaw, NeckPitch
 	Blend                   cross-fade INTO this strike, per previous strike (pose distance measured)
 	Hitbox                  limb radius around the CombatPaths capsules (+ Config.Hitbox.Pad)
@@ -189,10 +235,10 @@ Config.Attacks = {
 		Damage = 3.5, Stun = 0.5,
 		Knock = { Back = 14, Up = 0, Side = -3 }, KnockTime = 0.2,
 		Contact = Vector3.new(0.2, 0.47, -3.11), ReactPush = -1, React = 1.1,
-		Ideal = 3.3, MaxLunge = 3.8, LungeFrom = 0.14, LungeTo = 0.34,
+		Ideal = 3.44, MaxLunge = 3.8, LungeFrom = 0.14, LungeTo = 0.34,
 		Tilt = { Pitch = 5, Roll = 0, NeckYaw = 14 },
 		Blend = { Default = 0.1, Uppercut = 0.12 },
-		Hitbox = 0.45, Name = "Cross",
+		Hitbox = 0.45, Name = "Cross", MaxTargets = 1,
 	},
 	Swing2 = {
 		-- left straight: starts from Swing1's finish, same timing mirrored
@@ -200,21 +246,22 @@ Config.Attacks = {
 		Damage = 3.5, Stun = 0.5,
 		Knock = { Back = 14, Up = 0, Side = 3 }, KnockTime = 0.2,
 		Contact = Vector3.new(-0.13, 0.39, -3.06), ReactPush = 1, React = 1.1,
-		Ideal = 3.3, MaxLunge = 3.8, LungeFrom = 0.14, LungeTo = 0.34,
+		Ideal = 3.39, MaxLunge = 3.8, LungeFrom = 0.14, LungeTo = 0.34,
 		Tilt = { Pitch = 5, Roll = 0, NeckYaw = -14 },
 		Blend = { Default = 0.12, Swing1 = 0.06, Uppercut = 0.15 },
-		Hitbox = 0.45, Name = "Straight",
+		Hitbox = 0.45, Name = "Straight", MaxTargets = 1,
 	},
 	Swing3 = {
-		-- two-handed hook from the right: winds the body all the way round, lands close and to the right
+		-- two-handed hook from the right: winds the body all the way round and lunges the torso ~2 studs
+		-- forward; the lead arm crosses the front on the Hit frame (so it lands at 3.3, not up close)
 		Anim = "Swing3", Class = "Light", Speed = 1.15, Hit = 0.3833, ChainAt = 0.44, Length = 0.6667,
 		Damage = 3.5, Stun = 0.5,
 		Knock = { Back = 16, Up = 0, Side = -5 }, KnockTime = 0.2,
 		Contact = Vector3.new(1.16, 0.55, -0.9), ReactPush = -1, React = 1.0,
-		Ideal = 1.7, MaxLunge = 4.4, LungeFrom = 0.14, LungeTo = 0.37,
+		Ideal = 3.33, MaxLunge = 3.8, LungeFrom = 0.14, LungeTo = 0.37,
 		Tilt = { Pitch = 4, Roll = -8, NeckYaw = 22 },
 		Blend = { Default = 0.12, Swing2 = 0.06, Uppercut = 0.11 },
-		Hitbox = 0.48, Name = "Hook",
+		Hitbox = 0.5, Name = "Hook", MaxTargets = 1,
 	},
 	Uppercut = {
 		-- heavy: a long readable load (the left hand drops behind the hip), then the fist rises
@@ -223,10 +270,10 @@ Config.Attacks = {
 		Damage = 5.5, Stun = 0.8,
 		Knock = { Back = 24, Up = 26, Side = 0 }, KnockTime = 0.2,
 		Contact = Vector3.new(0.34, 1.71, -2.68), ReactPush = 1, React = 0.72,
-		Ideal = 2.8, MaxLunge = 3.8, LungeFrom = 0.12, LungeTo = 0.36,
+		Ideal = 3.21, MaxLunge = 3.8, LungeFrom = 0.12, LungeTo = 0.36,
 		Tilt = { Pitch = 20, Roll = 0, NeckYaw = 0, NeckPitch = 26 },
 		Blend = { Default = 0.12, Swing1 = 0.13, Swing2 = 0.14, Swing3 = 0.15 },
-		Hitbox = 0.5, Name = "Uppercut",
+		Hitbox = 0.5, Name = "Uppercut", MaxTargets = 1,
 	},
 	Sweep = {
 		-- finisher: a spinning hop that drops into a low sweep; the right foot crosses the front at
@@ -236,26 +283,32 @@ Config.Attacks = {
 		Knock = { Back = 46, Up = 0, Side = 10 }, KnockTime = 0.34, -- (guard break slide)
 		Launch = { Back = 66, Up = 38, Side = 8, LegsUp = 16, LegsSide = 16, Tip = 3.0, Time = 1.6 },
 		Contact = Vector3.new(0.61, -2.55, -2.89), ReactPush = 1, React = 1,
-		Ideal = 3.0, MaxLunge = 3.8, LungeFrom = 0.45, LungeTo = 0.86,
-		Tilt = nil,
+		Ideal = 3.21, MaxLunge = 3.8, LungeFrom = 0.45, LungeTo = 0.86,
+		-- (the give when it can't take them down: guard break, or a stun-immune fighter - the legs buckle)
+		Tilt = { Pitch = -6, Roll = 0, NeckYaw = 0, NeckPitch = -10 },
 		Blend = { Default = 0.16, Swing3 = 0.17, Uppercut = 0.16 },
-		Hitbox = 0.55, Name = "Sweep",
+		Hitbox = 0.55, Name = "Sweep", MaxTargets = 1,
 	},
 
-	-- forward dash + M1: the lunge punch low into the body, carrying the dash's momentum
+	-- forward dash + M1: the lunge punch low into the body, carrying the dash's momentum. The arm is
+	-- already out at full reach when it lands, so the momentum stops Ideal short of a body
 	DashAttack = {
 		Anim = "DashAttack", Class = "Dash", Speed = 1, Hit = 0.05, ChainAt = 0.25, Length = 0.25, Hold = 0.2,
 		Damage = 5.5, Stun = 0.85,
 		Knock = { Back = 80, Up = 16, Side = 0 }, KnockTime = 0.24,
 		Contact = Vector3.new(0.59, -0.67, -4.17), ReactPush = 0, React = 0.8,
-		Ideal = 3.4, MaxLunge = 0, LungeFrom = 0, LungeTo = 0,
+		Ideal = 4.5, MaxLunge = 0, LungeFrom = 0, LungeTo = 0,
 		Tilt = { Pitch = 16, Roll = 0, NeckYaw = 8, NeckPitch = 12 },
-		Blend = { Default = 0.04 },
-		Hitbox = 0.5, Name = "Dash Strike",
+		Blend = { Default = 0.07 },
+		Hitbox = 0.5, Name = "Dash Strike", MaxTargets = 1,
 		Cooldown = 0.35,
 	},
 
-	-- jump + M1: drop out of the air into a stomp (pack: the raised left foot drives down on Hit)
+	-- jump + M1: GROUND SMASH. A standalone move, never part of a combo: it can't start while a chain
+	-- is live (starting it ends any chain and its target lock), it needs a real jump the server sees,
+	-- and it lands only when the body is on the ground. It hits everyone on the shattered ground (an
+	-- area move), but it never knocks down or re-stuns a fighter who is still reeling from a combo
+	-- (stunned / guard broken): it can't extend or reset one. (pack: the raised left foot drives down)
 	Downslam = {
 		Anim = "Downslam", Class = "Stomp", Speed = 1, Hit = 0.3833, ChainAt = 0.5833, Length = 0.5833,
 		Damage = 7, Stun = 0, GuardBreak = true, GuardBreakDamage = 3.5,
@@ -263,17 +316,20 @@ Config.Attacks = {
 		Launch = { Back = 32, Up = 26, Side = 0, LegsUp = 12, LegsSide = 0, Tip = 2.4, Time = 1.25 },
 		Contact = Vector3.new(-0.5, -2.9, -1.1), ReactPush = 0, React = 1,
 		Ideal = 2.5, MaxLunge = 0, LungeFrom = 0, LungeTo = 0,
+		-- (the ground-shock give when it can't take them down: the knees buckle, the head drops)
+		Tilt = { Pitch = -9, Roll = 0, NeckYaw = 0, NeckPitch = -14 },
 		Blend = { Default = 0.06 },
-		Hitbox = 0.6, Name = "Stomp",
+		Hitbox = 0.6, Name = "Stomp", MaxTargets = 8,
 		Cooldown = 2.2, Hang = 0.08,
 		-- the clip holds its raised-knee pose until the feet touch down, then stomps: StompAt is the
 		-- clip time the stomp resumes from on touchdown; the impact follows StompDelay later (pack Hit)
 		StompAt = 0.345, StompDelay = 0.04, FallSpeed = { 34, 140 }, MaxFall = 1.4,
-		-- the landing shock hits everyone standing on the shatter: StompRadius is the shattered
-		-- ground's own reach (CombatShatter's outer ring of broken ground and rock spikes is built
-		-- from this radius), to a fighter's centre; StompHeight is how far above the foot their feet
-		-- may be
-		StompRadius = 7, StompHeight = 3.2,
+		-- the landing shock hits everyone standing on the shattered ground. StompRadius is the VISIBLE
+		-- rim of the shatter (CombatShatter builds its outer ring so the broken plates' outer edges
+		-- land on it); a fighter is hit when their footprint reaches it: centre within StompRadius +
+		-- StompFoot. StompLow / StompHeight: how far below / above the ground at the impact their feet
+		-- may be (standing on it or just off it - not up on a ledge, not high in the air)
+		StompRadius = 7.2, StompFoot = 0.45, StompLow = 1.0, StompHeight = 2.0,
 	},
 }
 
@@ -285,25 +341,33 @@ Config.Attacks = {
 -- skip a body. A fighter's body is a box in its own space (arms included). One strike hits each
 -- fighter at most once.
 Config.Hitbox = {
-	Body = { HalfWidth = 1.5, Bottom = -3.0, Top = 2.1, HalfDepth = 0.6 },
-	Pad = 0.12, -- added to every limb radius
+	-- R6: torso 2 wide and 1 deep, arms out to 1.5 each side, head up to 2.1 above the root, feet at -3
+	Body = { HalfWidth = 1.5, Bottom = -3.0, Top = 2.1, HalfDepth = 0.55 },
+	-- added to every limb radius. The limb capsule ends AT the limb's own end (HitDetect takes the
+	-- radius off the measured tip), so a fist that visibly stops short never connects
+	Pad = 0.08,
 	-- a connecting chain strike carries its attacker along with the victim it knocks back (this share
 	-- of the victim's slide), so a combo drives the fight across the ground instead of pushing the
 	-- victim out of reach
 	Follow = 0.85,
 	-- lag compensation (a player attacker): the victim is tested where the ATTACKER saw it - rewound
 	-- by the round trip plus Roblox's replication interpolation
-	Rewind = 0.12, -- interpolation delay of replicated bodies
-	RewindMax = 0.35,
+	Rewind = 0.1, -- interpolation delay of replicated bodies
+	RewindMax = 0.22, -- never judged against a body older than this...
+	RewindReach = 3.5, -- ...or further than this from where the server has it now (high ping stays
+	-- playable, but a fighter who has long since dashed away can't be hit where they were)
 	-- ...and the attacker is placed where its own screen had it. The server's copy of a player's body
 	-- trails the player's screen by the replication delay (a few tenths of a second - longer than a
 	-- step-in), so the owning client reports its root as the strike's active frames begin and midway.
 	-- The server checks the report against its own copy and waits a moment for it before judging.
-	ReportDrift = 7, -- max studs between a report and the server's copy of that body (else ignored)
+	-- max studs between a report and the server's copy of that body (else ignored): a base plus what
+	-- the body's own speed covers in one round trip, capped - never a free reach extension. A Ground
+	-- Smash touchdown report may be further above the server's copy (it trails the fast drop)
+	ReportDrift = 1.0, ReportDriftMax = 5.5, ReportDriftLand = 12,
 	ReportWait = 0.25, -- max seconds the server waits past the active frames' start for a report
 	ReportLead = 0.12, -- max seconds a report is carried forward along its velocity
 	LagLead = 0.05, -- no report: the server's copy is led this far along its velocity
-	MaxTargets = 4,
+	MaxTargets = 1, -- default per strike (see the attacks' own MaxTargets)
 }
 
 -- reaction replacement: a new reaction restarts the clip only if the old one has run this long,
@@ -318,6 +382,7 @@ Config.Guard = {
 	Arc = 0.05, -- blocks when dot(defender look, to attacker) > this (front ~175 degrees)
 	StartDelay = 0.05, -- the guard is up this long after pressing block
 	BreakStun = 1.05, -- guard broken: no control for this long
+	BreakHitstop = 0.13, -- the heaviest freeze in the game: the guard shatters
 	BreakReactSpeed = 0.56, -- the directional hit reaction, slowed: heavier and readable
 	ReblockAfter = 0.35, -- after the break ends, before the guard can go up again
 	LeanTime = 0.32, -- the block tilt's settle time (heavy: x1.25)
@@ -338,7 +403,9 @@ Config.Dash = {
 	Right = { Anim = "DashRight", Speed = 1, Distance = 15, Duration = 0.36, FadeAt = 0.44, Lock = 0.4 },
 	Ramp = 0.05, -- seconds to reach full speed
 	Ease = 1.6, -- deceleration curve over the last 45%
-	StopGap = 3.2, -- a dash stops this far (root to root) from a fighter in its path, never through them
+	-- a dash stops this far (root to root) from a fighter in its path, never through them: where a dash
+	-- strike out of it lands (its Ideal, less the momentum that still carries it in)
+	StopGap = 4.1,
 	StopWidth = 2.6, -- how wide the path is
 }
 
@@ -368,20 +435,109 @@ Config.RequestRate = 25 -- max combat requests per second per player
 Config.StudioDummies = true -- practice dummies next to the spawn when testing in Studio
 
 ---------------------------------------------------------------------------
--- sounds (Roblox's built-in client sounds; swap the ids for your own)
+-- sounds
 ---------------------------------------------------------------------------
+-- Every combat sound is a small stack of LAYERS played together (CombatFX.Sound), built from
+-- Roblox's own client sounds (rbxasset://, shipped with every client) shaped with pitch, a short
+-- envelope and EQ - so a punch is a sharp transient over a body thud, not a sword whoosh:
+--   Id        the source
+--   Volume    layer level (the SFX slider scales everything)
+--   Speed     playback speed = pitch (0.5 = an octave down: bigger and heavier)
+--   Var       random pitch spread per play (+- share), so no two hits sound alike
+--   Start     where in the source to start (seconds): skips a slow attack
+--   Len/Fade  cut the layer after Len seconds, fading out over Fade (a tight transient)
+--   Eq        { Low, Mid, High } gain in dB (EqualizerSoundEffect): Low = weight, High = snap
+--   Drive     a touch of distortion (0..1): crunch on the heavy layers
+--   Delay     seconds after the others (a sub-bass tail, rubble after a smash)
+--   Reach     how far it carries (studs, default 100); heavy impacts carry further
+-- Sources: action_falling = rushing air (whooshes, dash wind), action_jump_land = a body/foot
+-- thud (every impact, pitched and filtered), action_footsteps_plastic = a quick step,
+-- action_get_up = a cloth/body shuffle, glassbreak = a brittle shatter (pitched far down: rubble).
+-- To use your own library sounds, swap an Id: every other setting still applies.
+local AIR = "rbxasset://sounds/action_falling.mp3"
+local THUD = "rbxasset://sounds/action_jump_land.mp3"
+local STEP = "rbxasset://sounds/action_footsteps_plastic.mp3"
+local CLOTH = "rbxasset://sounds/action_get_up.mp3"
+local SHATTER = "rbxasset://sounds/glassbreak.wav"
 Config.Sounds = {
-	Swing = { Id = "rbxasset://sounds/swordslash.wav", Volume = 0.28, Speed = 1.45 },
-	HeavySwing = { Id = "rbxasset://sounds/swordlunge.wav", Volume = 0.34, Speed = 1.05 },
-	Hit = { Id = "rbxasset://sounds/action_jump_land.mp3", Volume = 1.6, Speed = 1.5 },
-	HeavyHit = { Id = "rbxasset://sounds/action_jump_land.mp3", Volume = 2.1, Speed = 1.0 },
-	Block = { Id = "rbxasset://sounds/unsheath.wav", Volume = 0.5, Speed = 1.7 },
-	HeavyBlock = { Id = "rbxasset://sounds/unsheath.wav", Volume = 0.65, Speed = 1.25 },
-	GuardBreak = { Id = "rbxasset://sounds/glassbreak.wav", Volume = 0.75, Speed = 0.9 },
-	GuardBreakThud = { Id = "rbxasset://sounds/action_jump_land.mp3", Volume = 2.2, Speed = 0.7 },
-	Dash = { Id = "rbxasset://sounds/swordlunge.wav", Volume = 0.35, Speed = 0.8 },
-	Slam = { Id = "rbxasset://sounds/action_jump_land.mp3", Volume = 2.4, Speed = 0.62 },
-	Knockdown = { Id = "rbxasset://sounds/action_jump_land.mp3", Volume = 2.2, Speed = 0.78 },
+	-- punches: the air they cut
+	Swing = { -- light whoosh: a thin, fast rip of air
+		{ Id = AIR, Volume = 0.55, Speed = 2.6, Var = 0.08, Start = 0.35, Len = 0.09, Fade = 0.07, Eq = { -24, -2, 4 } },
+	},
+	HeavySwing = { -- heavy whoosh: lower and longer, with the body turning behind it
+		{ Id = AIR, Volume = 0.7, Speed = 1.75, Var = 0.06, Start = 0.3, Len = 0.16, Fade = 0.1, Eq = { -14, 2, 1 } },
+		{ Id = CLOTH, Volume = 0.25, Speed = 1.6, Var = 0.05, Len = 0.12, Fade = 0.06, Eq = { -10, 0, -6 } },
+	},
+	-- punches: impacts (a snap on top of a body thud)
+	Hit = { -- light impact (the straights)
+		{ Id = THUD, Volume = 1.3, Speed = 1.45, Var = 0.07, Len = 0.12, Fade = 0.06, Eq = { 4, 0, -8 } },
+		{ Id = THUD, Volume = 0.85, Speed = 2.9, Var = 0.08, Len = 0.05, Fade = 0.04, Eq = { -30, -4, 6 } },
+	},
+	Hook = { -- the hook: a flatter, wider slap
+		{ Id = THUD, Volume = 1.35, Speed = 1.3, Var = 0.07, Len = 0.13, Fade = 0.07, Eq = { 5, 1, -8 } },
+		{ Id = THUD, Volume = 0.9, Speed = 2.4, Var = 0.08, Len = 0.06, Fade = 0.05, Eq = { -24, 0, 5 } },
+		{ Id = CLOTH, Volume = 0.3, Speed = 1.9, Var = 0.06, Len = 0.08, Fade = 0.05, Eq = { -12, 0, -4 } },
+	},
+	HeavyHit = { -- heavy impact
+		{ Id = THUD, Volume = 1.7, Speed = 1.0, Var = 0.05, Len = 0.2, Fade = 0.1, Eq = { 8, 0, -9 }, Drive = 0.15, Reach = 130 },
+		{ Id = THUD, Volume = 0.95, Speed = 2.3, Var = 0.07, Len = 0.06, Fade = 0.05, Eq = { -22, 0, 6 } },
+	},
+	Uppercut = { -- rising and crunchy: the snap, the thud and a short tail of air
+		{ Id = THUD, Volume = 1.7, Speed = 1.1, Var = 0.05, Len = 0.18, Fade = 0.1, Eq = { 7, 1, -8 }, Drive = 0.2, Reach = 130 },
+		{ Id = THUD, Volume = 1.0, Speed = 2.6, Var = 0.07, Len = 0.05, Fade = 0.04, Eq = { -24, 0, 7 } },
+		{ Id = AIR, Volume = 0.35, Speed = 2.2, Var = 0.06, Start = 0.4, Len = 0.14, Fade = 0.1, Eq = { -20, 0, 2 }, Delay = 0.02 },
+	},
+	-- guard
+	Block = { -- a dull, padded smack on the forearms
+		{ Id = THUD, Volume = 1.1, Speed = 1.6, Var = 0.06, Len = 0.09, Fade = 0.05, Eq = { 0, -2, -14 } },
+		{ Id = CLOTH, Volume = 0.35, Speed = 2.1, Var = 0.06, Len = 0.07, Fade = 0.04, Eq = { -12, 0, -6 } },
+	},
+	HeavyBlock = {
+		{ Id = THUD, Volume = 1.45, Speed = 1.2, Var = 0.05, Len = 0.14, Fade = 0.07, Eq = { 4, -2, -14 } },
+		{ Id = CLOTH, Volume = 0.4, Speed = 1.7, Var = 0.05, Len = 0.1, Fade = 0.05, Eq = { -10, 0, -6 } },
+	},
+	GuardBreak = { -- the guard caving in: a deep crack, a brittle snap, a shock tail
+		{ Id = THUD, Volume = 1.9, Speed = 0.8, Var = 0.04, Len = 0.3, Fade = 0.15, Eq = { 9, 0, -8 }, Drive = 0.3, Reach = 140 },
+		{ Id = SHATTER, Volume = 0.45, Speed = 0.72, Var = 0.05, Len = 0.35, Fade = 0.2, Eq = { -6, 0, -4 } },
+		{ Id = THUD, Volume = 1.0, Speed = 2.5, Var = 0.06, Len = 0.05, Fade = 0.04, Eq = { -24, 0, 6 } },
+	},
+	-- movement
+	Dash = { -- a burst of wind over a hard push-off step
+		{ Id = AIR, Volume = 0.75, Speed = 1.55, Var = 0.06, Start = 0.2, Len = 0.26, Fade = 0.16, Eq = { -12, 1, 0 } },
+		{ Id = STEP, Volume = 0.6, Speed = 1.35, Var = 0.06, Len = 0.1, Fade = 0.05, Eq = { 0, 0, -3 } },
+	},
+	Step = { -- a fast step (the dash strike's plant)
+		{ Id = STEP, Volume = 0.55, Speed = 1.25, Var = 0.07, Len = 0.09, Fade = 0.05 },
+	},
+	Land = { -- feet back on the ground (the stomp's own landing sits under the smash)
+		{ Id = THUD, Volume = 0.9, Speed = 1.05, Var = 0.05, Len = 0.2, Fade = 0.1, Eq = { 2, 0, -6 } },
+	},
+	-- finishers
+	Sweep = { -- the low sweep connecting: a heavy slap as the legs go
+		{ Id = THUD, Volume = 1.8, Speed = 0.95, Var = 0.05, Len = 0.22, Fade = 0.12, Eq = { 8, 0, -9 }, Drive = 0.2, Reach = 140 },
+		{ Id = THUD, Volume = 0.9, Speed = 2.2, Var = 0.06, Len = 0.06, Fade = 0.05, Eq = { -22, 0, 5 } },
+	},
+	DashHit = { -- the dash strike: momentum driven into the body
+		{ Id = THUD, Volume = 1.8, Speed = 0.92, Var = 0.05, Len = 0.22, Fade = 0.12, Eq = { 9, 0, -8 }, Drive = 0.22, Reach = 140 },
+		{ Id = THUD, Volume = 1.0, Speed = 2.35, Var = 0.07, Len = 0.06, Fade = 0.05, Eq = { -22, 0, 6 } },
+		{ Id = AIR, Volume = 0.4, Speed = 1.6, Var = 0.05, Start = 0.35, Len = 0.18, Fade = 0.12, Eq = { -16, 0, 0 }, Delay = 0.015 },
+	},
+	Knockdown = { -- a body hitting the floor
+		{ Id = THUD, Volume = 1.6, Speed = 0.72, Var = 0.05, Len = 0.35, Fade = 0.2, Eq = { 7, 0, -10 }, Reach = 120 },
+		{ Id = CLOTH, Volume = 0.45, Speed = 1.1, Var = 0.05, Len = 0.2, Fade = 0.1, Eq = { -6, 0, -6 }, Delay = 0.05 },
+	},
+	-- GROUND SMASH: a real ground impact - the boom, a sub-bass drop under it, then the rubble
+	Slam = {
+		{ Id = THUD, Volume = 2.4, Speed = 0.55, Var = 0.03, Len = 0.55, Fade = 0.35, Eq = { 10, 0, -8 }, Drive = 0.35, Reach = 180 },
+		{ Id = THUD, Volume = 1.2, Speed = 1.9, Var = 0.05, Len = 0.07, Fade = 0.05, Eq = { -18, 2, 6 }, Reach = 150 },
+	},
+	SlamSub = {
+		{ Id = THUD, Volume = 2.2, Speed = 0.32, Var = 0.02, Len = 0.8, Fade = 0.55, Eq = { 10, -8, -30 }, Reach = 200, Delay = 0.01 },
+	},
+	SlamDebris = {
+		{ Id = SHATTER, Volume = 0.55, Speed = 0.42, Var = 0.06, Len = 0.9, Fade = 0.5, Eq = { 2, 0, -12 }, Delay = 0.06, Reach = 150 },
+		{ Id = STEP, Volume = 0.5, Speed = 0.7, Var = 0.08, Len = 0.5, Fade = 0.3, Eq = { 2, 0, -8 }, Delay = 0.12, Reach = 120 },
+	},
 }
 
 ---------------------------------------------------------------------------

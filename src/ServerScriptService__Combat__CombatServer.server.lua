@@ -9,8 +9,9 @@
 	  "Pos"   { Seq, P, L, V, Tau, Land? } where this client has its body during strike Seq (the server
 	                                   judges the strike from there, within Config.Hitbox.ReportDrift)
 	The server answers the sender with CombatEvent("Ack", { Seq, Kind, Ok, Action, Slot, Chain }) so the
-	client can keep (or roll back) what it started playing. Requests are rate limited and type-checked;
-	damage, targets, stun and timing are never taken from the client.
+	client can keep (or roll back) what it started playing (Chain.Lock = the fighter the chain is locked
+	onto, if any). Requests are rate limited and type-checked; damage, targets, the target lock, stun,
+	knockback, cooldowns and timing are never taken from the client.
 ]]
 
 local Players = game:GetService("Players")
@@ -118,7 +119,7 @@ Request.OnServerEvent:Connect(function(player: Player, kind: any, payload: any)
 	if type(payload) ~= "table" then
 		payload = {}
 	end
-	local seq = if type(payload.Seq) == "number" then payload.Seq else 0
+	local seq = if type(payload.Seq) == "number" and payload.Seq == payload.Seq and math.abs(payload.Seq) < 2 ^ 31 then payload.Seq else 0
 	local char = player.Character
 	if not char or not Service.Get(char) then
 		return
@@ -138,7 +139,8 @@ Request.OnServerEvent:Connect(function(player: Player, kind: any, payload: any)
 			Seq = seq,
 			H = if type(payload.H) == "number" then payload.H else nil,
 		})
-		Event:FireClient(player, "Ack", { Seq = seq, Kind = "Attack", Ok = ok == true, Action = action, Slot = slot, Chain = chain })
+		-- At: when the server decided (server time) - the client's timing readout in Studio compares it
+		Event:FireClient(player, "Ack", { Seq = seq, Kind = "Attack", Ok = ok == true, Action = action, Slot = slot, Chain = chain, At = workspace:GetServerTimeNow() })
 	elseif kind == "Dash" then
 		local dir = payload.Dir
 		local ok = type(dir) == "string" and DIRS[dir] == true and Service.RequestDash(char, dir)

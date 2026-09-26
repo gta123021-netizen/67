@@ -10,6 +10,8 @@
 
 	  local ac = AnimController.get(humanoid)
 	  ac:Play("Swing1", { Fade = 0.08, Speed = 1.1 })
+	  ac:PlayFresh("HitLeft", { Fade = 0.06 })   -- restart a clip that is already playing without a
+	                                             -- snap: a second copy fades in from the current pose
 	  ac:Stop("Swing1", 0.15)
 ]]
 
@@ -31,9 +33,15 @@ local PRIORITY = {
 	Core = Enum.AnimationPriority.Core,
 }
 
+-- "HitLeft#2" is the second copy of "HitLeft" (the same clip, its own track)
+local function baseKey(key: string): string
+	return string.match(key, "^(.-)#%d+$") or key
+end
+
 -- shared Animation objects (one per clip for the whole place)
 local animations: { [string]: Animation } = {}
 local function animationFor(key: string): Animation?
+	key = baseKey(key)
 	local a = animations[key]
 	if a then
 		return a
@@ -86,6 +94,7 @@ function AnimController.get(humanoid: Humanoid): any
 		Humanoid = humanoid,
 		Animator = animator,
 		Tracks = {} :: { [string]: AnimationTrack },
+		Fresh = {} :: { [string]: string }, -- which copy of a clip PlayFresh last started
 		Alive = true,
 		Conn = nil :: RBXScriptConnection?,
 	}, AnimController)
@@ -117,7 +126,7 @@ function AnimController:Track(key: string): AnimationTrack?
 	if not ok or not track then
 		return nil
 	end
-	local def = Config.Anim[key]
+	local def = Config.Anim[baseKey(key)]
 	track.Priority = PRIORITY[def.Priority] or Enum.AnimationPriority.Action
 	track.Looped = def.Looped == true
 	self.Tracks[key] = track
@@ -149,10 +158,40 @@ function AnimController:Play(key: string, opts: any?): AnimationTrack?
 	return t
 end
 
+-- a clean restart of a clip that may already be playing (hit reactions landing back to back): the
+-- clip's other copy starts from the top and fades in while the copy on screen fades out from the
+-- pose it is in - no one-frame snap back to the first frame. opts as Play (Restart is implied).
+function AnimController:PlayFresh(key: string, opts: any?): AnimationTrack?
+	local copy = key .. "#2"
+	local active = self.Fresh[key] or key
+	local cur = self:Track(active)
+	if not cur then
+		return nil
+	end
+	local o = table.clone(opts or {})
+	o.Restart = true
+	if not cur.IsPlaying then
+		return self:Play(active, o)
+	end
+	local nextKey = if active == key then copy else key
+	local fade = if o.Fade ~= nil then o.Fade else 0.1
+	local tr = self:Play(nextKey, o)
+	if tr then
+		cur:Stop(fade)
+		self.Fresh[key] = nextKey
+	end
+	return tr
+end
+
 function AnimController:Stop(key: string, fade: number?)
+	local f = if fade ~= nil then fade else 0.15
 	local t = self.Tracks[key]
 	if t and t.IsPlaying then
-		t:Stop(if fade ~= nil then fade else 0.15)
+		t:Stop(f)
+	end
+	local c = self.Tracks[key .. "#2"]
+	if c and c.IsPlaying then
+		c:Stop(f)
 	end
 end
 
@@ -164,7 +203,11 @@ end
 
 function AnimController:IsPlaying(key: string): boolean
 	local t = self.Tracks[key]
-	return t ~= nil and t.IsPlaying
+	if t ~= nil and t.IsPlaying then
+		return true
+	end
+	local c = self.Tracks[key .. "#2"]
+	return c ~= nil and c.IsPlaying
 end
 
 function AnimController:Destroy()
@@ -183,6 +226,7 @@ function AnimController:Destroy()
 		end)
 	end
 	table.clear(self.Tracks)
+	table.clear(self.Fresh)
 	controllers[self.Humanoid] = nil
 end
 

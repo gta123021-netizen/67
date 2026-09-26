@@ -44,7 +44,9 @@ function Touch.Start(api: any)
 	gui.Parent = player:WaitForChild("PlayerGui")
 
 	local buttons = {}
-	local function makeButton(name: string, label: string, colors: { Color3 }, onDown: () -> (), onUp: (() -> ())?)
+	-- onDown gets the touch that pressed the button (a held ATTACK is let go when THAT finger lifts,
+	-- even off the button)
+	local function makeButton(name: string, label: string, colors: { Color3 }, onDown: (InputObject?) -> (), onUp: (() -> ())?)
 		local b = Instance.new("TextButton")
 		b.Name = name
 		b.Text = ""
@@ -78,26 +80,40 @@ function Touch.Start(api: any)
 			txt.TextColor3 = Color3.new(1, 1, 1)
 			txt.Parent = b
 		end
-		local down = false
-		b.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-				down = true
-				TweenService:Create(scale, TweenInfo.new(0.08), { Scale = 0.9 }):Play()
-				onDown()
-			end
-		end)
-		b.InputEnded:Connect(function(input)
-			if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) and down then
-				down = false
+		local down: InputObject? = nil
+		local function lift()
+			if down then
+				down = nil
 				TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Back), { Scale = 1 }):Play()
 				if onUp then
 					onUp()
 				end
 			end
+		end
+		b.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+				if down then
+					return -- a second finger on the same button is not a second press
+				end
+				down = input
+				TweenService:Create(scale, TweenInfo.new(0.08), { Scale = 0.9 }):Play()
+				onDown(input)
+			end
+		end)
+		b.InputEnded:Connect(function(input)
+			if input == down then
+				lift()
+			end
+		end)
+		-- the finger slid off the button before lifting: the button never hears the end, the screen does
+		UserInputService.TouchEnded:Connect(function(input)
+			if input == down then
+				lift()
+			end
 		end)
 		buttons[name] = { Button = b, Label = txt, Release = function()
 			if down then
-				down = false
+				down = nil
 				scale.Scale = 1
 				if onUp then
 					onUp()

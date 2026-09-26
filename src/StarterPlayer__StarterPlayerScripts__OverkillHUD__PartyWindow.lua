@@ -1021,28 +1021,54 @@ return function(ctx: any)
 	end)
 
 	---------------------------------------------------------------------------
-	-- party frames on the left edge (while you're in a party)
+	-- party frames (while you're in a party). Desktop: one of the HUD column's groups (ctx.Column),
+	-- right above the portal card / the dock, Theme.Hud.GroupGap from it - the two can never meet.
+	-- Phones: beside the column's top, the same gap to its right. The member rows are drawn with the
+	-- HUD's outline and stacked Theme.Hud.RowGap apart (the header chip too), so every row is as
+	-- far from the next as every other.
 	---------------------------------------------------------------------------
-	local framesPos = function(hidden: boolean): UDim2
-		return UDim2.new(0, if hidden then -330 else 24, 0.5, if isTouch then 40 else -60)
-	end
+	local HUD = Theme.Hud
+	local column = if isTouch then nil else ctx.Column
 	local frames = new("Frame", {
 		Name = "PartyFrames",
 		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = framesPos(true),
-		Size = UDim2.fromOffset(290, 300),
+		Size = UDim2.fromOffset(HUD.PartyWidth, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = if ctx.ColumnOrder then ctx.ColumnOrder.Party else 1,
+		Visible = false,
 		ZIndex = 18,
-		Parent = ctx.Hud,
+		Parent = column or ctx.Hud,
 	})
-	Kit.list(frames, Enum.FillDirection.Vertical, 10, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local framesHeader = new("Frame", { Name = "Header", BackgroundTransparency = 1, Size = UDim2.fromOffset(290, 34), LayoutOrder = 0, ZIndex = 18, Parent = frames })
+	if not column then
+		frames.Position = UDim2.fromOffset(HUD.Margin + HUD.ColumnWidth + HUD.GroupGap, HUD.TouchTop)
+	end
+	-- the rows slide in from the left inside the group (the group's own place never moves)
+	local framesBody = new("Frame", {
+		Name = "Body",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(HUD.PartyWidth, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ZIndex = 18,
+		Parent = frames,
+	})
+	Kit.list(framesBody, Enum.FillDirection.Vertical, HUD.RowGap, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top)
+	local framesHeader = new("Frame", { Name = "Header", BackgroundTransparency = 1, Size = UDim2.fromOffset(HUD.PartyWidth, HUD.PartyHeaderHeight), LayoutOrder = 0, ZIndex = 18, Parent = framesBody })
 	Kit.list(framesHeader, Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local headerChip = Q.Chip(framesHeader, "PARTY", TEAL, TEAL_D, 32, 19)
+	-- the header chips carry the rows' outline too: the header sits exactly RowGap above the first
+	-- row, ink to ink, like every row above the next
+	local function hudOutline(chip: any)
+		local st = chip.Frame:FindFirstChildOfClass("UIStroke")
+		if st then
+			st.Thickness = HUD.Outline * 1.35
+		end
+	end
+	local headerChip = Q.Chip(framesHeader, "PARTY", TEAL, TEAL_D, HUD.PartyHeaderHeight, 19)
 	headerChip.Frame.LayoutOrder = 1
-	local searchChip = Q.Chip(framesHeader, "SEARCHING", C.Blue, C.BlueDeep, 28, 19)
+	hudOutline(headerChip)
+	local searchChip = Q.Chip(framesHeader, "SEARCHING", C.Blue, C.BlueDeep, HUD.PartyHeaderHeight, 19)
 	searchChip.Frame.LayoutOrder = 2
 	searchChip.Frame.Visible = false
+	hudOutline(searchChip)
 	local framesShown = false
 	local framesKey = ""
 
@@ -1051,15 +1077,15 @@ return function(ctx: any)
 		local b = Kit.plate({
 			Class = "TextButton",
 			Name = "Member",
-			Parent = frames,
-			Size = UDim2.fromOffset(270, 62),
+			Parent = framesBody,
+			Size = UDim2.fromOffset(HUD.PartyRowWidth, HUD.PartyRowHeight),
 			LayoutOrder = order,
 			Radius = UDim.new(1, 0),
-			Stroke = 4,
+			Stroke = HUD.Outline,
 			ZIndex = 18,
 			Gradient = { C.Navy700, C.Night },
 		})
-		local av = Q.Avatar(b, v, 52, if isLeader then C.Gold else TEAL, 19, { Side = "Left", Gap = 5, Width = 62, Band = { C.Navy700, C.Night, 90 } })
+		Q.Avatar(b, v, 52, if isLeader then C.Gold else TEAL, 19, { Side = "Left", Gap = 5, Width = HUD.PartyRowHeight, Band = { C.Navy700, C.Night, 90 } })
 		Kit.outlineOnTop(b, 22)
 		if isLeader then
 			Kit.image({ Name = "Crown", Image = Theme.Icon.Crown, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(11, 3), Size = UDim2.fromOffset(32, 32), Rotation = -35, ZIndex = 23, Parent = b })
@@ -1111,7 +1137,7 @@ return function(ctx: any)
 		local key = if party then partyKey(s) else ""
 		if show and key ~= framesKey then
 			framesKey = key
-			for _, c in ipairs(frames:GetChildren()) do
+			for _, c in ipairs(framesBody:GetChildren()) do
 				if c.Name == "Member" then
 					c:Destroy()
 				end
@@ -1129,7 +1155,17 @@ return function(ctx: any)
 		local hidden = not show or ctx.Current() ~= nil or ctx.HudHidden() or s.Match ~= nil
 		if framesShown ~= not hidden then
 			framesShown = not hidden
-			tween(frames, 0.45, { Position = framesPos(hidden) }, if hidden then Enum.EasingStyle.Quint else Enum.EasingStyle.Back)
+			if hidden then
+				tween(framesBody, 0.3, { Position = UDim2.fromOffset(-HUD.PartyWidth - 60, 0) }, Enum.EasingStyle.Quint).Completed:Connect(function(state)
+					if state == Enum.PlaybackState.Completed and not framesShown then
+						frames.Visible = false -- out of the column: the groups below close up
+					end
+				end)
+			else
+				frames.Visible = true
+				framesBody.Position = UDim2.fromOffset(-HUD.PartyWidth - 60, 0)
+				tween(framesBody, 0.45, { Position = UDim2.new() }, Enum.EasingStyle.Back)
+			end
 		end
 	end
 	ctx.On("QueueState", refreshFrames)
