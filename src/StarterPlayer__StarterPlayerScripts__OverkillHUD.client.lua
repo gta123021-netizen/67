@@ -639,7 +639,11 @@ local corner = new("Frame", {
 	Size = UDim2.fromOffset(CORNER_W, 382),
 	Parent = hudLayer,
 })
-Kit.list(corner, Enum.FillDirection.Vertical, 18, Enum.HorizontalAlignment.Left, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
+-- the dock's tiles sit as far from the status pills as the pills sit from each other (20 edge to
+-- edge: desktop = the dock row's spare 10 under its tiles + 5 + the pill row's 5; phones, where the
+-- pills come first, = the pill row's 5 + 15)
+local CORNER_PAD = if isTouch then 15 else 5
+Kit.list(corner, Enum.FillDirection.Vertical, CORNER_PAD, Enum.HorizontalAlignment.Left, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
 local status = new("Frame", {
 	Name = "Status",
 	BackgroundTransparency = 1,
@@ -658,6 +662,17 @@ local PILL_X = 30 -- pill left edge, holder space
 local TEXT_X = 57 -- captions and values, pill space (clear of the badge)
 local RIGHT_PAD = 8 -- actions and the xp bar end here, pill space
 ctx.PillMetrics = { Height = PILL_H, BadgeX = BADGE_X, BadgeY = HOLDER_H / 2, TextX = TEXT_X, RightPad = RIGHT_PAD }
+-- where the dock's tiles are (cards that stand on the column line up with them): Left / Width of
+-- the column; desktop: TileTop = the tiles' top edge above the screen's bottom; phones: TileFoot =
+-- the tiles' bottom edge below the top; Gap = the space between neighbours in the column
+ctx.DockMetrics = {
+	Left = 30,
+	Width = CORNER_W,
+	TileTop = 24 + 230 + CORNER_PAD + 126,
+	TileFoot = 84 + 230 + CORNER_PAD + 116,
+	Gap = (70 - PILL_H) + 10,
+	Stroke = 4.5,
+}
 
 -- the pills' background textures: little silhouettes (shurikens, coins or stars) scattered at
 -- random angles and sizes, never closer than a set gap, all fully inside the capsule. They are
@@ -972,13 +987,6 @@ local dock = new("Frame", {
 })
 Kit.list(dock, Enum.FillDirection.Horizontal, 12, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Bottom)
 
-local function keyText(k: Enum.KeyCode?): string?
-	if not k then
-		return nil
-	end
-	return Theme.KeyText(k)
-end
-
 ctx.Dock = {}
 local function dockButton(o: { [string]: any })
 	local accent = o.Accent[1]
@@ -1048,25 +1056,9 @@ local function dockButton(o: { [string]: any })
 		Stroke = 3.2,
 		Parent = tag,
 	})
-	-- key chip
-	local key = keyText(o.Key)
+	-- (no key caps on the tiles: the dock reads as clean icon tiles; the keys still work, and
+	-- Settings lists them)
 	local keyLabel: TextLabel? = nil
-	if key and not isTouch then
-		-- a key cap centred on the top edge: clear of the icon below and the buttons either side
-		local chip = Kit.plate({
-			Name = "Key",
-			Parent = api.Body,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.new(0.5, 0, 0, -8),
-			Size = UDim2.fromOffset(28, 28),
-			Radius = 10,
-			Stroke = 3,
-			Color = C.Text,
-			ZIndex = z + 8,
-			Gradient = { Color3.new(1, 1, 1), Color3.fromRGB(206, 216, 234) },
-		})
-		keyLabel = Kit.text({ Text = key, TextSize = 18, TextColor3 = C.Ink, Stroke = false, ZIndex = z + 9, Parent = chip })
-	end
 	-- notification badge
 	local badge = Kit.plate({
 		Name = "Badge",
@@ -1287,6 +1279,7 @@ function ctx.SetOverlay(name: string?, thenOpen: string?, openArg: any?)
 		return
 	end
 	ctx.Overlay = name
+	player:SetAttribute("UIOverlay", name) -- combat input steps aside while an overlay is up
 	pcall(function()
 		game:GetService("ProximityPromptService").Enabled = name == nil
 	end)
@@ -1308,6 +1301,7 @@ end
 
 -- the dock + coins + level slide away while a window (shop, stats, bag, settings) is open
 ctx.On("WindowChanged", function(name: string?)
+	player:SetAttribute("UIWindow", name) -- combat keys stay quiet while a window is open
 	tween(corner, 0.4, { Position = cornerPos(name ~= nil or hudHidden()) }, Enum.EasingStyle.Quint)
 end)
 

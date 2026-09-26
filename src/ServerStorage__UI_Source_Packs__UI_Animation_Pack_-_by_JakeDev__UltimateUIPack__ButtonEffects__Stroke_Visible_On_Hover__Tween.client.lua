@@ -1,24 +1,13 @@
---// This is a Stroke Visiblilty Toggle on Hover Effect, the uistroke will go visible on hover.
+--// This is a Shine Effect, a shiny line will appear randomly.
 
-local btn = script.Parent
-local stroke = btn.UIStroke
+-- CREDITS TO RILEYBYTES (roblox.com/users/3890364928/profile) for making this
+
+
 local TS = game:GetService("TweenService")
 
-local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+local button = script.Parent
+local shine = button:WaitForChild("Frame"):WaitForChild("Shine")
+local info = TweenInfo.new(1, Enum.EasingStyle.Circular, Enum.EasingDirection.In, -1, false)
 
-stroke.Enabled = false
-local function makeTween(alpha)
-	return TS:Create(stroke, tInfo, {Transparency = alpha})
-end
-
-btn.MouseEnter:Connect(function()
-	stroke.Enabled = true
-	makeTween(0):Play()
-end)
-
-btn.MouseLeave:Connect(function()
-	makeTween(1):Play()
-	makeTween(1).Completed:Connect(function()
-		stroke.Enabled = false
-	end)
-end)
+shine.Position = UDim2.fromScale(-0.5, 0.5)
+TS:Create(shine, info, {Position = UDim2.fromScale(1.5, 0.5)}):Play()

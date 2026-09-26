@@ -58,6 +58,13 @@ Theme.Accent = {
 	Bag = { Theme.C.Blue, Theme.C.BlueDeep },
 	Settings = { Theme.C.Purple, Theme.C.PurpleDeep },
 	Party = { Theme.C.Teal, Theme.C.TealDeep },
+	-- combat controls (keybinds page)
+	Attack = { Theme.C.Red, Theme.C.RedDeep },
+	Heavy = { Theme.C.Gold, Theme.C.GoldDeep },
+	Block = { Theme.C.Blue, Theme.C.BlueDeep },
+	Dash = { Theme.C.Teal, Theme.C.TealDeep },
+	Sprint = { Theme.C.Green, Theme.C.GreenDeep },
+	ShiftLock = { Theme.C.Purple, Theme.C.PurpleDeep },
 }
 
 Theme.Rarity = {
@@ -126,15 +133,27 @@ Theme.Sound = {
 -- controls
 ---------------------------------------------------------------------------
 -- default hotkeys (players can rebind them in Settings > Keybinds; saved with their settings)
-Theme.DefaultKeys = { Shop = "B", Stats = "P", Bag = "Backquote", Party = "G", Settings = "M" }
+Theme.DefaultKeys = {
+	Shop = "B", Stats = "P", Bag = "Backquote", Party = "G", Settings = "M",
+	-- combat (StarterPlayerScripts.CombatClient reads these live)
+	Block = "F", Dash = "Q", Sprint = "LeftShift", ShiftLock = "LeftControl",
+}
 
 -- the actions listed on the keybinds page, in order
+-- Section groups the rows; Fixed = a control that can't be rebound (shown for reference);
+-- Draw = a drawn glyph instead of an icon image; Icon = which Theme.Icon to use (default: Id)
 Theme.KeyActions = {
-	{ Id = "Shop", Label = "Shop", Sub = "Open the shop" },
-	{ Id = "Stats", Label = "Profile", Sub = "Your profile and stats" },
-	{ Id = "Bag", Label = "Bag", Sub = "Your backpack" },
-	{ Id = "Party", Label = "Party", Sub = "Invite players and team up" },
-	{ Id = "Settings", Label = "Menu", Sub = "This settings menu" },
+	{ Id = "Attack", Label = "Light Attack", Sub = "Left click  ·  gamepad RT  ·  hold to chain  ·  jump + M1 to stomp", Section = "COMBAT", Fixed = "M1", Icon = "Flame" },
+	{ Id = "Heavy", Label = "Heavy Attack", Sub = "Right click  ·  gamepad Y  ·  one uppercut per combo", Section = "COMBAT", Fixed = "M2", Draw = "Heavy" },
+	{ Id = "Block", Label = "Block", Sub = "Hold to guard  ·  gamepad LT", Section = "COMBAT", Draw = "Shield" },
+	{ Id = "Dash", Label = "Dash", Sub = "Goes where you're moving  ·  forward + M1 to strike  ·  gamepad B", Section = "COMBAT", Draw = "Dash" },
+	{ Id = "Sprint", Label = "Sprint", Sub = "Hold to run  ·  gamepad L3", Section = "COMBAT", Icon = "Boot" },
+	{ Id = "ShiftLock", Label = "Shift Lock", Sub = "Toggle the locked camera  ·  you face where you aim", Section = "COMBAT", Draw = "Lock" },
+	{ Id = "Shop", Label = "Shop", Sub = "Open the shop", Section = "MENUS" },
+	{ Id = "Stats", Label = "Profile", Sub = "Your profile and stats", Section = "MENUS" },
+	{ Id = "Bag", Label = "Bag", Sub = "Your backpack", Section = "MENUS" },
+	{ Id = "Party", Label = "Party", Sub = "Invite players and team up", Section = "MENUS" },
+	{ Id = "Settings", Label = "Menu", Sub = "This settings menu", Section = "MENUS" },
 }
 
 -- keys a player can't take: movement, jump, chat, interact, camera zoom, hotbar numbers,
@@ -152,6 +171,11 @@ local PUNCT = {
 	Semicolon = ";", Quote = "'", Comma = ",", Period = ".",
 }
 local FKEYS = { F1 = true, F2 = true, F3 = true, F4 = true, F5 = true, F6 = true, F7 = true, F8 = true }
+-- modifier keys that can hold an action (shift lock is Overkill's own keybind, so Shift is free)
+local SPECIAL = {
+	LeftShift = "SHIFT", RightShift = "R-SHIFT", LeftControl = "CTRL", RightControl = "R-CTRL",
+	LeftAlt = "ALT", RightAlt = "R-ALT", CapsLock = "CAPS",
+}
 
 -- can this KeyCode name be bound to a menu?
 function Theme.KeyAllowed(name: any): boolean
@@ -161,18 +185,24 @@ function Theme.KeyAllowed(name: any): boolean
 	if #name == 1 and string.match(name, "^[A-Z]$") then
 		return true
 	end
-	return PUNCT[name] ~= nil or FKEYS[name] == true
+	return PUNCT[name] ~= nil or FKEYS[name] == true or SPECIAL[name] ~= nil
 end
 
 -- short label for a key cap: "B", "`", "F2"
 function Theme.KeyText(code: any): string
 	local name = if typeof(code) == "EnumItem" then code.Name else tostring(code)
-	return PUNCT[name] or name
+	return PUNCT[name] or SPECIAL[name] or name
 end
 
 Theme.Keys = {}
 -- map = { Shop = "B", ... } (KeyCode names); anything missing or invalid falls back to the default
 function Theme.SetKeys(map: any)
+	-- keys saved before shift lock had its own bind had Sprint on Left Ctrl (Shift was Roblox's
+	-- shift lock): those move to the new layout, Sprint on Shift and Shift Lock on Left Ctrl
+	if type(map) == "table" and map.ShiftLock == nil and map.Sprint == "LeftControl" then
+		map = table.clone(map)
+		map.Sprint = nil
+	end
 	for id, def in pairs(Theme.DefaultKeys) do
 		local name = if type(map) == "table" and Theme.KeyAllowed(map[id]) then map[id] else def
 		Theme.Keys[id] = (Enum.KeyCode :: any)[name]

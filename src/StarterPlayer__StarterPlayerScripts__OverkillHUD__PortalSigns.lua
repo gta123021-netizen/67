@@ -1,9 +1,11 @@
 --[[
 	PortalSigns  (StarterPlayerScripts.OverkillHUD.PortalSigns)
-	Walk up to a portal and a card rises above the hotbar: the mode, how it plays, how many players
-	are searching, the expected wait, and whether you can walk in right now (party leader, party size,
+	Walk up to a portal and a card rises over the dock (SHOP / STATS / BAG / PARTY / MENU), in the
+	bottom-left HUD column, exactly as wide as it and as far above the tiles as the status pills are
+	below them: the mode, how it plays, how many players are
+	searching, the expected wait, and whether you can walk in right now (party leader, party size,
 	queue lock, private duel). It stays out of the way while you're already searching that mode,
-	in a match, or while a window / the quest dialogue is open.
+	in a match, or while a window / the quest dialogue is open (the column slides away then too).
 ]]
 
 local Players = game:GetService("Players")
@@ -18,7 +20,20 @@ return function(ctx: any)
 	local player = Players.LocalPlayer
 
 	local RANGE = 17 -- studs from the doorway
-	local W, H = 720, 132
+	local W, H = 720, 132 -- the card's own layout size; it is drawn scaled to fit the HUD column
+	-- the bottom-left HUD column (OverkillHUD's corner cluster, ctx.DockMetrics): the card stands on
+	-- the dock, exactly as wide as the column, as far above the tiles as the tiles are above the
+	-- status pills and the pills are from each other
+	local DM = ctx.DockMetrics or { Left = 30, Width = 548, TileTop = 385, TileFoot = 445, Gap = 20, Stroke = 4.5 }
+	local COLUMN_X, COLUMN_W = DM.Left, DM.Width
+	local PLATE_STROKE = 7.5 -- this card's ink outline, at layout size
+	local SHADOW = 10 -- this card's drop shadow hangs this far under it, at layout size
+	-- scaled so the card's outer ink edge lines up with the dock tiles' outer ink edge on both sides
+	local FIT = (COLUMN_W + DM.Stroke * 2) / (W + PLATE_STROKE * 2)
+	-- the gap, ink edge to ink edge, is the same as between two status pills (both inked): the
+	-- card's shadow bottom is its lowest edge
+	local GAP = DM.Gap - DM.Stroke * 2 + DM.Stroke
+	local isTouch = ctx.IsTouch
 
 	---------------------------------------------------------------------------
 	-- doorways
@@ -77,13 +92,18 @@ return function(ctx: any)
 	local holder = new("Frame", {
 		Name = "PortalCard",
 		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -238),
+		-- desktop: standing on the dock; phones: under the column (the dock is its last row there)
+		AnchorPoint = if isTouch then Vector2.new(0, 0) else Vector2.new(0, 1),
+		Position = if isTouch
+			then UDim2.fromOffset(COLUMN_X + (COLUMN_W - W * FIT) / 2, DM.TileFoot + DM.Gap)
+			else UDim2.new(0, COLUMN_X + (COLUMN_W - W * FIT) / 2, 1, -(DM.TileTop + GAP + SHADOW * FIT)),
 		Size = UDim2.fromOffset(W, H),
 		Visible = false,
 		ZIndex = 15,
 		Parent = ctx.Hud,
 	})
+	-- drawn at the column's width (the whole card scales from its anchored corner)
+	new("UIScale", { Name = "Fit", Scale = FIT, Parent = holder })
 	local card = new("Frame", {
 		Name = "Card",
 		BackgroundTransparency = 1,

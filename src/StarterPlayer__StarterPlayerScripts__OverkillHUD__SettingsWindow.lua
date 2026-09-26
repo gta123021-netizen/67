@@ -74,7 +74,7 @@ return function(ctx: any)
 			Stroke = 2,
 			Parent = r,
 		})
-		return r, subLabel, rowStroke
+		return r, subLabel, rowStroke, disc
 	end
 
 	-- "57%" (string.format's %d cuts 0.57 * 100 = 56.999... down to 56)
@@ -264,8 +264,72 @@ return function(ctx: any)
 	---------------------------------------------------------------------------
 	-- KEYBINDS page: click a key cap, press the new key. Taken keys swap, game keys are refused.
 	---------------------------------------------------------------------------
-	local keysPage = new("Frame", { Name = "Keybinds", BackgroundTransparency = 1, Position = list.Position, Size = list.Size, Visible = false, ZIndex = 12, Parent = content })
+	-- combat + menu keys: more rows than the page is tall, so it scrolls. The padding keeps the rows'
+	-- outer outlines inside the clip, and the bar gets its own lane on the right.
+	local keysPage = new("ScrollingFrame", {
+		Name = "Keybinds",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = list.Position,
+		Size = list.Size,
+		Visible = false,
+		ZIndex = 12,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		ScrollBarImageColor3 = C.Rim,
+		ScrollBarImageTransparency = 0.2,
+		VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+		Parent = content,
+	})
+	Kit.padding(keysPage, 5, 5, 12, 5)
 	Kit.list(keysPage, Enum.FillDirection.Vertical, 12, Enum.HorizontalAlignment.Center)
+
+	-- a section title between groups of rows ("COMBAT", "MENUS")
+	local function sectionHeader(text: string, order: number)
+		local h = new("Frame", { Name = "Section_" .. text, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), LayoutOrder = order, ZIndex = 12, Parent = keysPage })
+		Kit.text({ Text = text, TextSize = 20, FontFace = Theme.Font.Display, TextColor3 = C.TextSoft, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, Position = UDim2.fromOffset(6, 0), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13, Stroke = 2.4, Parent = h })
+		local line = new("Frame", { Name = "Line", BackgroundColor3 = C.Rim, BackgroundTransparency = 0.72, BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, Kit.textWidth(text, 20) + 20, 0.5, 0), Size = UDim2.new(1, -(Kit.textWidth(text, 20) + 26), 0, 3), ZIndex = 12, Parent = h })
+		Kit.pill(line)
+	end
+
+	-- glyphs drawn from shapes (white with an ink outline, like the icon art)
+	local function drawGlyph(kind: string, parent: GuiObject, z: number)
+		if kind == "Dash" then
+			for _, dx in ipairs({ -7, 7 }) do
+				local ch = Kit.chevron(parent, 26, z, 1)
+				ch.Position = UDim2.new(0.5, dx, 0.5, 0)
+			end
+		elseif kind == "Heavy" then
+			-- a rising double chevron: the uppercut
+			for _, dy in ipairs({ -7, 7 }) do
+				local ch = Kit.chevron(parent, 26, z, 1)
+				ch.Position = UDim2.new(0.5, 0, 0.5, dy)
+				ch.Rotation = -90
+			end
+		elseif kind == "Shield" then
+			local holder = new("Frame", { Name = "Shield", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(34, 38), ZIndex = z, Parent = parent })
+			for layer = 1, 2 do
+				local grow = if layer == 1 then 3 else 0
+				local col = if layer == 1 then C.Ink else Color3.new(1, 1, 1)
+				local top = new("Frame", { BackgroundColor3 = col, BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 4 - grow), Size = UDim2.fromOffset(26 + grow * 2, 17 + grow * 2), ZIndex = z + layer - 1, Parent = holder })
+				Kit.corner(top, 6 + grow)
+				local tip = new("Frame", { BackgroundColor3 = col, BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 20), Size = UDim2.fromOffset(18.4 + grow * 2, 18.4 + grow * 2), Rotation = 45, ZIndex = z + layer - 1, Parent = holder })
+				Kit.corner(tip, 4 + grow)
+			end
+		elseif kind == "Lock" then
+			-- shift lock: the crosshair the camera locks to (a ring and a dot, ink under white)
+			for layer = 1, 2 do
+				local ink = layer == 1
+				local ring = new("Frame", { Name = "Ring", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(28, 28), ZIndex = z + layer - 1, Parent = parent })
+				Kit.pill(ring)
+				new("UIStroke", { Thickness = if ink then 8.5 else 4, Color = if ink then C.Ink else Color3.new(1, 1, 1), Parent = ring })
+				local dot = new("Frame", { Name = "Dot", BackgroundColor3 = if ink then C.Ink else Color3.new(1, 1, 1), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(if ink then 12 else 7, if ink then 12 else 7), ZIndex = z + layer - 1, Parent = parent })
+				Kit.pill(dot)
+			end
+		end
+	end
 
 	local KEY_FACE, KEY_DEEP = Color3.fromRGB(240, 244, 252), Color3.fromRGB(172, 186, 214)
 	local keyRows: { any } = {}
@@ -289,6 +353,12 @@ return function(ctx: any)
 	end
 
 	local function refreshKeyRow(kr: any)
+		if kr.Action.Fixed then
+			kr.Cap.SetText(kr.Action.Fixed)
+			kr.Sub.Text = kr.Action.Sub
+			kr.Sub.TextColor3 = C.TextDim
+			return
+		end
 		local name = keyName(kr.Id)
 		local def = Theme.DefaultKeys[kr.Id]
 		kr.Cap.SetText(Theme.KeyText(name))
@@ -319,6 +389,12 @@ return function(ctx: any)
 	end
 
 	local function startListening(kr: any)
+		if kr.Action.Fixed then
+			-- the mouse buttons can't be rebound
+			Kit.sfx("Error")
+			Kit.shake(kr.Cap.Button)
+			return
+		end
 		if listening == kr then
 			stopListening()
 			return
@@ -342,10 +418,18 @@ return function(ctx: any)
 		end)
 	end
 
+	local lastSection = nil
 	for i, action in ipairs(Theme.KeyActions) do
+		if action.Section and action.Section ~= lastSection then
+			lastSection = action.Section
+			sectionHeader(action.Section, i * 2 - 1)
+		end
 		local accent = Theme.Accent[action.Id] or Theme.Accent.Settings
-		local icon = (Theme.Icon :: any)[action.Id] or Theme.Icon.Gear
-		local r, sub, rowStroke = row(i, action.Label, action.Sub, accent[1], accent[2], nil, icon, keysPage)
+		local icon = if action.Draw then nil else ((Theme.Icon :: any)[action.Icon or action.Id] or Theme.Icon.Gear)
+		local r, sub, rowStroke, disc = row(i * 2, action.Label, action.Sub, accent[1], accent[2], if action.Draw then "" else nil, icon, keysPage)
+		if action.Draw and disc then
+			drawGlyph(action.Draw, disc.Frame, disc.ContentZ)
+		end
 		local kr: any = { Id = action.Id, Action = action, Row = r, Sub = sub }
 		kr.RowStroke = rowStroke
 		kr.Cap = Kit.button({
@@ -359,7 +443,7 @@ return function(ctx: any)
 			Stroke = 3.5,
 			Color = KEY_FACE,
 			Deep = KEY_DEEP,
-			Text = Theme.KeyText(keyName(action.Id)),
+			Text = if action.Fixed then action.Fixed else Theme.KeyText(keyName(action.Id)),
 			TextSize = 28,
 			TextStroke = false,
 			ZIndex = 14,

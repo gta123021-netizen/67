@@ -14,7 +14,8 @@ Config.QuestGiver = "Goki"                               -- who you talk to
 Config.PromptDistance = 20                               -- studs, from the podium centre
 Config.TitleHeight = 12                                  -- studs above the podium for the QUESTS sign
 Config.TitleSize = Vector2.new(17, 5)                    -- quieter QUESTS sign above the podium
-Config.CombatEnabled = false -- flip to true once your combat system reports combat stats (see QuestServer)
+Config.CombatEnabled = true -- the combat system (ServerScriptService.Combat) reports Kills, Hits, Damage, Blocks, KillStreak
+Config.UltimatesEnabled = false -- ultimate quests stay hidden until ultimates exist
 
 -- Places that count for "visit" / "spend time at" quests.
 -- Path = workspace path to a model; Folder = every child of that folder is its own spot.
@@ -222,7 +223,7 @@ end
 function Config.GetPool(tierName: string)
 	local out = {}
 	for _, q in ipairs(Config.Quests[tierName]) do
-		if Config.CombatEnabled or not q.Combat then
+		if (Config.CombatEnabled or not q.Combat) and (q.Stat ~= "Ultimates" or Config.UltimatesEnabled) then
 			table.insert(out, q)
 		end
 	end
