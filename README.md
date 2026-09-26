@@ -37,7 +37,8 @@
     reaching a surface, the drop pool, no splatter code left
   - `lune run tests/gore_test.luau` - the gore: thresholds, order, players' arms growing back with the heal
     effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
-  - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout
+  - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout;
+    the Sparring Dummy's spot, its brain (walks up, a beat to notice, fights, smashes with no arms, its leash)
   - `lune run tests/limbs_test.luau` - the server's limb rules: stages, lost limbs hidden, players' arms
     growing back (never an NPC's), one-arm damage and guard chip, one-handed single strikes, no guard and
     no attacks without arms, players too, tools stowed
@@ -136,6 +137,12 @@
 ### Practice dummies
 - The still and guarding dummies never heal: their damage (and its gore) stays until they are knocked
   out, and a fresh one respawns on its spot a few seconds after the knockout.
+- The Sparring Dummy (orange) stands on its own spot, at least 26 studs from the other two. It walks up
+  to the nearest player and fights back through CombatService like anyone: light chains with an
+  uppercut mixed in, a rest after each finisher, its guard up now and then when you swing. Its limbs are
+  a fighter's - with one arm it throws single left-hand strikes, with none it jumps into Ground
+  Smashes. It has 60 health (`Config.SparringHealth`), never chases past 40 studs from its spot, and
+  walks home when nobody is near.
 
 ### Ground Smash
 - Branching fissures that follow the ground and end on the gameplay radius (stopping at steps, walls,

@@ -442,6 +442,56 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("3c  an NPC fighting back (the Sparring Dummy's way: CombatService, like anyone)")
+---------------------------------------------------------------------------
+do
+	local x = lane()
+	local N, eN = fighter("LN1", x, 0, -1) -- (an NPC)
+	local P, eP = fighter("LP1", x, -3.4, 1, true)
+	eP.Hum.MaxHealth, eP.Hum.Health = 1000, 1000
+	local from = #Env.events
+	local names = {}
+	for _ = 1, 240 do
+		local ok, name = Service.RequestAttack(N, { Kind = "Light" })
+		if ok then
+			table.insert(names, name)
+		end
+		Env.place(N, x, 0, 0, -1)
+		Env.place(P, x, -3.4, 0, 1)
+		Env.step()
+	end
+	local hits = 0
+	for i = from + 1, #Env.events do
+		local ev = Env.events[i]
+		if ev.Kind == "Hit" and ev.Data.A == N and ev.Data.V == P then
+			hits += 1
+		end
+	end
+	check(("an NPC's chain lands on a player: %d strikes (%s), %d hits"):format(#names, table.concat(names, ","), hits), #names >= 4 and hits >= 4 and eP.Hum.Health < 1000)
+	-- one arm: the NPC is held to single left-hand strikes too
+	eN.Hum:TakeDamage(eN.Hum.MaxHealth * 0.3)
+	Env.run(2)
+	local singles = {}
+	for _ = 1, 150 do
+		local ok, name, slot = Service.RequestAttack(N, { Kind = "Light" })
+		if ok then
+			table.insert(singles, name .. "/" .. tostring(slot))
+		end
+		Env.place(N, x, 0, 0, -1)
+		Env.place(P, x, -3.4, 0, 1)
+		Env.step()
+	end
+	local allSingle = #singles > 0
+	for _, s in ipairs(singles) do
+		allSingle = allSingle and s == G.OneArm.Light .. "/1"
+	end
+	check(("... and with one arm, its strikes are single lefts too (%s)"):format(table.concat(singles, ",")), allSingle)
+	N:Destroy()
+	P:Destroy()
+	Env.step()
+end
+
+---------------------------------------------------------------------------
 section("4  players too")
 ---------------------------------------------------------------------------
 do

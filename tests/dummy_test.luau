@@ -55,6 +55,11 @@ function Env.Players:CreateHumanoidModelFromDescription(_desc, rigType)
 	hum.Health = 100
 	hum._p.HealthChanged = Env.Signal.new()
 	hum._p.Died = Env.Signal.new()
+	hum._p.MoveDirection = V3.zero
+	hum._p.MoveTo = function(self, p)
+		self._p.MovedTo = p
+	end
+	hum._p.Move = function() end
 	hum.Parent = m
 	local root = Client.new("Part")
 	root.Name = "HumanoidRootPart"
@@ -70,17 +75,28 @@ function Env.Players:CreateHumanoidModelFromDescription(_desc, rigType)
 	return m
 end
 local entities = {}
+local fighters = {} -- players' bodies (Service.Get)
+local attacks = {} -- every RequestAttack: { Char, Info }
 local Service = {
 	Entities = entities,
 	Register = function(model)
-		local e = { Char = model, Hum = model:FindFirstChildOfClass("Humanoid"), Root = model:FindFirstChild("HumanoidRootPart"), AC = { Play = function() end }, State = "Idle", Npc = true }
+		local e = { Char = model, Hum = model:FindFirstChildOfClass("Humanoid"), Root = model:FindFirstChild("HumanoidRootPart"), AC = { Play = function() end, Stop = function() end, IsPlaying = function()
+			return false
+		end }, State = "Idle", Npc = true, GoreStage = 0 }
 		entities[model] = e
 		return e
+	end,
+	Get = function(c)
+		return fighters[c] or entities[c]
 	end,
 	Alive = function(e)
 		return e.Hum.Health > 0
 	end,
 	RequestBlock = function() end,
+	RequestAttack = function(char, info)
+		table.insert(attacks, { Char = char, Info = info })
+		return true, if info.Air then "Downslam" else "Swing1", 1
+	end,
 }
 
 local Config = Env.load("ReplicatedStorage/Combat/CombatConfig")
@@ -135,6 +151,83 @@ for _, m in ipairs(ws:FindFirstChild("PracticeDummies"):GetChildren()) do
 end
 check("... exactly once (a second Died never spawns a second one)", count == 1, count)
 check("the Guard Dummy is untouched by it (still hurt, never healed)", dummy("Guard Dummy") == guard and gh.Health == gh.MaxHealth * 0.7)
+
+print("\n== the Sparring Dummy")
+local spar, sh = dummy("Sparring Dummy")
+check("a third dummy, the Sparring Dummy, stands", spar ~= nil)
+local sroot = spar and spar:FindFirstChild("HumanoidRootPart")
+local function far(m)
+	local r = m and m:FindFirstChild("HumanoidRootPart")
+	return r and (V3.new(r.CFrame.Position.X, 0, r.CFrame.Position.Z) - V3.new(sroot.CFrame.Position.X, 0, sroot.CFrame.Position.Z)).Magnitude or 0
+end
+local tNow, gNow = dummy("Training Dummy"), dummy("Guard Dummy")
+check(("on its own spot, well away from the other two (%.0f and %.0f studs)"):format(far(tNow), far(gNow)), far(tNow) >= 26 and far(gNow) >= 26)
+check(("a real fight's health (Config.SparringHealth = %s)"):format(tostring(Config.SparringHealth)), sh.MaxHealth == Config.SparringHealth and sh.Health == Config.SparringHealth)
+-- a player walks up
+local es = entities[spar]
+local home = sroot.CFrame.Position
+local pChar = Client.new("Model")
+local pHum = Client.new("Humanoid")
+pHum.Health = 100
+pHum.Parent = pChar
+local pRoot = Client.new("Part")
+pRoot.Name = "HumanoidRootPart"
+pRoot.Parent = pChar
+local pEnt = { Char = pChar, Hum = pHum, Root = pRoot, State = "Idle" }
+fighters[pChar] = pEnt
+Env.player("Sparrer", 0.05, pChar)
+local function stand(dist)
+	local look = sroot.CFrame.LookVector
+	pRoot.CFrame = CF.new(sroot.CFrame.Position + V3.new(look.X, 0, look.Z).Unit * dist)
+end
+local function attacksBy(from)
+	local n, heavy, air = 0, 0, 0
+	for i = from + 1, #attacks do
+		if attacks[i].Char == spar then
+			n += 1
+			if attacks[i].Info.Kind == "Heavy" then
+				heavy += 1
+			end
+			if attacks[i].Info.Air then
+				air += 1
+			end
+		end
+	end
+	return n, heavy, air
+end
+stand(15)
+Env.run(1.2)
+local moved = sh._p.MovedTo
+check("a player 15 studs away: it walks up to them", moved ~= nil and (moved - pRoot.CFrame.Position).Magnitude < 5)
+-- (out of sight, then suddenly right in front of it)
+stand(40)
+Env.run(0.5)
+stand(3.2)
+local a0 = #attacks
+Env.run(0.4)
+check("someone suddenly in reach: a beat to notice first (no ambush the instant they appear)", attacksBy(a0) == 0)
+Env.run(3)
+local n, heavy = attacksBy(a0)
+check(("then it fights back: %d strikes asked for (lights, the odd uppercut)"):format(n), n >= 3)
+-- no arms: only the Ground Smash
+es.GoreStage = 2
+local a1 = #attacks
+Env.run(3)
+local n2, _, air2 = attacksBy(a1)
+check(("no arms: it only jumps into Ground Smashes (%d asked, %d of them the smash)"):format(n2, air2), n2 >= 1 and n2 == air2 and sh.Jump == true)
+es.GoreStage = 0
+-- a player beyond its leash: it doesn't follow; it walks home
+pRoot.CFrame = CF.new(home + V3.new(60, 0, 0))
+sroot.CFrame = CF.new(home + V3.new(8, 0, 0))
+local a2 = #attacks
+Env.run(1.2)
+local mt = sh._p.MovedTo
+check("a player far past its ground: never chased, it walks back home", attacksBy(a2) == 0 and mt ~= nil and V3.new(mt.X - home.X, 0, mt.Z - home.Z).Magnitude < 0.5)
+-- standing at home with nobody about: it stays put (never walking on the spot)
+sroot.CFrame = CF.new(home)
+sh._p.MovedTo = nil
+Env.run(1)
+check("at home with nobody near: it stands still", sh._p.MovedTo == nil)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
 if failed > 0 then

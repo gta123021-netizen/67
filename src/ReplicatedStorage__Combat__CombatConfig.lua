@@ -514,6 +514,7 @@ Config.KOLaunch = { Back = 34, Up = 30, Side = 0, LegsUp = 20, LegsSide = 0, Tip
 -- practice dummies: this much health, so one full string knocks them out on its finisher (a light
 -- string deals 3.5 x3 + the sweep's 6.5 = 17; with the uppercut in it 16 before the sweep)
 Config.DummyHealth = 16.5
+Config.SparringHealth = 60 -- the Sparring Dummy: a real fight (both its arms can come off before it drops)
 Config.RequestRate = 25 -- max combat requests per second per player
 Config.StudioDummies = true -- practice dummies (a still one and a guarding one) near the spawn in Studio
 
