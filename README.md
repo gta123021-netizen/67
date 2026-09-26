@@ -89,6 +89,8 @@
   - one arm: every blow does x1.15, and a block lets through twice the chip
   - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
+  - a strike thrown with a torn-off fist whiffs (the strike still plays; `Config.CanStrike`): the right
+    straight needs the right arm, the uppercut the left, the hook either, kicks and the smash never care
 - Damage numbers are stamped on the attacker's own impact frame by the same rule the server deals
   damage by; the server's number only corrects it if it differs (a blow it never confirms is taken back).
 - Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the

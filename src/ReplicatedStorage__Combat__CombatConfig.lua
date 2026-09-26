@@ -814,6 +814,21 @@ function Config.ArmsAt(stage: number?): number
 	return math.max(0, 2 - math.min(stage or 0, 2))
 end
 
+-- a strike thrown with `limbs` (CombatPaths) can only land while one of them is still attached (the
+-- right arm is gone from stage 1, the left from stage 2): a punch with a lost fist whiffs
+function Config.CanStrike(stage: number?, limbs: { string }?): boolean
+	if not Config.Gore.Enabled or not limbs then
+		return true
+	end
+	local s = stage or 0
+	for _, l in ipairs(limbs) do
+		if not ((l == "Right Arm" and s >= 1) or (l == "Left Arm" and s >= 2)) then
+			return true
+		end
+	end
+	return false
+end
+
 -- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the
 -- chip that gets through a guard). The server deals it; the attacker's screen predicts it the same way
 function Config.GoreDamage(base: number, stage: number?, blocked: boolean?): number

@@ -688,6 +688,10 @@ local function predictImpact(a: any)
 	if not path or def.Id == "Downslam" then
 		return
 	end
+	-- (a fist that has been torn off lands nothing: nothing to predict)
+	if not Config.CanStrike(ctx.Char:GetAttribute("GoreStage"), path.Limbs) then
+		return
+	end
 	local c = ctx
 	local radius = HitDetect.Radius(def.Id)
 	local prevTau: number? = nil

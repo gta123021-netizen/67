@@ -1206,6 +1206,10 @@ local function stepJob(job: any, t: number): boolean
 	if not path then
 		return false
 	end
+	-- a punch thrown with a fist that has been torn off never lands (the strike still plays)
+	if goreFor(e) and not Config.CanStrike(e.GoreStage, path.Limbs) then
+		return false
+	end
 	local tau = (t - job.Start) * def.Speed
 	if tau < path.From then
 		return true

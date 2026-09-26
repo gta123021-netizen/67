@@ -229,6 +229,26 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("3b  a torn-off fist lands nothing")
+---------------------------------------------------------------------------
+do
+	local x = lane()
+	local A, eA = fighter("LA5", x, 0, -1, true)
+	local B, eB = fighter("LB5", x, -3.4, 1)
+	eB.Hum.MaxHealth, eB.Hum.Health = 1000, 1000
+	check("the rule: Swing1 (right fist) needs the right arm, Swing3 (both) either, the Sweep a leg", not Config.CanStrike(1, { "Right Arm" }) and Config.CanStrike(1, { "Left Arm" }) and Config.CanStrike(1, { "Right Arm", "Left Arm" }) and not Config.CanStrike(2, { "Right Arm", "Left Arm" }) and Config.CanStrike(2, { "Right Leg" }))
+	local h = strike(A, B, x)
+	check("whole: the opening right straight lands", h ~= nil and h.K == "Swing1")
+	eA.Hum:TakeDamage(30)
+	local hp = eB.Hum.Health
+	h = strike(A, B, x)
+	check("right arm torn off: the opening right straight whiffs (no hit, no damage)", h == nil and eB.Hum.Health == hp)
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+
+---------------------------------------------------------------------------
 section("4  players too")
 ---------------------------------------------------------------------------
 do
