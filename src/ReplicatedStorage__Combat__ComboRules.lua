@@ -19,8 +19,9 @@
 	  - Starting later than CloseAt starts a fresh chain; pressing before OpenAt is "early" (the
 	    client keeps it in its buffer when it is within Config.Combo.Buffer of OpenAt).
 	  - A fighter that has lost an arm (its gore stage, Config.Gore) never chains: M1 / M2 throw one
-	    strike with the hand it has left (Config.Gore.OneArm), which ends the chain like a finisher,
-	    with OneArm.Recover after it. With no arms a press does nothing.
+	    strike with the hand it has left (Config.Gore.OneArm), which ends the chain like a finisher.
+	    The next may start once that strike's victim has had OneArm.Breathe of control back before
+	    it could land (Rules.SingleGap): never a true combo. With no arms a press does nothing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -116,6 +117,20 @@ function Rules.Decide(c: Chain, kind: string, t: number, slack: number?, want: n
 	return "go", C.Lights[math.clamp(lights + 1, 1, #C.Lights)], slot, heavy, lights + 1
 end
 
+-- a one-handed strike's own rhythm (seconds from its start to the next one's): past its chain point,
+-- and long enough that its victim - hit clean, held the longest it can be (stun + hit-stop) - has
+-- OneArm.Breathe of control back before the next one-handed strike could land. So no two of them
+-- are ever a true combo, and they still come as fast as that allows
+function Rules.SingleGap(def: any): number
+	local one = Config.Gore.OneArm
+	local soonest = math.huge
+	for _, n in ipairs({ one.Light, one.Heavy }) do
+		soonest = math.min(soonest, Config.Attacks[n].HitReal)
+	end
+	local held = def.HitReal + (def.Stun or 0) + (if def.ClassDef then def.ClassDef.Hitstop or 0 else 0)
+	return math.max(def.ChainReal, held + one.Breathe - soonest)
+end
+
 -- record a strike that started at `start` (chain point / window from its own timing). stage = the
 -- fighter's gore stage: a one-armed fighter's strike stands alone (the chain ends with it)
 function Rules.Commit(c: Chain, attack: string, slot: number, heavy: boolean, lights: number, start: number, stage: number?)
@@ -123,7 +138,7 @@ function Rules.Commit(c: Chain, attack: string, slot: number, heavy: boolean, li
 	local single = Config.Gore.Enabled and Config.ArmsAt(stage) < 2
 	if attack == C.Finisher or single then
 		Rules.Reset(c)
-		c.CooldownUntil = start + def.LengthReal + (if single then Config.Gore.OneArm.Recover else C.FinisherCooldown)
+		c.CooldownUntil = start + (if single then Rules.SingleGap(def) else def.LengthReal + C.FinisherCooldown)
 		c.Last = attack
 		c.LastKind = "Finisher"
 		return
@@ -178,6 +193,19 @@ function Rules.CoverStun(c: Chain, def: any): number
 		return 0
 	end
 	return best + C.StunMargin
+end
+
+-- THE BLOW'S VERDICT on the attacker's own screen, from what that screen showed of the victim when
+-- the blow landed there. The server judges the very same facts as of that same moment
+-- (CombatService: THE GUARD AND THE ESCAPE WINDOW), so the two always agree.
+--   seen = { Blocking (its guard up on this screen), GuardFor (seconds it has been up here), Facing
+--            (it faces the attacker), Escape (its Escape attribute), Restarted (a new chain of this
+--            attacker on a body its last chain stunned, hardly back in control) }
+-- Returns guarded, guard break, held (in its escape window or reset-locked: no stun, no launch)
+function Rules.Verdict(def: any, seen: any): (boolean, boolean, boolean)
+	local guarded = seen.Blocking == true and seen.Facing == true and (seen.GuardFor or 0) >= Config.Guard.StartDelay
+	local held = seen.Escape == true or seen.Restarted == true
+	return guarded, guarded and def.GuardBreak == true and not held, held
 end
 
 -- THE INPUT BUFFER (the attacking client): one press remembered at a time - the newest - with

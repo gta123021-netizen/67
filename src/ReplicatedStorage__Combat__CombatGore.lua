@@ -6,9 +6,9 @@
 	  2  the left arm (<= 50%)
 	  3  the killing blow bursts the head in a huge bloody mist (0)
 	A blow that takes several stages at once plays each of them in turn (a beat apart), in order. An
-	NPC's lost limb stays lost until it respawns; a PLAYER's arms grow back as its health comes back
-	(Config.RegrowStage): the left, then the right, each with the place's own heal burst (the
-	Regrow effect) and the flesh knitting back. It matters: the server keeps the stage (the
+	NPC's lost limb stays lost until it respawns; a PLAYER's arms grow back, one every
+	Config.Gore.Regrow.Time seconds (the last one lost first), each with the place's own heal burst
+	(the Regrow effect) and the flesh knitting back. It matters: the server keeps the stage (the
 	character's GoreStage attribute), hides the lost limb for everyone and makes a one-armed fighter
 	easier to hurt and single-handed, an armless one unable to block or strike (CombatService).
 

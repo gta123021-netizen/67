@@ -10,6 +10,11 @@
 	space. Between two frames the tip's swept path is tested as well, so a limb that snaps a long way
 	in one frame (the pack's punches do) can't skip a body.
 
+	Lost arms (Config.Gore) count on both sides: a body missing an arm is only as wide as its torso
+	on that side (Config.Hitbox.ArmlessHalfWidth), and a strike never lands with a limb its thrower
+	has lost (that limb's capsule is skipped). The attacking client and the server pass the same
+	gore stages, so they still agree.
+
 	The capsule's rounded end sits on the limb's own end face: every measured segment is pulled in
 	at the tip by Config.Hitbox.Shorten of the attack's radius, and the box and pad are sized so the
 	whole thing reaches exactly as far as the real limb meets the real body (tools/contact.py: within
@@ -52,22 +57,47 @@ HD.RawPaths = Paths
 
 local BODY = Config.Hitbox.Body
 
+-- the body box's half widths to its left (-X) and right (+X) at a gore stage: a lost arm's side
+-- ends at the torso (the right arm goes first, then the left)
+export type Shape = { L: number, R: number }
+local WHOLE: Shape = { L = BODY.HalfWidth, R = BODY.HalfWidth }
+local SHAPES: { Shape } = {
+	{ L = BODY.HalfWidth, R = Config.Hitbox.ArmlessHalfWidth or 1.1 },
+	{ L = Config.Hitbox.ArmlessHalfWidth or 1.1, R = Config.Hitbox.ArmlessHalfWidth or 1.1 },
+}
+function HD.BodyFor(stage: number?): Shape
+	if not Config.Gore.Enabled or not stage or stage < 1 then
+		return WHOLE
+	end
+	return SHAPES[math.min(stage, 2)]
+end
+
+-- the limbs a thrower at a gore stage no longer has
+local LOST = { {}, { ["Right Arm"] = true }, { ["Right Arm"] = true, ["Left Arm"] = true } }
+function HD.LostLimbs(stage: number?): { [string]: boolean }
+	if not Config.Gore.Enabled or not stage or stage < 1 then
+		return LOST[1]
+	end
+	return LOST[math.min(stage, 2) + 1]
+end
+
 -- distance from a point (in the body's own space) to the body box
-local function pointBox(p: Vector3): number
-	local dx = math.max(math.abs(p.X) - BODY.HalfWidth, 0)
+local function pointBox(p: Vector3, shape: Shape?): number
+	local sh = shape or WHOLE
+	local dx = if p.X >= 0 then math.max(p.X - sh.R, 0) else math.max(-p.X - sh.L, 0)
 	local dy = math.max(BODY.Bottom - p.Y, p.Y - BODY.Top, 0)
 	local dz = math.max(math.abs(p.Z) - BODY.HalfDepth, 0)
 	return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
 -- closest approach of a segment (body space) to the body box, and where along it
-local function segmentBox(a: Vector3, b: Vector3): (number, Vector3)
+local function segmentBox(a: Vector3, b: Vector3, shape: Shape?): (number, Vector3)
 	local len = (b - a).Magnitude
 	local n = math.clamp(math.ceil(len / 0.3), 1, 24)
 	local best, at = math.huge, a
 	for i = 0, n do
 		local p = a:Lerp(b, i / n)
-		local d = pointBox(p)
+		local d = pointBox(p, shape)
 		if d < best then
 			best, at = d, p
 		end
@@ -151,8 +181,12 @@ end
 
 --[[ does the strike touch this body between clip times t0 and t1?
 	attackCf: the attacker's frame (flat facing); bodyCf: the victim's root frame (flat facing)
-	radius: the limb's radius (+ pad). Returns hit?, contact point (world) ]]
-function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1: number, radius: number): (boolean, Vector3?)
+	radius: the limb's radius (+ pad). victimStage / attackerStage: their gore stages (a lost arm's
+	side of the body is narrower; a lost limb never lands). Returns hit?, contact point (world) ]]
+function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1: number, radius: number, victimStage: number?, attackerStage: number?): (boolean, Vector3?)
+	local shape = HD.BodyFor(victimStage)
+	local lost = HD.LostLimbs(attackerStage)
+	local limbs = shortened[key] and shortened[key].Limbs or {}
 	local times = HD.TimesBetween(key, t0, t1)
 	local toBody = bodyCf:Inverse() * attackCf -- attacker space -> body space
 	local lift = HD.GroundLift(key, attackCf, bodyCf)
@@ -162,18 +196,20 @@ function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1:
 		local caps = if raw then lifted(raw, lift) else nil
 		if caps then
 			for li, cap in ipairs(caps) do
-				local a = toBody * cap[1]
-				local b = toBody * cap[2]
-				local d, at = segmentBox(a, b)
-				if d <= radius then
-					return true, bodyCf * at
-				end
-				-- the tip's path since the previous frame (a fast snap sweeps through the body)
-				if prev and prev[li] then
-					local pa = toBody * prev[li][2]
-					local d2, at2 = segmentBox(pa, b)
-					if d2 <= radius then
-						return true, bodyCf * at2
+				if not lost[limbs[li] or ""] then
+					local a = toBody * cap[1]
+					local b = toBody * cap[2]
+					local d, at = segmentBox(a, b, shape)
+					if d <= radius then
+						return true, bodyCf * at
+					end
+					-- the tip's path since the previous frame (a fast snap sweeps through the body)
+					if prev and prev[li] then
+						local pa = toBody * prev[li][2]
+						local d2, at2 = segmentBox(pa, b, shape)
+						if d2 <= radius then
+							return true, bodyCf * at2
+						end
 					end
 				end
 			end

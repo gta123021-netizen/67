@@ -286,6 +286,10 @@ function Service.Register(char: Model, player: Player?): Entity?
 		LastHitAt = 0,
 		AirPending = false,
 		GoreStage = 0,
+		Wounds = 0, -- the share of its health lost, added up (healing never takes any back)
+		LastHealth = hum.Health,
+		RegrowAt = nil, -- (a player) when its next lost arm grows back
+		Stowed = nil, -- (a player) the tool its lost right hand held, back in its hand with the arm
 		GuardSpans = {}, -- the guard's recent history: { Up, Down? } (see guardedAt)
 		Escape = false, -- in the escape window (no stun can land) - the Escape attribute too
 		EscapeLog = {}, -- its recent flips: { At, On }
@@ -300,6 +304,8 @@ function Service.Register(char: Model, player: Player?): Entity?
 	char:SetAttribute("CombatEntity", true)
 	char:SetAttribute("GoreStage", 0)
 	char:SetAttribute("Escape", false)
+	char:SetAttribute("Wounds", 0)
+	char:SetAttribute("RegrowAt", nil)
 	if e.Npc then
 		for _, p in ipairs(char:GetDescendants()) do
 			if p:IsA("BasePart") and not p.Anchored then
@@ -962,22 +968,27 @@ function stowTools(e: Entity)
 	for _, t in ipairs(e.Char:GetChildren()) do
 		if t:IsA("Tool") then
 			t.Parent = bag
+			e.Stowed = t
 		end
 	end
 end
 Service.StowTools = stowTools
 
--- the body catches up with the health it has left. An NPC never gets a limb back (only a respawn
--- makes it whole); a player's arms grow back as its health does (Config.RegrowStage)
-function updateGore(e: Entity)
-	if not goreFor(e) or not e.Char.Parent then
+-- the right arm back: the tool it was holding goes back in its hand (unless the player has put
+-- something else in it meanwhile, or the tool is gone)
+local function unstowTool(e: Entity)
+	local t = e.Stowed
+	e.Stowed = nil
+	local bag = e.Player and e.Player:FindFirstChildOfClass("Backpack")
+	if not (t and bag and t.Parent == bag) or e.Char:FindFirstChildOfClass("Tool") then
 		return
 	end
+	t.Parent = e.Char
+end
+
+-- the body at gore stage `st` (up: limbs lost; down: a player's arm grown back)
+local function setGore(e: Entity, st: number)
 	local was = e.GoreStage or 0
-	local st = math.max(was, Config.GoreStageFor(e.Hum.Health, e.Hum.MaxHealth))
-	if st == was and e.Player and not e.Npc and e.Hum.Health > 0 then
-		st = Config.RegrowStage(e.Hum.Health, e.Hum.MaxHealth, was)
-	end
 	if st == was then
 		return
 	end
@@ -995,15 +1006,62 @@ function updateGore(e: Entity)
 			showLimb(e.Char, part)
 		end
 	end
-	-- no right arm, nothing held; no arms, no guard
+	-- no right arm, nothing held (and what it held comes back with it); no arms, no guard
 	if st >= 1 then
 		stowTools(e)
+	elseif was >= 1 then
+		unstowTool(e)
 	end
 	if Config.ArmsAt(st) == 0 and e.State == "Blocking" then
 		dropGuard(e)
 	end
+	-- a player's next lost arm grows back Regrow.Time from now (every client sees when: RegrowAt)
+	local R = Config.Gore.Regrow
+	if e.Player and R and R.Players and st >= 1 and st <= 2 and e.Hum.Health > 0 then
+		e.RegrowAt = now() + R.Time
+		e.Char:SetAttribute("RegrowAt", workspace:GetServerTimeNow() + R.Time)
+	else
+		e.RegrowAt = nil
+		e.Char:SetAttribute("RegrowAt", nil)
+	end
+end
+
+-- the body catches up with the damage it has taken: every point of health lost adds to its wounds
+-- (healing never takes any back - an NPC's limbs never come back, a player's only grow back in
+-- time: regrowArm), and the wounds decide the stage
+function updateGore(e: Entity)
+	if not goreFor(e) or not e.Char.Parent then
+		return
+	end
+	local hum = e.Hum
+	local h = hum.Health
+	local last = e.LastHealth or h
+	if h < last then
+		e.Wounds = math.min(1, (e.Wounds or 0) + (last - h) / math.max(hum.MaxHealth, 1))
+		e.Char:SetAttribute("Wounds", e.Wounds)
+	end
+	e.LastHealth = h
+	local was = e.GoreStage or 0
+	local st = math.max(was, if h <= 0 then 3 else Config.GoreStageForWounds(e.Wounds or 0))
+	if st ~= was then
+		setGore(e, st)
+	end
 end
 Service.UpdateGore = updateGore
+
+-- a player's lost arm grown back (the last one lost first): its wounds drop to what the arms it
+-- still misses need (Config.WoundsAfterRegrow)
+local function regrowArm(e: Entity)
+	local st = e.GoreStage or 0
+	if not (alive(e) and st >= 1 and st <= 2 and e.Player) then
+		e.RegrowAt = nil
+		return
+	end
+	e.Wounds = Config.WoundsAfterRegrow(st - 1)
+	e.Char:SetAttribute("Wounds", e.Wounds)
+	setGore(e, st - 1)
+end
+Service._regrowArm = regrowArm -- (tests)
 
 local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, job: any)
 	local t = now()
@@ -1024,11 +1082,18 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	-- had it when the blow landed there (a guard dropped since still stops it, one raised since came
 	-- too late), and still able to take it now
 	local tau = t - stateAgeFor(att)
+	if att.Player and job.HitTau then
+		-- (exactly: the moment the blow landed on the attacker's screen, less the time the victim's
+		-- state takes to reach it)
+		local landed = job.Start + job.HitTau / def.Speed
+		tau = math.clamp(landed - latency(att), t - Config.Hitbox.RewindMax, t)
+	end
 	local toAtt = att.Root.Position - vic.Root.Position
 	local facing = flat(vic.Root.CFrame.LookVector):Dot(flat(toAtt)) > Config.Guard.Arc
 	local guarded = facing and guardedAt(vic, tau) and (vic.State == "Blocking" or States.Allows(vic.State, "Block"))
 	-- a guard breaker is held off by a fighter that was in its escape window (the same moment)
 	local breakHeld = escapeAt(vic, tau) or resetLockedAt(att, vic, tau)
+	Service._lastTau = tau -- (tests: the moment the blow was judged at)
 	if STUDIO and vic.State == "Blocking" and not guarded and workspace:GetAttribute("CombatDebugHits") then
 		print(string.format("[HitDbg] guard missed: facing dot %.2f, up for %.2f", flat(vic.Root.CFrame.LookVector):Dot(flat(toAtt)), t - vic.BlockStartAt))
 	end
@@ -1371,7 +1436,8 @@ local function stepJob(job: any, t: number): boolean
 					break
 				end
 				local vcf = rewoundFrame(v, seenAt)
-				local hit, at = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius)
+				-- (a lost arm: that side of the body is narrower, and a limb gone never lands)
+				local hit, at = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius, if goreFor(v) then v.GoreStage else 0, if goreFor(e) then e.GoreStage else 0)
 				if debugHits then
 					-- Studio tuning: remember how close each strike came to each body
 					job.Dbg = job.Dbg or {}
@@ -1393,6 +1459,7 @@ local function stepJob(job: any, t: number): boolean
 					if clearTo(acf.Position + Vector3.new(0, 1, 0), losTo) then
 						job.Hit[v.Char] = true
 						job.Count += 1
+						job.HitTau = b
 						applyHit(e, v, def, contact, job)
 					end
 				end
@@ -1658,9 +1725,10 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 	local start = t - latency(ent)
 	-- players get a little slack for the network; NPCs are on the server's own clock
 	local slack = if ent.Npc then 0 else Config.Combo.Slack
-	-- lost arms: one left throws single strikes with that hand, none throws nothing (Config.Gore)
+	-- lost arms: one left throws single strikes with that hand; none, only the Ground Smash
+	-- (Config.Gore, Config.CanUse)
 	local stage = if goreFor(ent) then ent.GoreStage or 0 else 0
-	if Config.ArmsAt(stage) == 0 then
+	if Config.ArmsAt(stage) == 0 and info.Air ~= true then
 		return false
 	end
 	-- forward dash + M1
@@ -2056,6 +2124,10 @@ RunService.Heartbeat:Connect(function(dt: number)
 			e.Budget = math.min(SB.Max, e.Budget + dt * SB.Max / SB.Refill)
 		end
 		escapeLog(e, t)
+		-- a player's lost arm growing back on its own clock
+		if e.RegrowAt and t >= e.RegrowAt then
+			regrowArm(e)
+		end
 		if publish then
 			publishDebug(e, t)
 		end

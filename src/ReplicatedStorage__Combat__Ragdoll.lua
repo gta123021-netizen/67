@@ -159,7 +159,10 @@ local function setRig(char: Model, on: boolean)
 	end
 	for _, c in ipairs(folder:GetChildren()) do
 		if c:IsA("BasePart") then
-			c.CanCollide = on
+			-- (a lost limb - hidden by the gore, GoreHidden - never touches the ground)
+			local limb = char:FindFirstChild(string.sub(c.Name, 10))
+			local lost = string.sub(c.Name, 1, 9) == "Collider_" and limb ~= nil and limb:GetAttribute("GoreHidden") ~= nil
+			c.CanCollide = on and not lost
 		end
 	end
 end

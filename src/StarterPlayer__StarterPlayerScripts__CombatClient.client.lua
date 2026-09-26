@@ -570,6 +570,24 @@ end
 
 -- the bodies a strike of mine could land on, as this screen shows them
 type Body = { Model: Model, Root: BasePart }
+-- how far this body has come apart (Config.Gore: lost arms change what it can throw)
+local function myStage(): number
+	local st = ctx and ctx.Char:GetAttribute("GoreStage")
+	return if type(st) == "number" then st else 0
+end
+
+-- a press the body can't answer for want of arms (a strike or a guard with none, a combo with one):
+-- the HUD's limb pill shakes (OverkillHUD.LimbStatus listens on this attribute)
+local deniedAt = 0
+local function limbDenied()
+	local t = os.clock()
+	if t - deniedAt < 0.25 then
+		return
+	end
+	deniedAt = t
+	player:SetAttribute("LimbDenied", t)
+end
+
 -- WHAT THIS SCREEN SAW of each fighter it could strike - when its guard went up, when it got control
 -- back, which of my chains last stunned it - so my impact frame judges the guard, the escape window
 -- and the one-chain-per-stun rule exactly as the server does (it judges them as of that same frame:
@@ -683,15 +701,17 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	local acf = CFrame.lookAt(root.Position, root.Position + flat(root.CFrame.LookVector))
 	local vcf = CFrame.lookAt(vr.Position, vr.Position + flat(vr.CFrame.LookVector))
 	local toMe = flat(root.Position - vr.Position)
-	-- the guard as the server will judge it: up (on this screen) long enough, facing me
+	-- the blow's verdict as the server will judge it (Rules.Verdict): the guard up on this screen
+	-- long enough and facing me; no stun in its escape window, nor from a new chain of mine on a body
+	-- my last one stunned that has hardly had control back (a guard breaker is held off then)
 	local w = watchFighter(victim)
-	local guardUp = victim:GetAttribute("CombatState") == "Blocking" and now() - w.BlockSince >= Config.Guard.StartDelay
-	local guarded = guardUp and flat(vr.CFrame.LookVector):Dot(toMe) > Config.Guard.Arc
-	-- no stun lands in its escape window, nor from a new chain of mine on a body my last one stunned
-	-- that has hardly had control back (a guard breaker is held off then: a plain block)
-	local restarted = w.StunChain ~= nil and w.StunChain ~= a.ChainKey and (w.ControlSince == nil or now() - w.ControlSince < Config.Combo.ResetGrace)
-	local held = victim:GetAttribute("Escape") == true or restarted
-	local brk = guarded and def.GuardBreak == true and not held
+	local guarded, brk, held = Rules.Verdict(def, {
+		Blocking = victim:GetAttribute("CombatState") == "Blocking",
+		GuardFor = now() - w.BlockSince,
+		Facing = flat(vr.CFrame.LookVector):Dot(toMe) > Config.Guard.Arc,
+		Escape = victim:GetAttribute("Escape") == true,
+		Restarted = w.StunChain ~= nil and w.StunChain ~= a.ChainKey and (w.ControlSince == nil or now() - w.ControlSince < Config.Combo.ResetGrace),
+	})
 	local blocked = guarded and not brk
 	-- (a launcher inside a chain takes them down, unless held)
 	local launched = not guarded and not held and def.Launch ~= nil and a.Slot > 0
@@ -723,7 +743,14 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	FX.Damage(victim, dmg, damageKind(def, brk, blocked, launched), ctx.Char)
 	local hum = victim:FindFirstChildOfClass("Humanoid")
 	if hum then
-		Gore.Hit(victim, hum.Health - dmg, drive)
+		-- the stage this blow earns, by the server's own rule: its wounds (health lost, added up -
+		-- healing never takes them back, only an arm growing back does) plus this blow
+		local wounds = victim:GetAttribute("Wounds")
+		local st: number? = nil
+		if type(stage) == "number" and type(wounds) == "number" then
+			st = if hum.Health - dmg <= 0 then 3 else math.max(stage, Config.GoreStageForWounds(wounds + dmg / math.max(hum.MaxHealth, 1)))
+		end
+		Gore.Hit(victim, hum.Health - dmg, drive, st)
 	end
 end
 
@@ -780,7 +807,7 @@ local function predictImpact(a: any)
 				local dist = (vr.Position - root.Position).Magnitude
 				if dist < 12 and dist < bestD then
 					local vcf = CFrame.lookAt(vr.Position, vr.Position + flat(vr.CFrame.LookVector))
-					local hit, at = HitDetect.Sweep(def.Id, acf, vcf, from, to, radius)
+					local hit, at = HitDetect.Sweep(def.Id, acf, vcf, from, to, radius, body.Model:GetAttribute("GoreStage"), myStage())
 					if hit and at and clearTo(acf.Position + Vector3.new(0, 1, 0), at, vr.Position.Y) then
 						best, bestD, bestAt = body, dist, at
 					end
@@ -896,12 +923,6 @@ local function heightAboveGround(root: BasePart): number
 	groundParams.FilterDescendantsInstances = charList()
 	local hit = workspace:Raycast(root.Position, Vector3.new(0, -60, 0), groundParams)
 	return if hit then math.max(0, root.Position.Y - hit.Position.Y - 3) else 20
-end
-
--- how far this body has come apart (Config.Gore: lost arms change what it can throw)
-local function myStage(): number
-	local st = ctx and ctx.Char:GetAttribute("GoreStage")
-	return if type(st) == "number" then st else 0
 end
 
 local function startDownslam()
@@ -1047,9 +1068,17 @@ function tryAttack(kind: string)
 	end
 	local t = now()
 	local s = ctx.State
-	-- no arms, no attacks of any kind (it can only move); one arm: that hand's single strikes
+	-- no arms: the Ground Smash (jump + M1) and nothing else - any other press is refused, and the
+	-- HUD's limb pill says why. One arm: that hand's single strikes (Config.CanUse)
 	local stage = myStage()
 	if Config.ArmsAt(stage) == 0 then
+		if s == "Idle" and airborne() then
+			if kind == "Light" and t - ctx.LastJumpAt < 1.6 and t >= ctx.DownslamUntil then
+				startDownslam()
+			end
+		elseif s == "Idle" or s == "ComboWindow" then
+			limbDenied()
+		end
 		return
 	end
 	if s == "Dashing" then
@@ -1116,6 +1145,16 @@ function tryAttack(kind: string)
 	local _, enter = Config.Transition(prev, name :: string)
 	Rules.Commit(ctx.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, t - enter / Config.Attacks[name :: string].Speed, stage)
 	playAttack(name :: string, slot :: number, nil, prev)
+	if Config.ArmsAt(stage) == 1 then
+		-- one-handed: M1 held throws the next single strike the moment it may, the way holding M1
+		-- runs a chain
+		local c = ctx
+		task.delay(math.max(0, c.Chain.CooldownUntil - now()) + 0.01, function()
+			if ctx == c and not c.Buffer and m1StillHeld() then
+				tryAttack("Light")
+			end
+		end)
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -1263,6 +1302,10 @@ local function armless(): boolean
 end
 
 local function tryBlock()
+	if armless() and not inputBlocked() then
+		limbDenied()
+		return
+	end
 	if inputBlocked() or (ctx.State ~= "Idle" and ctx.State ~= "ComboWindow") or now() < ctx.BlockRetryAt or now() < ctx.ReblockAt or armless() then
 		return
 	end

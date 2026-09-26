@@ -43,7 +43,9 @@
     no attacks without arms, players too, tools stowed
   - `lune run tests/guard_sync_test.luau` - the guard and the escape window judged as the attacker's screen
     saw them (a last-instant raise or drop), so its damage number is the one dealt
-  - `lune run tests/limb_status_test.luau` - the limb-state pill over the hotbar
+  - `lune run tests/limb_status_test.luau` - the limb pills: yours over the hotbar and the tags over others
+  - `lune run tests/verdict_sync_test.luau` - 220 random blows (random ping, guard raised / dropped at
+    random moments, escape windows, guard breakers): the attacker's screen and the server agree on all
   - `lune run tests/shatter_test.luau` - the Ground Smash visuals on flat ground, slopes, bumps, platforms,
     steps, walls, ledges, water; the place's effects only, smoke rolling outward; pools, overlap, the descent
   - `python3 tests/gore_kit_check.py <place.rbxl>` - CombatGore's measured kit offsets against the place
@@ -90,10 +92,12 @@
 ### Limbs and gore (`CombatGore`, `CombatService`) - NPCs and players
 - As a fighter's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
   (50%), and the killing blow bursts the head in a thick red mist. Players too (`Config.Gore.Players`).
-- An NPC's lost limb stays lost until it respawns. A PLAYER's arms grow back as its health comes back
-  (`Config.Gore.Regrow`): the left once its health is 5% over 50%, then the right once it is 5% over 75%
-  (the margin keeps it from flickering at a line), each with the library's heal burst on the new arm and
-  the flesh knitting back. The head never.
+- Limbs follow a fighter's WOUNDS: the share of its health it has lost, added up (healing never takes
+  any back). 25% lost takes the right arm, 50% the left, the killing blow the head.
+- An NPC's lost limb stays lost until it respawns. A PLAYER's lost arms grow back one at a time,
+  10 s each (`Config.Gore.Regrow.Time`; 20 s for both, the last one lost first, the clock restarting
+  when another arm goes), each with the library's heal burst on the new arm and the flesh knitting back.
+  A regrown arm takes the same 25% again to lose; a tool the right hand held goes back in it. Never the head.
 - The server keeps the stage (the character's `GoreStage` attribute, and on every Hit) and hides the lost
   limb for everyone; every client plays it on the blow's own frame (the attacker from its own impact
   frame) with the torn limb thrown, the wounds and the blood. A body already missing limbs when a client
@@ -101,13 +105,19 @@
 - Losing arms matters (`Config.Gore.OneArm` / `NoArms`, one shared rule `Config.GoreDamage`):
   - one arm: every blow does x1.15, and a block lets through twice the chip. It fights with the hand it
     has left and never combos: M1 is a single left straight, M2 a single left uppercut, each a strike of
-    its own with a short recovery after it; no dash strike (the right hand's). The Ground Smash stays.
-  - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25, and
-    no attack of any kind - it can only move
+    its own, flowing like a chain's opener (buffered presses, hold M1 to repeat). The next waits until the
+    last one's victim has had 0.2 s of control back, so no two are ever a true combo (a jab every 0.75 s,
+    an uppercut every 1.24 s); no dash strike (the right hand's). The Ground Smash stays.
+  - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25, no
+    strikes - it moves, dashes and Ground Smashes; any other press shakes the limb pill
+  - hitboxes follow the body: a side whose arm is gone is only as wide as the torso, a strike never
+    lands with a limb its thrower has lost, and a lost arm's ragdoll collider stays off
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
   - (a strike never swings a missing arm; `Config.CanUse`, `Config.CanStrike`)
-- A pill over the hotbar shows your own state: ONE ARM (vulnerable, single strikes), NO ARMS (no guard,
-  no attacks), and a green ARM RESTORED as one grows back.
+- Your limb pill over the hotbar is the HUD's own status pill (the hero / coin / level pills' builder):
+  the hero pill's ringed badge holding a fighter figure whose lost arm is gone and grows back in green,
+  ONE ARM / NO ARMS / ARM RESTORED, what it means, and a socket counting the seconds to the next arm.
+  Every other fighter missing an arm wears the same pill, smaller, over its head.
 - Damage numbers are stamped on the attacker's own impact frame, and the server deals that same number:
   it judges the guard and the escape window as the attacker's screen saw them (a round trip ago), and
   that screen predicts with the same rules (the guard up long enough, the `Escape` attribute, one chain

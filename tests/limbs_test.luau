@@ -164,7 +164,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("1b  a player's arms grow back with its health (never an NPC's)")
+section("1b  a player's arms grow back, 10 s each (never an NPC's); healing never does")
 ---------------------------------------------------------------------------
 do
 	local x = lane()
@@ -185,39 +185,67 @@ do
 	end, FindFirstChild = function(_, n)
 		return if n == "Handle" then watchHandle else nil
 	end })
+	local T = G.Regrow.Time
 	hum:TakeDamage(55)
+	local t0 = Env.now()
 	check("(a player down to 45%: both arms gone, the watch on the left with them)", P:GetAttribute("GoreStage") == 2 and P.Limbs["Left Arm"].Transparency == 1 and watchHandle.Transparency == 1)
-	local function heal(frac)
-		hum.Health = hum.MaxHealth * frac
-		hum.HealthChanged:Fire(hum.Health)
-		Env.step()
-	end
-	local M = G.Regrow.Margin
-	heal(G.Stages[2] + M * 0.5)
-	check(("back to %.0f%% - inside the margin over 50%%: still no arms (no flicker at the line)"):format((G.Stages[2] + M * 0.5) * 100), P:GetAttribute("GoreStage") == 2 and P.Limbs["Left Arm"].Transparency == 1)
-	heal(G.Stages[2] + M + 0.01)
-	check("past the margin: the left arm grows back, as it was, and its watch with it", P:GetAttribute("GoreStage") == 1 and P.Limbs["Left Arm"].Transparency == 0 and P.Limbs["Left Arm"]:GetAttribute("GoreHidden") == nil and watchHandle.Transparency == 0 and P.Limbs["Right Arm"].Transparency == 1)
+	check(("its wounds are published (%.2f) and when the next arm grows back (RegrowAt)"):format(P:GetAttribute("Wounds") or -1), math.abs((P:GetAttribute("Wounds") or 0) - 0.55) < 1e-6 and type(P:GetAttribute("RegrowAt")) == "number")
+	-- healed all the way: nothing grows back from health
+	hum.Health = hum.MaxHealth
+	hum.HealthChanged:Fire(hum.Health)
+	Env.run(T - 0.3)
+	check(("healed to full: still no arms after %.1f s (health never regrows them)"):format(Env.now() - t0), P:GetAttribute("GoreStage") == 2)
+	Env.run(0.4)
+	check(("%.1f s: the LEFT arm (the last one lost) grows back, as it was, its watch with it"):format(Env.now() - t0), P:GetAttribute("GoreStage") == 1 and P.Limbs["Left Arm"].Transparency == 0 and P.Limbs["Left Arm"]:GetAttribute("GoreHidden") == nil and watchHandle.Transparency == 0 and P.Limbs["Right Arm"].Transparency == 1)
 	check("... one arm again: the guard goes back up", Service.RequestBlock(P, true) and eP.State == "Blocking")
 	Service.RequestBlock(P, false)
-	heal(G.Stages[1] + M * 0.5)
-	check("inside the margin over 75%: the right arm not yet", P:GetAttribute("GoreStage") == 1)
-	heal(G.Stages[1] + M + 0.01)
-	check("past it: the right arm grows back too - whole again", P:GetAttribute("GoreStage") == 0 and P.Limbs["Right Arm"].Transparency == 0 and P.Limbs["Right Arm"]:GetAttribute("GoreHidden") == nil)
-	hum:TakeDamage(hum.Health - hum.MaxHealth * 0.7)
-	check("hurt again: it comes apart again", P:GetAttribute("GoreStage") == 1 and P.Limbs["Right Arm"].Transparency == 1)
+	Env.run(T - 0.5)
+	check("the right arm not yet", P:GetAttribute("GoreStage") == 1)
+	Env.run(0.6)
+	check(("%.1f s (%d s each, %d for both): the right arm too - whole again"):format(Env.now() - t0, T, T * 2), P:GetAttribute("GoreStage") == 0 and P.Limbs["Right Arm"].Transparency == 0 and P:GetAttribute("RegrowAt") == nil)
+	check("... and its wounds healed with it", (P:GetAttribute("Wounds") or 1) == 0)
+	hum:TakeDamage(20)
+	check("a regrown arm takes the same share of damage again to lose (20% lost: still whole)", P:GetAttribute("GoreStage") == 0)
+	hum:TakeDamage(6)
+	check("... 26%: the right arm goes again", P:GetAttribute("GoreStage") == 1 and P.Limbs["Right Arm"].Transparency == 1)
+	-- losing another arm restarts the clock (the newest loss grows back first, 10 s after it)
+	Env.run(T * 0.6)
+	hum:TakeDamage(30)
+	local t1 = Env.now()
+	Env.run(T - 0.2)
+	check("a second arm lost part-way: the clock restarts from that loss", P:GetAttribute("GoreStage") == 2)
+	Env.run(0.4)
+	check(("... %.1f s after it: the left back"):format(Env.now() - t1), P:GetAttribute("GoreStage") == 1)
 	hum:TakeDamage(1000)
-	heal(1)
-	check("dead: nothing grows back (the respawn makes it whole)", P:GetAttribute("GoreStage") == 3)
-	-- an NPC healed all the way: never
+	Env.run(T * 2 + 1)
+	check("dead: nothing grows back (the respawn makes it whole)", P:GetAttribute("GoreStage") == 3 and P:GetAttribute("RegrowAt") == nil)
+	-- an NPC: never
 	local B, eB = fighter("LR2", x + 30, -3.4, 1)
 	eB.Hum:TakeDamage(55)
-	eB.Hum.Health = eB.Hum.MaxHealth
-	eB.Hum.HealthChanged:Fire(eB.Hum.Health)
-	Env.step()
-	check("an NPC healed to full never grows an arm back", B:GetAttribute("GoreStage") == 2 and B.Limbs["Right Arm"].Transparency == 1 and B.Limbs["Left Arm"].Transparency == 1)
-	check("the rule: never below what the health earns, never the head", Config.RegrowStage(40, 100, 2) == 2 and Config.RegrowStage(100, 100, 3) == 3 and Config.RegrowStage(100, 100, 2) == 0 and Config.RegrowStage(0, 100, 2) == 2)
+	Env.run(T * 2 + 1)
+	check("an NPC never grows an arm back", B:GetAttribute("GoreStage") == 2 and B.Limbs["Right Arm"].Transparency == 1 and B.Limbs["Left Arm"].Transparency == 1 and B:GetAttribute("RegrowAt") == nil)
+	check("the rules: wounds 25% -> no right arm, 50% -> none; a regrowth leaves just what the missing arms need", Config.GoreStageForWounds(0.24) == 0 and Config.GoreStageForWounds(0.25) == 1 and Config.GoreStageForWounds(0.5) == 2 and Config.GoreStageForWounds(0.99) == 2 and Config.WoundsAfterRegrow(1) == 0.25 and Config.WoundsAfterRegrow(0) == 0)
 	P:Destroy()
 	B:Destroy()
+	Env.step()
+end
+do
+	-- a tool in the right hand: stowed with the arm, back in the hand when the arm grows back
+	local x = lane()
+	local P, eP = fighter("LR3", x, -3.4, 1, true)
+	local bag = { Name = "Backpack", ClassName = "Backpack" }
+	eP.Player.FindFirstChildOfClass = function(_, c)
+		return if c == "Backpack" then bag else nil
+	end
+	local sword = { Name = "Sword", ClassName = "Tool", Parent = P, IsA = function(_, c)
+		return c == "Tool"
+	end }
+	P.Tools = { sword }
+	eP.Hum:TakeDamage(30)
+	check("the right arm lost: the sword goes back in the backpack", sword.Parent == bag)
+	Env.run(G.Regrow.Time + 0.3)
+	check("the right arm grown back: the sword is back in its hand", sword.Parent == P and P:GetAttribute("GoreStage") == 0)
+	P:Destroy()
 	Env.step()
 end
 
@@ -303,12 +331,55 @@ do
 	check("committing it ends the chain (nothing can follow it)", c.Slot == 0 and #Rules.Followups(c) == 0)
 	local vNo = Rules.Decide(c, "Light", 10 + Config.Attacks[n1].ChainReal + 0.01, 0, nil, 1)
 	check("... and the next press waits out the whole strike and its recovery", vNo == "no")
-	local vOk, nOk, sOk = Rules.Decide(c, "Light", 10 + Config.Attacks[n1].LengthReal + G.OneArm.Recover + 0.01, 0, nil, 1)
+	local vOk, nOk, sOk = Rules.Decide(c, "Light", 10 + Rules.SingleGap(Config.Attacks[n1]) + 0.01, 0, nil, 1)
 	check("... then it is a new single strike, never the chain's next", vOk == "go" and nOk == G.OneArm.Light and sOk == 1)
 	check("no arms: no strike of any kind", Rules.Decide(Rules.New(), "Light", 10, 0, nil, 2) == "no" and Rules.Decide(Rules.New(), "Heavy", 10, 0, nil, 2) == "no")
-	check("the moves left: one arm keeps its hand's strikes and the Ground Smash, not the dash strike (the right hand's); none keeps nothing",
+	check("the moves left: one arm keeps its hand's strikes and the Ground Smash, not the dash strike (the right hand's); none keeps only the Ground Smash",
 		Config.CanUse(1, "Swing2") and Config.CanUse(1, "Uppercut") and Config.CanUse(1, "Downslam") and not Config.CanUse(1, "Swing1") and not Config.CanUse(1, "Swing3") and not Config.CanUse(1, "Sweep") and not Config.CanUse(1, "DashAttack")
-			and not Config.CanUse(2, "Swing2") and not Config.CanUse(2, "Downslam") and Config.CanUse(0, "Swing1"))
+			and not Config.CanUse(2, "Swing2") and not Config.CanUse(2, "Uppercut") and not Config.CanUse(2, "DashAttack") and Config.CanUse(2, "Downslam") and Config.CanUse(0, "Swing1"))
+	-- never a true combo: after every one-handed strike, whatever comes next, its victim has had
+	-- control back for a moment (even with the server's network slack) before the next can land
+	local slack = Config.Combo.Slack
+	local worst, pair = math.huge, ""
+	for _, a in ipairs({ G.OneArm.Light, G.OneArm.Heavy }) do
+		for _, b in ipairs({ G.OneArm.Light, G.OneArm.Heavy }) do
+			local da, db = Config.Attacks[a], Config.Attacks[b]
+			local free = da.HitReal + da.Stun + da.ClassDef.Hitstop
+			local nextLands = Rules.SingleGap(da) - slack + db.HitReal
+			if nextLands - free < worst then
+				worst, pair = nextLands - free, a .. " > " .. b
+			end
+		end
+	end
+	check(("no true combo: the victim always has %.2f s of control before the next one-handed strike can land (worst: %s)"):format(worst, pair), worst >= 0.05, worst)
+	local gapL, gapH = Rules.SingleGap(Config.Attacks[G.OneArm.Light]), Rules.SingleGap(Config.Attacks[G.OneArm.Heavy])
+	check(("...and they still come as fast as that allows: a jab every %.2f s, an uppercut every %.2f s"):format(gapL, gapH), gapL < 0.9 and gapH < 1.4)
+	-- the hitboxes: a lost arm's side of the body is narrower; a lost fist never lands
+	local HD = Env.load("ReplicatedStorage/Combat/HitDetect")
+	local whole, one, none = HD.BodyFor(0), HD.BodyFor(1), HD.BodyFor(2)
+	check("a body missing its right arm is narrower on its right only; with none, on both sides", whole.L == whole.R and one.R < whole.R and one.L == whole.L and none.L < whole.L and none.R < whole.R)
+	local CF, V3 = Env.CFrame, Env.Vector3
+	local acf = CF.new(0, 3, 0)
+	local vcf = CF.lookAt(V3.new(0, 3, -3.2), V3.new(0, 3, 0))
+	local path = HD.Paths.Swing1
+	local r = HD.Radius("Swing1")
+	check("a right straight lands with the right arm, and never once it is gone", HD.Sweep("Swing1", acf, vcf, path.From, path.To, r, 0, 0) and not HD.Sweep("Swing1", acf, vcf, path.From, path.To, r, 0, 1))
+	local p3 = HD.Paths.Swing3
+	check("a two-handed hook still lands with the hand that is left", HD.Sweep("Swing3", acf, vcf, p3.From, p3.To, HD.Radius("Swing3"), 0, 1) and not HD.Sweep("Swing3", acf, vcf, p3.From, p3.To, HD.Radius("Swing3"), 0, 2))
+	-- a blow that only grazed the tip of the arm that is gone now misses
+	local grazed, missed = 0, 0
+	for dx = -2.6, 2.6, 0.05 do
+		local v2 = CF.lookAt(V3.new(dx, 3, -3.2), V3.new(dx, 3, 0))
+		local h0 = HD.Sweep("Swing2", acf, v2, HD.Paths.Swing2.From, HD.Paths.Swing2.To, HD.Radius("Swing2"), 0, 0)
+		local h2 = HD.Sweep("Swing2", acf, v2, HD.Paths.Swing2.From, HD.Paths.Swing2.To, HD.Radius("Swing2"), 2, 0)
+		if h0 then
+			grazed += 1
+		end
+		if h0 and not h2 then
+			missed += 1
+		end
+	end
+	check(("sweeping a jab across a body: %d offsets hit it whole, %d of them only the arms it no longer has"):format(grazed, missed), grazed > 0 and missed > 0 and missed < grazed)
 end
 do
 	local x = lane()
@@ -343,7 +414,7 @@ do
 	for i, sl in ipairs(slots) do
 		allOne = allOne and sl == 1 and started[i] == G.OneArm.Light
 	end
-	check(("mashing M1 for 2.5 s: %d strikes, every one a single left (slot 1), none chained"):format(#started), allOne and #started >= 2 and #started <= 4, table.concat(started, ","))
+	check(("mashing M1 for 2.5 s: %d strikes, every one a single left (slot 1), none chained"):format(#started), allOne and #started >= 3 and #started <= 4, table.concat(started, ","))
 	Env.run(1.5)
 	local ok, name = Service.RequestAttack(A, { Kind = "Heavy" })
 	check("M2: the left uppercut, on its own", ok and name == G.OneArm.Heavy, name)
@@ -358,8 +429,12 @@ do
 	eA.Hum:TakeDamage(25)
 	check("(down to under 50%: no arms)", arms(A) == 0)
 	Env.run(0.5)
-	local any = Service.RequestAttack(A, { Kind = "Light" }) or Service.RequestAttack(A, { Kind = "Heavy" }) or Service.RequestAttack(A, { Kind = "Light", Air = true, H = 5 })
-	check("no arms: M1, M2 and the Ground Smash are all refused", any == false and eA.State ~= "Attacking")
+	local any = Service.RequestAttack(A, { Kind = "Light" }) or Service.RequestAttack(A, { Kind = "Heavy" })
+	check("no arms: M1 and M2 are refused (no strike of any kind)", any == false and eA.State ~= "Attacking")
+	Env.place(A, x, 0, 0, -1)
+	local smash = Service.RequestAttack(A, { Kind = "Light", Air = true, H = 5 })
+	check("... but the Ground Smash (the legs) still goes", smash == true and eA.State == "Attacking")
+	Env.run(2.5)
 	check("... but it can still move (a dash)", Service.RequestDash(A, "Back") or Service.RequestDash(A, "Forward"))
 	A:Destroy()
 	B:Destroy()

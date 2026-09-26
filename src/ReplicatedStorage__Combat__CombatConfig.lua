@@ -414,6 +414,8 @@ Config.Hitbox = {
 	-- R6: torso 2 wide and 1 deep (the idle stance turns it 13 deg, a shoulder forward), arms out to
 	-- 1.5 each side, head up to 2.1 above the root, feet at -3
 	Body = { HalfWidth = 1.5, Bottom = -3.0, Top = 2.1, HalfDepth = 0.58 },
+	-- a side whose arm is gone ends at the torso (2 wide, turned 13 deg in the idle stance)
+	ArmlessHalfWidth = 1.1,
 	-- added to every limb radius
 	Pad = 0.1,
 	-- the capsule is pulled in at the tip by this share of its radius, so its rounded end sits on
@@ -548,19 +550,22 @@ Config.Blood = {
 
 ---------------------------------------------------------------------------
 -- gore (CombatGore + CombatService): the damage a fighter has taken, on its body - NPCs and players
--- alike. An NPC's lost limb stays lost until it respawns; a player's arms grow back with its health
--- (Regrow). The server keeps the stage on the character as its GoreStage attribute. Losing arms
--- matters:
+-- alike. A fighter's WOUNDS (the share of its health it has lost, added up; healing never takes any
+-- back) decide its stage: the right arm at Stages[1]'s share lost, the left at Stages[2]'s, the
+-- head on the killing blow. The server keeps the stage and the wounds on the character (GoreStage,
+-- Wounds attributes). Losing arms matters:
 --   one arm    every blow hurts more (OneArm.DamageTaken), and a block stops much less of it
 --              (OneArm.GuardChip times the chip damage). It fights with the hand it has left and
---              never combos: every press is one strike on its own (M1 OneArm.Light, M2
---              OneArm.Heavy - both thrown with the left hand), then OneArm.Recover before the next;
---              no dash strike (that is the right hand's). The Ground Smash (the legs) stays
+--              never combos: M1 is the left straight (OneArm.Light), M2 the left uppercut
+--              (OneArm.Heavy), each a strike of its own. The next one waits until the last one's
+--              victim has had OneArm.Breathe of control back (so no two ever make a true combo); no
+--              dash strike (that is the right hand's). The Ground Smash (the legs) stays
 --   no arms    no guard at all (a block can't go up; one already up drops), blows hurt more still,
---              and no attack of any kind: it can only move
---   Regrow      a PLAYER's arms grow back as its health comes back (never an NPC's, never the head):
---               the left once its health is Margin above the left arm's stage share, then the right
---               the same way (so a fighter hovering at a threshold never flickers)
+--              no strikes: it moves, dashes and Ground Smashes, nothing else
+--   (a body missing an arm is that much narrower to hit on that side: Config.Hitbox.ArmlessHalfWidth)
+--   Regrow      a PLAYER's lost arms grow back, one at a time, Regrow.Time seconds each (the last one
+--               lost first), counted from when its last arm went or came back - never an NPC's,
+--               never the head. A regrown arm takes the same share of damage again to lose
 --   Players     false: only NPCs come apart
 --   Stages      health shares at which each stage plays, in order: the right arm torn off, the
 --               left arm, the head burst (the last one on the killing blow only)
@@ -574,9 +579,9 @@ Config.Gore = {
 	Enabled = true,
 	Players = true,
 	Stages = { 0.75, 0.5, 0 },
-	OneArm = { DamageTaken = 1.15, GuardChip = 2, Light = "Swing2", Heavy = "Uppercut", Recover = 0.25 },
+	OneArm = { DamageTaken = 1.15, GuardChip = 2, Light = "Swing2", Heavy = "Uppercut", Breathe = 0.2 },
 	NoArms = { DamageTaken = 1.25 },
-	Regrow = { Players = true, Margin = 0.05 },
+	Regrow = { Players = true, Time = 10 },
 	GibLife = 10,
 	BleedTime = 4,
 	Stagger = 0.14,
@@ -813,20 +818,23 @@ function Config.GoreStageFor(health: number, max: number): number
 	return n
 end
 
--- a player's stage as its health comes back (Config.Gore.Regrow): `stage` (1: no right arm, 2: no
--- arms) steps back one arm at a time once the health is Margin above that arm's share. Never below
--- what the health itself earns, never the head (3)
-function Config.RegrowStage(health: number, max: number, stage: number): number
-	local G = Config.Gore
-	if not (G.Regrow and G.Regrow.Players) or max <= 0 or health <= 0 then
-		return stage
+-- the stage a fighter's wounds earn while it lives (0: whole, 1: no right arm, 2: no arms; the head
+-- only goes on the killing blow)
+function Config.GoreStageForWounds(wounds: number): number
+	local stages = Config.Gore.Stages
+	local n = 0
+	for i = 1, math.min(2, #stages - 1) do
+		if wounds >= 1 - stages[i] - 1e-9 then
+			n = i
+		end
 	end
-	local f = health / max
-	local s = stage
-	while s >= 1 and s <= 2 and f > G.Stages[s] + G.Regrow.Margin do
-		s -= 1
-	end
-	return math.max(s, Config.GoreStageFor(health, max))
+	return n
+end
+
+-- the wounds a fighter is left with once an arm has grown back to `stage` (just enough that the
+-- arms it still misses stay missing; the regrown one takes the same share of damage again to lose)
+function Config.WoundsAfterRegrow(stage: number): number
+	return if stage >= 1 then 1 - Config.Gore.Stages[stage] else 0
 end
 
 -- arms a fighter still has at a gore stage (the right goes first, then the left)
@@ -850,7 +858,7 @@ function Config.CanStrike(stage: number?, limbs: { string }?): boolean
 end
 
 -- may a fighter at gore stage `stage` use this move (an attack name from Config.Attacks)? With one arm
--- only that hand's single strikes and the Ground Smash; with none, nothing
+-- only that hand's single strikes and the Ground Smash; with none, only the Ground Smash
 function Config.CanUse(stage: number?, move: string): boolean
 	local G = Config.Gore
 	if not G.Enabled then
@@ -859,10 +867,8 @@ function Config.CanUse(stage: number?, move: string): boolean
 	local arms = Config.ArmsAt(stage)
 	if arms >= 2 then
 		return true
-	elseif arms == 0 then
-		return false
 	end
-	return move == G.OneArm.Light or move == G.OneArm.Heavy or move == "Downslam"
+	return move == "Downslam" or (arms == 1 and (move == G.OneArm.Light or move == G.OneArm.Heavy))
 end
 
 -- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the

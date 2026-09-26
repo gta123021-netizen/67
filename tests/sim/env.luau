@@ -353,13 +353,32 @@ function Env.character(name, pos, look)
 	function char:GetAttributeChangedSignal()
 		return Signal.new()
 	end
-	local hum = { Name = "Humanoid", ClassName = "Humanoid", Health = 100, MaxHealth = 100, Parent = char, Died = Signal.new(), HealthChanged = Signal.new(), AutoRotate = true, IsA = isA }
+	-- (Health is a property like Roblox's: any change to it fires HealthChanged)
+	local humData = { Health = 100 }
+	local hum = setmetatable({ Name = "Humanoid", ClassName = "Humanoid", MaxHealth = 100, Parent = char, Died = Signal.new(), HealthChanged = Signal.new(), AutoRotate = true, IsA = isA }, {
+		__index = function(_, k)
+			if k == "Health" then
+				return humData.Health
+			end
+			return nil
+		end,
+		__newindex = function(t, k, v)
+			if k == "Health" then
+				local old = humData.Health
+				humData.Health = v
+				if v ~= old then
+					t.HealthChanged:Fire(v)
+				end
+			else
+				rawset(t, k, v)
+			end
+		end,
+	})
 	function hum:TakeDamage(d)
 		if self.Health <= 0 then
 			return
 		end
 		self.Health = math.max(0, self.Health - d)
-		self.HealthChanged:Fire(self.Health)
 		if self.Health <= 0 then
 			self.Died:Fire()
 		end
@@ -413,6 +432,13 @@ function Env.character(name, pos, look)
 	char.Limbs = limbs
 	char.Accessories = {}
 	function char:FindFirstChildOfClass(c)
+		if c == "Tool" then
+			for _, t in ipairs(char.Tools or {}) do
+				if t.Parent == char then
+					return t
+				end
+			end
+		end
 		return if c == "Humanoid" then hum else nil
 	end
 	function char:FindFirstChild(n)
