@@ -1756,10 +1756,10 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 	local start = t - latency(ent)
 	-- players get a little slack for the network; NPCs are on the server's own clock
 	local slack = if ent.Npc then 0 else Config.Combo.Slack
-	-- lost arms: one left throws single strikes with that hand; none, only the Ground Smash
-	-- (Config.Gore, Config.CanUse)
+	-- lost arms: one left throws single strikes with that hand; none, no attack at all - not even
+	-- the Ground Smash (Config.Gore, Config.CanUse)
 	local stage = if goreFor(ent) then ent.GoreStage or 0 else 0
-	if Config.ArmsAt(stage) == 0 and info.Air ~= true then
+	if Config.ArmsAt(stage) == 0 then
 		return false
 	end
 	-- forward dash + M1

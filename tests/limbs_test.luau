@@ -334,9 +334,9 @@ do
 	local vOk, nOk, sOk = Rules.Decide(c, "Light", 10 + Rules.SingleGap(Config.Attacks[n1]) + 0.01, 0, nil, 1)
 	check("... then it is a new single strike, never the chain's next", vOk == "go" and nOk == G.OneArm.Light and sOk == 1)
 	check("no arms: no strike of any kind", Rules.Decide(Rules.New(), "Light", 10, 0, nil, 2) == "no" and Rules.Decide(Rules.New(), "Heavy", 10, 0, nil, 2) == "no")
-	check("the moves left: one arm keeps its hand's strikes and the Ground Smash, not the dash strike (the right hand's); none keeps only the Ground Smash",
+	check("the moves left: one arm keeps its hand's strikes and the Ground Smash, not the dash strike (the right hand's); none keeps nothing, not even the Ground Smash",
 		Config.CanUse(1, "Swing2") and Config.CanUse(1, "Uppercut") and Config.CanUse(1, "Downslam") and not Config.CanUse(1, "Swing1") and not Config.CanUse(1, "Swing3") and not Config.CanUse(1, "Sweep") and not Config.CanUse(1, "DashAttack")
-			and not Config.CanUse(2, "Swing2") and not Config.CanUse(2, "Uppercut") and not Config.CanUse(2, "DashAttack") and Config.CanUse(2, "Downslam") and Config.CanUse(0, "Swing1"))
+			and not Config.CanUse(2, "Swing2") and not Config.CanUse(2, "Uppercut") and not Config.CanUse(2, "DashAttack") and not Config.CanUse(2, "Downslam") and Config.CanUse(0, "Swing1"))
 	-- never a true combo: after every one-handed strike, whatever comes next, its victim has had
 	-- control back for a moment (even with the server's network slack) before the next can land
 	local slack = Config.Combo.Slack
@@ -433,8 +433,8 @@ do
 	check("no arms: M1 and M2 are refused (no strike of any kind)", any == false and eA.State ~= "Attacking")
 	Env.place(A, x, 0, 0, -1)
 	local smash = Service.RequestAttack(A, { Kind = "Light", Air = true, H = 5 })
-	check("... but the Ground Smash (the legs) still goes", smash == true and eA.State == "Attacking")
-	Env.run(2.5)
+	check("... nor the Ground Smash (jump + M1)", smash == false and eA.State ~= "Attacking")
+	Env.run(0.5)
 	check("... but it can still move (a dash)", Service.RequestDash(A, "Back") or Service.RequestDash(A, "Forward"))
 	A:Destroy()
 	B:Destroy()

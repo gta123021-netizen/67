@@ -110,7 +110,8 @@
     last one's victim has had 0.2 s of control back, so no two are ever a true combo (a jab every 0.75 s,
     an uppercut every 1.24 s); no dash strike (the right hand's). The Ground Smash stays.
   - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25, no
-    strikes - it moves, dashes and Ground Smashes; any other press shakes the limb pill
+    attack of any kind (not even the Ground Smash) - it moves and dashes; any attack press shakes the
+    limb pill
   - hitboxes follow the body: a side whose arm is gone is only as wide as the torso, a strike never
     lands with a limb its thrower has lost, and a lost arm's ragdoll collider stays off
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
@@ -140,8 +141,7 @@
 - The Sparring Dummy (orange) stands on its own spot, at least 26 studs from the other two. It walks up
   to the nearest player and fights back through CombatService like anyone: light chains with an
   uppercut mixed in, a rest after each finisher, its guard up now and then when you swing. Its limbs are
-  a fighter's - with one arm it throws single left-hand strikes, with none it jumps into Ground
-  Smashes. It has 60 health (`Config.SparringHealth`), never chases past 40 studs from its spot, and
+  a fighter's - with one arm it throws single left-hand strikes, with none it can't attack at all. It has 60 health (`Config.SparringHealth`), never chases past 40 studs from its spot, and
   walks home when nobody is near.
 
 ### Ground Smash

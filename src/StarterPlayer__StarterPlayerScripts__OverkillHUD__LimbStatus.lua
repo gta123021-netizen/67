@@ -9,7 +9,7 @@
 	           screen's white-and-ink figure) with its arms: a lost arm is gone from it, a growing
 	           one grows back in green as the clock runs
 	    value  ONE ARM (gold) / NO ARMS (red) / ARM RESTORED (green, for a moment)
-	    caption  what it means: SINGLE STRIKES · WEAK GUARD / NO GUARD · SMASH ONLY
+	    caption  what it means: SINGLE STRIKES · WEAK GUARD / NO GUARD · NO ATTACKS
 	    socket   the pill's right end (the coins +, the hero CHANGE): seconds until the next arm
 	    A press the body can't answer (a strike or a guard with no arms) shakes it (CombatClient
 	    sets the player's LimbDenied attribute).
@@ -38,7 +38,7 @@ return function(ctx: any)
 
 	local STATES = {
 		[1] = { Value = "ONE ARM", Caption = "SINGLE STRIKES  ·  WEAK GUARD", Accent = C.Gold, Deep = C.GoldDeep },
-		[2] = { Value = "NO ARMS", Caption = "NO GUARD  ·  SMASH ONLY", Accent = C.Red, Deep = C.RedDeep },
+		[2] = { Value = "NO ARMS", Caption = "NO GUARD  ·  NO ATTACKS", Accent = C.Red, Deep = C.RedDeep },
 	}
 	local RESTORED = { Value = "ARM RESTORED", Caption = "BACK IN THE FIGHT", Accent = C.Green, Deep = C.GreenDeep, Restored = true }
 	local RESTORED_HOLD = 1.4
@@ -374,7 +374,8 @@ return function(ctx: any)
 		local bb = new("BillboardGui", {
 			Name = "LimbTag",
 			Size = UDim2.fromOffset(460 * TAG_SCALE, M.Height * TAG_SCALE + 12),
-			StudsOffset = Vector3.new(0, 2.3, 0),
+			-- (high enough to clear the name and health bar Roblox draws over a head)
+			StudsOffset = Vector3.new(0, 3.8, 0),
 			AlwaysOnTop = true,
 			LightInfluence = 0,
 			MaxDistance = 90,

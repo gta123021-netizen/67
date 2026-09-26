@@ -562,7 +562,7 @@ Config.Blood = {
 --              victim has had OneArm.Breathe of control back (so no two ever make a true combo); no
 --              dash strike (that is the right hand's). The Ground Smash (the legs) stays
 --   no arms    no guard at all (a block can't go up; one already up drops), blows hurt more still,
---              no strikes: it moves, dashes and Ground Smashes, nothing else
+--              and no attack of any kind (not even the Ground Smash): it moves and dashes, nothing else
 --   (a body missing an arm is that much narrower to hit on that side: Config.Hitbox.ArmlessHalfWidth)
 --   Regrow      a PLAYER's lost arms grow back, one at a time, Regrow.Time seconds each (the last one
 --               lost first), counted from when its last arm went or came back - never an NPC's,
@@ -859,7 +859,7 @@ function Config.CanStrike(stage: number?, limbs: { string }?): boolean
 end
 
 -- may a fighter at gore stage `stage` use this move (an attack name from Config.Attacks)? With one arm
--- only that hand's single strikes and the Ground Smash; with none, only the Ground Smash
+-- only that hand's single strikes and the Ground Smash; with none, nothing
 function Config.CanUse(stage: number?, move: string): boolean
 	local G = Config.Gore
 	if not G.Enabled then
@@ -868,8 +868,10 @@ function Config.CanUse(stage: number?, move: string): boolean
 	local arms = Config.ArmsAt(stage)
 	if arms >= 2 then
 		return true
+	elseif arms == 0 then
+		return false
 	end
-	return move == "Downslam" or (arms == 1 and (move == G.OneArm.Light or move == G.OneArm.Heavy))
+	return move == "Downslam" or move == G.OneArm.Light or move == G.OneArm.Heavy
 end
 
 -- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the

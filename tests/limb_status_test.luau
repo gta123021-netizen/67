@@ -221,7 +221,7 @@ local shakes0, sounds0 = shakes, #sounds
 player:SetAttribute("LimbDenied", os.clock())
 check("a refused press shakes it, with the HUD's error sound", shakes == shakes0 + 1 and sounds[#sounds] == "Error" and #sounds == sounds0 + 1)
 stage(2, 10)
-check(("no arms: '%s' / '%s', red, and it shakes"):format(mine.Value.Text, mine.Caption.Text), home.Visible and mine.Value.Text == "NO ARMS" and string.find(mine.Caption.Text, "NO GUARD") ~= nil and string.find(mine.Caption.Text, "SMASH ONLY") ~= nil and mine.Glow.BackgroundColor3 == C.Red and shakes == shakes0 + 2)
+check(("no arms: '%s' / '%s', red, and it shakes"):format(mine.Value.Text, mine.Caption.Text), home.Visible and mine.Value.Text == "NO ARMS" and string.find(mine.Caption.Text, "NO GUARD") ~= nil and string.find(mine.Caption.Text, "NO ATTACKS") ~= nil and mine.Glow.BackgroundColor3 == C.Red and shakes == shakes0 + 2)
 for _, fn in ipairs(listeners.HudHidden or {}) do
 	fn(true)
 end

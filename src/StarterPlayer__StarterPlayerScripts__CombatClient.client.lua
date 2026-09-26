@@ -1068,15 +1068,11 @@ function tryAttack(kind: string)
 	end
 	local t = now()
 	local s = ctx.State
-	-- no arms: the Ground Smash (jump + M1) and nothing else - any other press is refused, and the
-	-- HUD's limb pill says why. One arm: that hand's single strikes (Config.CanUse)
+	-- no arms: no attack of any kind (not even the Ground Smash) - a press is refused and the HUD's
+	-- limb pill says why. One arm: that hand's single strikes (Config.CanUse)
 	local stage = myStage()
 	if Config.ArmsAt(stage) == 0 then
-		if s == "Idle" and airborne() then
-			if kind == "Light" and t - ctx.LastJumpAt < 1.6 and t >= ctx.DownslamUntil then
-				startDownslam()
-			end
-		elseif s == "Idle" or s == "ComboWindow" then
+		if s == "Idle" or s == "ComboWindow" then
 			limbDenied()
 		end
 		return

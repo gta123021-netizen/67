@@ -9,7 +9,7 @@
 	                    player and fights back - light chains with an uppercut mixed in, a rest
 	                    after each finisher, its guard up now and then when you swing. Its limbs
 	                    are a fighter's: with one arm it throws single left-hand strikes, with none
-	                    it can only jump into Ground Smashes (CombatService decides, as for anyone).
+	                    it can't attack at all (CombatService decides, as for anyone).
 	                    It never leaves its ground (Leash) and walks home when nobody is near.
 	The still two have Config.DummyHealth (one full string knocks one out on its finisher); the
 	Sparring Dummy has Config.SparringHealth, enough for a real fight (its arms come off on the way).
@@ -308,7 +308,7 @@ end
 
 -- the Sparring Dummy: walks up to the nearest player (never past its leash) and fights through
 -- CombatService like anyone - so its lost arms limit it the same way (single left-hand strikes with
--- one, only the Ground Smash with none)
+-- one, no attack at all with none)
 local FREE = { Idle = true, ComboWindow = true }
 local function spar(Service: any, e: any)
 	local t = os.clock()
@@ -372,18 +372,7 @@ local function spar(Service: any, e: any)
 		return
 	end
 	if arms == 0 then
-		-- no arms: the Ground Smash (a jump, then the stomp) is all it has left
-		if e.State == "Idle" and t > (e.NextSmash or 0) then
-			e.NextSmash = t + 2.5 + math.random()
-			face(e, target.Root.Position)
-			e.Hum.Jump = true
-			task.delay(0.18, function()
-				if Service.Alive(e) then
-					Service.RequestAttack(e.Char, { Kind = "Light", Air = true })
-				end
-			end)
-		end
-		return
+		return -- (no arms: no attack of any kind)
 	end
 	if e.State == "Idle" then
 		face(e, target.Root.Position)

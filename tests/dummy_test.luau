@@ -209,12 +209,12 @@ check("someone suddenly in reach: a beat to notice first (no ambush the instant 
 Env.run(3)
 local n, heavy = attacksBy(a0)
 check(("then it fights back: %d strikes asked for (lights, the odd uppercut)"):format(n), n >= 3)
--- no arms: only the Ground Smash
+-- no arms: no attack of any kind (not even the Ground Smash)
 es.GoreStage = 2
 local a1 = #attacks
 Env.run(3)
-local n2, _, air2 = attacksBy(a1)
-check(("no arms: it only jumps into Ground Smashes (%d asked, %d of them the smash)"):format(n2, air2), n2 >= 1 and n2 == air2 and sh.Jump == true)
+local n2 = attacksBy(a1)
+check(("no arms: it asks for no attack at all (%d), and never jumps into a smash"):format(n2), n2 == 0 and sh.Jump ~= true)
 es.GoreStage = 0
 -- a player beyond its leash: it doesn't follow; it walks home
 pRoot.CFrame = CF.new(home + V3.new(60, 0, 0))
