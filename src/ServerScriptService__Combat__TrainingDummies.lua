@@ -1,11 +1,10 @@
 --[[
 	TrainingDummies  (ServerScriptService.Combat.TrainingDummies)
-	Studio play-tests only: three R6 practice fighters side by side in a row on open ground near the
-	spawn, facing it, run entirely through CombatService (the same rules, animations, hitboxes, guard
-	and ragdoll as players).
+	Studio play-tests only: two R6 practice fighters side by side on open ground near the spawn,
+	facing it, run entirely through CombatService (the same rules, animations, hitboxes, guard and
+	ragdoll as players). Neither of them ever attacks anybody.
 	  Training Dummy    stands still - combo practice
 	  Guard Dummy       keeps its guard up (and puts it back up after a guard break)
-	  Sparring Partner  walks up and fights: light chains with an uppercut mixed in, guards sometimes
 	They have Config.DummyHealth: one full string knocks one out on its finisher (the KO throw, the
 	KO call-out), they heal back to full a moment after the last hit, and a knocked-out dummy is
 	back on its own spot a few seconds later.
@@ -22,7 +21,6 @@ local Dummies = {}
 local KINDS = {
 	{ Kind = "Target", Name = "Training Dummy", Color = Color3.fromRGB(163, 162, 165) },
 	{ Kind = "Guard", Name = "Guard Dummy", Color = Color3.fromRGB(90, 140, 210) },
-	{ Kind = "Sparring", Name = "Sparring Partner", Color = Color3.fromRGB(210, 110, 90) },
 }
 
 local function flat(v: Vector3): Vector3
@@ -131,8 +129,8 @@ function Dummies.Start(Service: any)
 	folder.Parent = workspace
 	local sp = spawnPoint()
 
-	-- one row of three open spots near the spawn, side by side (GAP apart), all facing the spawn;
-	-- kept for respawns
+	-- one row of open spots near the spawn, side by side (GAP apart), all facing the spawn; kept for
+	-- respawns
 	local GAP = 8
 	local rowFacing = Vector3.new(0, 0, -1)
 	local function findRow(): { Vector3 }
@@ -143,21 +141,21 @@ function Dummies.Start(Service: any)
 				local toSpawn = flat(sp - center)
 				local side = toSpawn:Cross(Vector3.yAxis).Unit
 				local spots: { Vector3 } = {}
-				for i = -1, 1 do
+				for i = 0, #KINDS - 1 do
 					local g = openGround(center + side * (i * GAP), ignoreList({ folder }), sp.Y)
 					if not g then
 						break
 					end
 					table.insert(spots, g)
 				end
-				if #spots == 3 and math.abs(spots[1].Y - spots[3].Y) < 1.5 then
+				if #spots == #KINDS and math.abs(spots[1].Y - spots[#spots].Y) < 1.5 then
 					rowFacing = toSpawn
 					return spots
 				end
 			end
 		end
 		rowFacing = Vector3.new(-1, 0, 0)
-		return { sp + Vector3.new(16, 0, -GAP), sp + Vector3.new(16, 0, 0), sp + Vector3.new(16, 0, GAP) }
+		return { sp + Vector3.new(16, 0, -GAP / 2), sp + Vector3.new(16, 0, GAP / 2) }
 	end
 	local row = findRow()
 
@@ -197,7 +195,7 @@ function Dummies.Start(Service: any)
 						e.Hum.Health = e.Hum.MaxHealth
 					end
 					local settled = e.State == "Idle" or e.State == "Blocking"
-					if kind.Kind ~= "Sparring" and settled and e.Root.Parent and (e.Root.Position - homeCf.Position).Magnitude > 2.5 then
+					if settled and e.Root.Parent and (e.Root.Position - homeCf.Position).Magnitude > 2.5 then
 						e.Root.AssemblyLinearVelocity = Vector3.zero
 						model:PivotTo(homeCf)
 					end
@@ -218,7 +216,7 @@ function Dummies.Start(Service: any)
 		place(k)
 	end
 
-	-- a small brain for the dummies (10 Hz), plus NPC walk animation
+	-- the guard dummy's guard (10 Hz)
 	local acc = 0
 	RunService.Heartbeat:Connect(function(dt)
 		acc += dt
@@ -254,19 +252,10 @@ local function face(e: any, pos: Vector3)
 	e.Root.CFrame = CFrame.lookAt(e.Root.Position, e.Root.Position + d)
 end
 
-local FREE = { Idle = true, ComboWindow = true }
-
+-- practice dummies never walk or turn on their own (a still target stays where it was left)
 function Dummies._think(Service: any, e: any)
-	local t = os.clock()
-	local free = FREE[e.State] == true
-	local moving = e.Hum.MoveDirection.Magnitude > 0.1 and free
-	if moving and not e.AC:IsPlaying("Walk") then
-		e.AC:Play("Walk", { Fade = 0.15, Speed = e.Hum.WalkSpeed / Config.WalkNatural })
-	elseif not moving and e.AC:IsPlaying("Walk") then
-		e.AC:Stop("Walk", 0.2)
-	end
-	e.Hum.AutoRotate = free
-	e.Hum.WalkSpeed = if free then Config.WalkSpeed else 0
+	e.Hum.AutoRotate = false
+	e.Hum.WalkSpeed = 0
 
 	if e.Kind == "Guard" then
 		local target = nearestPlayer(Service, e, 25)
@@ -275,59 +264,6 @@ function Dummies._think(Service: any, e: any)
 		end
 		if target and e.State == "Blocking" then
 			face(e, target.Root.Position)
-		end
-		return
-	end
-
-	if e.Kind ~= "Sparring" then
-		return
-	end
-	local target, dist = nearestPlayer(Service, e, 26)
-	if not target then
-		if free and e.Home and (e.Root.Position - e.Home).Magnitude > 3 then
-			e.Hum:MoveTo(e.Home)
-		end
-		if e.State == "Blocking" then
-			Service.RequestBlock(e.Char, false)
-		end
-		return
-	end
-	-- guard up sometimes when the player swings at it
-	if free and target.State == "Attacking" and dist < 7 and t > (e.NextGuardRoll or 0) then
-		e.NextGuardRoll = t + 1.2
-		if math.random() < 0.3 then
-			face(e, target.Root.Position)
-			Service.RequestBlock(e.Char, true)
-			e.GuardUntil = t + 0.9
-		end
-	end
-	if e.State == "Blocking" then
-		face(e, target.Root.Position)
-		if t > (e.GuardUntil or 0) then
-			Service.RequestBlock(e.Char, false)
-		end
-		return
-	end
-	if dist > 4.4 then
-		if free and t > (e.RestUntil or 0) then
-			e.Hum:MoveTo(target.Root.Position - flat(target.Root.Position - e.Root.Position) * 3.4)
-		end
-		return
-	end
-	e.Hum:Move(Vector3.zero)
-	if t < (e.RestUntil or 0) then
-		return
-	end
-	if e.State == "Idle" then
-		face(e, target.Root.Position)
-		e.PlanHeavyAt = math.random(1, 5) -- where this chain's uppercut goes (5 = none)
-	end
-	if free or e.State == "Attacking" then
-		local slot = (e.Chain and e.Chain.Slot or 0) + 1
-		local kind = if slot == e.PlanHeavyAt and not (e.Chain and e.Chain.Heavy) then "Heavy" else "Light"
-		local ok, action = Service.RequestAttack(e.Char, { Kind = kind })
-		if ok and action == Config.Combo.Finisher then
-			e.RestUntil = t + 2.2
 		end
 	end
 end

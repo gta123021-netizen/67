@@ -6,7 +6,8 @@
 	  - a simulated clock (os.clock) and task scheduler (task.delay / spawn / defer / wait) and a
 	    60 Hz Heartbeat (RunService.Heartbeat:Connect / :Wait)
 	  - bodies: a Model / Humanoid / HumanoidRootPart per fighter (position, facing, health, Died,
-	    attributes), a flat ground at y = 0 and optional solid boxes (walls) for the ray casts
+	    attributes), the ground (flat at y = 0 unless Env.groundAt is set: slopes, steps, bumps),
+	    holes in it (voids), water, and optional solid boxes (walls) for the ray casts
 	  - Motion (physics-lite: a drive moves the root by its velocity every frame), Ragdoll and
 	    AnimController as stubs (no joints, no animation in a headless run)
 	  - the CombatEvent remote records everything the server sends
@@ -174,6 +175,12 @@ local boxes = {} -- { Min, Max, CanCollide, Name }
 Env.boxes = boxes
 Env.groundY = 0
 Env.voids = {} -- { Center, Radius }: holes in the ground (a ledge / the void)
+Env.waters = {} -- { Center, Radius }: the ground there is water
+-- the ground's height at (x, z): nil = flat at Env.groundY. Set it for slopes, steps and bumps
+Env.groundAt = nil :: ((number, number) -> number)?
+function Env.heightAt(x: number, z: number): number
+	return if Env.groundAt then Env.groundAt(x, z) else Env.groundY
+end
 
 function Env.addBox(name, min, max, canCollide)
 	table.insert(boxes, { Name = name, Min = min, Max = max, CanCollide = canCollide ~= false })
@@ -218,21 +225,72 @@ end
 function workspace:GetServerTimeNow()
 	return 1000 + clock
 end
-function workspace:Raycast(o, d, params)
-	local best, bestN, bestInst = nil, nil, nil
-	-- the ground plane (except over a void)
-	if d.Y < 0 and o.Y >= Env.groundY then
-		local t = (Env.groundY - o.Y) / d.Y
-		if t <= 1 then
-			local p = o + d * t
-			local hole = false
-			for _, v in ipairs(Env.voids) do
-				if (V3.new(p.X, 0, p.Z) - V3.new(v.Center.X, 0, v.Center.Z)).Magnitude < v.Radius then
-					hole = true
+local function inRegion(list, p)
+	for _, v in ipairs(list) do
+		if (V3.new(p.X, 0, p.Z) - V3.new(v.Center.X, 0, v.Center.Z)).Magnitude < v.Radius then
+			return true
+		end
+	end
+	return false
+end
+
+-- where a ray first meets the ground (a height field: marched, then refined), with its normal
+local function rayGround(o, d)
+	if not Env.groundAt then
+		if d.Y < 0 and o.Y >= Env.groundY then
+			local t = (Env.groundY - o.Y) / d.Y
+			if t <= 1 then
+				return t, V3.new(0, 1, 0)
+			end
+		end
+		return nil
+	end
+	local len = d.Magnitude
+	if len < 1e-6 then
+		return nil
+	end
+	local n = math.max(2, math.ceil(len / 0.05))
+	local prevT, prevAbove = 0, (o.Y - Env.heightAt(o.X, o.Z)) >= 0
+	if not prevAbove then
+		return nil -- starts inside the ground
+	end
+	for i = 1, n do
+		local t = i / n
+		local p = o + d * t
+		if p.Y - Env.heightAt(p.X, p.Z) < 0 then
+			local lo, hi = prevT, t
+			for _ = 1, 16 do
+				local mid = (lo + hi) / 2
+				local q = o + d * mid
+				if q.Y - Env.heightAt(q.X, q.Z) < 0 then
+					hi = mid
+				else
+					lo = mid
 				end
 			end
-			if not hole then
-				best, bestN, bestInst = t, V3.new(0, 1, 0), { Name = "Ground" }
+			local q = o + d * lo
+			local e = 0.02
+			local gx = (Env.heightAt(q.X + e, q.Z) - Env.heightAt(q.X - e, q.Z)) / (2 * e)
+			local gz = (Env.heightAt(q.X, q.Z + e) - Env.heightAt(q.X, q.Z - e)) / (2 * e)
+			return lo, V3.new(-gx, 1, -gz).Unit
+		end
+		prevT = t
+	end
+	return nil
+end
+Env.rayGround = rayGround
+
+function workspace:Raycast(o, d, params)
+	local best, bestN, bestInst = nil, nil, nil
+	local mat = roblox.Enum.Material.Plastic
+	-- the ground (except over a void)
+	local gt, gn = rayGround(o, d)
+	if gt then
+		local p = o + d * gt
+		if not inRegion(Env.voids, p) then
+			best, bestN, bestInst = gt, gn, { Name = "Ground" }
+			if inRegion(Env.waters, p) then
+				mat = roblox.Enum.Material.Water
 			end
 		end
 	end
@@ -247,7 +305,10 @@ function workspace:Raycast(o, d, params)
 	if not best then
 		return nil
 	end
-	return { Position = o + d * best, Normal = bestN, Instance = bestInst, Material = roblox.Enum.Material.Plastic }
+	if bestInst.Name ~= "Ground" then
+		mat = roblox.Enum.Material.Plastic
+	end
+	return { Position = o + d * best, Normal = bestN, Instance = bestInst, Material = mat }
 end
 Env.workspace = workspace
 
@@ -340,7 +401,7 @@ end
 
 -- place a fighter: position (feet on the ground unless y given) and facing
 function Env.place(char, x, z, lookX, lookZ, y)
-	local pos = V3.new(x, y or (Env.groundY + 3), z)
+	local pos = V3.new(x, y or (Env.heightAt(x, z) + 3), z)
 	char.HumanoidRootPart.CFrame = CF.lookAt(pos, pos + V3.new(lookX or 0, 0, lookZ or -1))
 end
 function Env.face(char, target)
@@ -382,7 +443,9 @@ function Motion.Drive(root, duration, velocityAt, opts)
 			return
 		end
 		local v = velocityAt(t)
-		root.CFrame = root.CFrame + V3.new(v.X, 0, v.Z) * dt
+		local p = root.CFrame.Position + V3.new(v.X, 0, v.Z) * dt
+		-- (the body stays on the ground: a drive moves it across it, up and down slopes)
+		root.CFrame = root.CFrame + (V3.new(p.X, Env.heightAt(p.X, p.Z) + 3, p.Z) - root.CFrame.Position)
 	end)
 	return serial
 end
@@ -440,10 +503,18 @@ Env.events = {}
 local function remote(name)
 	local r = { Name = name, ClassName = "RemoteEvent" }
 	function r:FireAllClients(kind, data)
-		table.insert(Env.events, { To = "all", Kind = kind, Data = data, T = clock })
+		local ev = { To = "all", Kind = kind, Data = data, T = clock }
+		table.insert(Env.events, ev)
+		if Env.onEvent then
+			Env.onEvent(ev)
+		end
 	end
 	function r:FireClient(p, kind, data)
-		table.insert(Env.events, { To = p, Kind = kind, Data = data, T = clock })
+		local ev = { To = p, Kind = kind, Data = data, T = clock }
+		table.insert(Env.events, ev)
+		if Env.onEvent then
+			Env.onEvent(ev)
+		end
 	end
 	r.OnServerEvent = Signal.new()
 	return r
@@ -456,7 +527,8 @@ local moduleFiles = {
 	["ReplicatedStorage/Combat/CombatStates"] = "ReplicatedStorage__Combat__CombatStates.lua",
 	["ReplicatedStorage/Combat/ComboRules"] = "ReplicatedStorage__Combat__ComboRules.lua",
 	["ReplicatedStorage/Combat/CombatPaths"] = "ReplicatedStorage__Combat__CombatPaths.lua",
-	["ServerScriptService/Combat/HitDetect"] = "ServerScriptService__Combat__HitDetect.lua",
+	["ReplicatedStorage/Combat/HitDetect"] = "ReplicatedStorage__Combat__HitDetect.lua",
+	["ReplicatedStorage/Combat/CombatChoreo"] = "ReplicatedStorage__Combat__CombatChoreo.lua",
 	["ServerScriptService/Combat/CombatService"] = "ServerScriptService__Combat__CombatService.lua",
 	["ReplicatedStorage/OverkillUI/Theme"] = "ReplicatedStorage__OverkillUI__Theme.lua",
 }

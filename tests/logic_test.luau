@@ -1,8 +1,8 @@
 --!nocheck
 --[[
 	Pure-logic tests for what the attacking CLIENT decides and for the HUD column's layout math:
-	  - the critically damped facing turn (Motion.Turn): no overshoot, never faster than its top
-	    rate, the same at any frame rate
+	  - the critically damped turn to the aim (Motion.Turn, Config.Facing): no overshoot, never
+	    faster than its top rate, the same at any frame rate
 	  - the input buffer (ComboRules.BufferTake) with the chain's own timing (ComboRules.Decide)
 	  - client and server picking the same strike for the same press at any latency
 	  - the HUD column (Theme.Hud): equal gaps between every pair of groups, party frames never
@@ -32,8 +32,8 @@ local function section(name)
 end
 
 ---------------------------------------------------------------------------
-section("Facing turn (Motion.Turn)")
-local L = Config.Lock.Turn
+section("Facing turn to the aim (Motion.Turn, Config.Facing)")
+local L = Config.Facing
 local function turn(offset, hz, omega, maxRate)
 	local dt = 1 / hz
 	local vel, t = 0, 0

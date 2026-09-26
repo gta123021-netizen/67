@@ -147,12 +147,15 @@ function Rules.Followups(c: Chain): { string }
 	return list
 end
 
--- hitstun a strike needs so every possible follow-up lands before the victim can act
+-- hitstun a strike needs so every possible follow-up lands before the victim can act. The follow-up
+-- starts at this strike's chain point and enters its own clip where the pair's transition says
+-- (Config.Transitions), so its impact comes (Hit - Enter) / Speed after that
 function Rules.CoverStun(c: Chain, def: any): number
 	local best = 0
 	for _, name in ipairs(Rules.Followups(c)) do
 		local nd = Config.Attacks[name]
-		local gap = (def.ChainReal - def.HitReal) + nd.HitReal + (def.ClassDef.Hitstop or 0)
+		local _, enter = Config.Transition(def.Id, name)
+		local gap = (def.ChainReal - def.HitReal) + (nd.Hit - enter) / nd.Speed + (def.ClassDef.Hitstop or 0)
 		best = math.max(best, gap)
 	end
 	if best == 0 then

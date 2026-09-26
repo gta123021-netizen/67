@@ -3,8 +3,8 @@
 	Headless combat simulation: the REAL server modules from src/ (CombatService, HitDetect,
 	ComboRules, CombatConfig, CombatStates, CombatPaths) driven frame by frame at 60 Hz on a flat
 	ground (tests/sim/env.luau stands in for the engine). Every scenario asserts what the server
-	decides: which strikes connect, on whom, the target lock, stuns and the stun budget, the Ground
-	Smash rules, report validation and lag compensation.
+	decides: which strikes connect, on whom (free-form: no lock), where the blows drive the bodies,
+	stuns and the stun budget, the Ground Smash rules, report validation and lag compensation.
 
 	    lune run tests/combat_sim.luau        (from the repository root)
 ]]
@@ -131,24 +131,44 @@ local function stateOf(c)
 end
 
 ---------------------------------------------------------------------------
-section("1. Full light chain on a practice fighter: every strike at its measured distance")
+section("1. Full light chain on a practice fighter: every strike lands, the victim is driven straight down the line")
 do
 	local x = lane()
 	local A = fighter("A1", x, 0)
 	local B = fighter("B1", x, -3.4, 0, 1)
-	local eA, eB = Service.Get(A), Service.Get(B)
+	local eB = Service.Get(B)
 	eB.Hum.MaxHealth, eB.Hum.Health = 999, 999
+	-- the distance between the two roots on every impact
+	local dists = {}
+	Env.onEvent = function(ev)
+		if ev.Kind == "Hit" and ev.Data.A == A then
+			local d = B.HumanoidRootPart.Position - A.HumanoidRootPart.Position
+			table.insert(dists, V3.new(d.X, 0, d.Z).Magnitude)
+		end
+	end
 	local from = since()
 	local names = chain(A, { "Light", "Light", "Light", "Light" })
 	Env.run(1.5)
+	Env.onEvent = nil
 	check("chain runs Swing1 Swing2 Swing3 Sweep", table.concat(names, " ") == "Swing1 Swing2 Swing3 Sweep", table.concat(names, " "))
 	local h = hits(A, B, from)
 	check("all four strikes connect", #h == 4, #h)
 	check("strikes 1-3 stun (true combo)", h[1] and h[1].S > 0 and h[2] and h[2].S > 0 and h[3] and h[3].S > 0)
 	check("the sweep launches (finisher)", h[4] and h[4].RD == true)
-	check("lock established on the 2nd connect (LK on hit 2, not on hit 1)", h[1] and h[1].LK == nil and h[2] and h[2].LK == B, h[2] and tostring(h[2].LK))
-	check("hits 3 and 4 carry the lock", h[3] and h[3].LK == B and h[4] and h[4].LK == B)
-	check("chain ended with the sweep: lock cleared", Service.CurrentLock(eA) == nil)
+	local lanes = true
+	for i, d in ipairs(dists) do
+		local def = Config.Attacks[h[i] and h[i].K or "Swing1"]
+		lanes = lanes and d <= def.ReachMax + 0.12 and d >= def.Ideal - 0.9
+	end
+	check(("every impact within the strike's real reach (%s)"):format(table.concat((function()
+		local t = {}
+		for _, d in ipairs(dists) do
+			table.insert(t, ("%.2f"):format(d))
+		end
+		return t
+	end)(), " ")), lanes and #dists == 4)
+	check("the blows drove the victim straight along the attacker's facing (no sideways drift)", math.abs(B.HumanoidRootPart.Position.X - x) < 0.05, B.HumanoidRootPart.Position.X - x)
+	check("no hit event carries a lock", h[1] and h[1].LK == nil and h[2] and h[2].LK == nil)
 	remove(A)
 	remove(B)
 end
@@ -211,7 +231,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("3. Target lock: a third fighter stepping in between never takes the locked chain's blows")
+section("3. No lock: a third fighter stepping into the path takes the blow meant for the first")
 do
 	local x = lane()
 	local A = fighter("A3", x, 0)
@@ -225,36 +245,20 @@ do
 	press(A, "Light")
 	press(A, "Light")
 	Env.run(0.45) -- past the second strike's hit frame
-	check("locked onto B after two consecutive connects", Service.CurrentLock(eA) == Service.Get(B))
-	-- C walks in right in front of A, between A and B (closer to A than B is)
+	check("two connects on B: nothing owns the chain", eA.Lock == nil and eA.Streak == nil and Service.CurrentLock == nil)
+	-- C walks in right in front of A, between A and B
 	local pa = A.HumanoidRootPart.Position
 	local look = A.HumanoidRootPart.CFrame.LookVector
-	local pb = B.HumanoidRootPart.Position
-	local mid = pa + look * 1.9
+	local mid = pa + look * 2.4
 	Env.place(C, mid.X + 0.3, mid.Z, 0, 1)
+	local f3 = since()
 	press(A, "Light")
-	Env.run(0.1)
-	press(A, "Light")
-	Env.run(1.2)
-	local onC = hits(A, C, from)
-	local onB = hits(A, B, from)
-	check("C (between them) took no blow from the locked chain", #onC == 0, #onC)
-	check("B took all four", #onB == 4, #onB)
-	-- control: the same geometry with no lock: an unlocked strike lands on the first body (C)
-	local x2 = lane()
-	local A2 = fighter("A3c", x2, 0)
-	local B2 = fighter("B3c", x2, -3.4, 0, 1)
-	local C2 = fighter("C3c", x2 + 0.3, -1.9, 0, 1)
-	local f2 = since()
-	press(A2, "Light")
 	Env.run(0.6)
-	check("(control) unlocked, the first strike stops on the nearer body only", #hits(A2, C2, f2) == 1 and #hits(A2, B2, f2) == 0, ("C %d B %d"):format(#hits(A2, C2, f2), #hits(A2, B2, f2)))
+	check("the next strike lands on C, the body in its path", #hits(A, C, f3) == 1, #hits(A, C, f3))
+	check("...and never through C onto B", #hits(A, B, f3) == 0, #hits(A, B, f3))
 	remove(A)
 	remove(B)
 	remove(C)
-	remove(A2)
-	remove(B2)
-	remove(C2)
 end
 
 ---------------------------------------------------------------------------
@@ -275,51 +279,71 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("5. Lock clears: combo expiry, attacker stunned, victim death, victim leaving")
-do
-	-- expiry
+section("5. Free-form: from every angle the chain connects, and every blow drives along the attacker's facing")
+for _, case in ipairs({
+	{ "facing the attacker", 0, 1 },
+	{ "side-on", 1, 0 },
+	{ "back turned", 0, -1 },
+	{ "diagonal", 0.7, 0.7 },
+}) do
 	local x = lane()
-	local A = fighter("A5", x, 0)
-	local B = fighter("B5", x, -3.4, 0, 1)
+	-- the attacker comes in at an angle across the world (not along an axis)
+	local ang = math.rad(35)
+	local dir = V3.new(math.sin(ang), 0, -math.cos(ang))
+	local A = fighter("A5", x, 0, dir.X, dir.Z)
+	local bp = V3.new(x, 3, 0) + dir * 3.9
+	local B = fighter("B5", bp.X, bp.Z, case[2], case[3])
 	Service.Get(B).Hum.MaxHealth, Service.Get(B).Hum.Health = 999, 999
-	local eA = Service.Get(A)
-	press(A, "Light")
-	press(A, "Light")
-	Env.run(0.45)
-	check("locked", Service.CurrentLock(eA) ~= nil)
-	Env.run(1.2)
-	check("combo window ran out: lock gone", eA.Lock == nil and Service.CurrentLock(eA) == nil)
-	-- attacker stunned
-	press(A, "Light")
-	press(A, "Light")
-	Env.run(0.45)
-	check("locked again (new chain)", Service.CurrentLock(eA) ~= nil)
-	Service.Stun(A, 0.5)
-	check("attacker stunned: lock gone", eA.Lock == nil)
-	Env.run(1.5)
-	-- victim dies
-	press(A, "Light")
-	press(A, "Light")
-	Env.run(0.45)
-	check("locked (3)", Service.CurrentLock(eA) ~= nil)
-	Service.Get(B).Hum.Health = 1
-	Service.Get(B).Hum:TakeDamage(5)
-	Env.step()
-	check("victim died: lock gone", eA.Lock == nil)
-	remove(B)
-	-- victim leaves
-	local B2 = fighter("B5b", x, -3.4, 0, 1)
-	Service.Get(B2).Hum.MaxHealth, Service.Get(B2).Hum.Health = 999, 999
-	Env.run(1.5)
-	Env.place(A, x, 0)
-	Env.place(B2, x, -3.4, 0, 1)
-	press(A, "Light")
-	press(A, "Light")
-	Env.run(0.45)
-	check("locked (4)", Service.CurrentLock(eA) ~= nil)
-	remove(B2)
-	check("victim left: lock gone, no stale reference", eA.Lock == nil and (eA.Streak == nil or eA.Streak.Target ~= nil))
+	local from = since()
+	local b0 = B.HumanoidRootPart.Position
+	local names = chain(A, { "Light", "Light", "Light" })
+	Env.run(0.9)
+	local h = hits(A, B, from)
+	check(("victim %s: all three lights connect (%s)"):format(case[1], table.concat(names, " ")), #h == 3, #h)
+	local moved = B.HumanoidRootPart.Position - b0
+	moved = V3.new(moved.X, 0, moved.Z)
+	check(("victim %s: driven along the attacker's facing (dot %.3f)"):format(case[1], if moved.Magnitude > 0 then moved.Unit:Dot(dir) else 0), moved.Magnitude > 2 and moved.Unit:Dot(dir) > 0.995)
+	local d0 = A.HumanoidRootPart.CFrame.LookVector
+	check(("victim %s: the attacker never turned toward anybody"):format(case[1]), d0:Dot(dir) > 0.9999)
 	remove(A)
+	remove(B)
+end
+do
+	-- the step-in never homes: a body off to the side is not stepped toward
+	local x = lane()
+	local A = fighter("A5s", x, 0)
+	local off = V3.new(x, 3, 0) + V3.new(math.sin(math.rad(55)), 0, -math.cos(math.rad(55))) * 4.6
+	local B = fighter("B5s", off.X, off.Z, 0, 1)
+	local p0 = A.HumanoidRootPart.Position
+	local from = since()
+	press(A, "Light")
+	Env.run(0.7)
+	local moved = A.HumanoidRootPart.Position - p0
+	check("a body 55 degrees off the facing: the step goes straight ahead, not toward it", math.abs(moved.X) < 1e-3 and moved.Z < 0, ("%.3f %.3f"):format(moved.X, moved.Z))
+	check("...and the strike doesn't reach it", #hits(A, B, from) == 0)
+	remove(A)
+	remove(B)
+	-- the step stops at the body in the lane (a lunge, never a walk-through), and is short with
+	-- nobody there
+	local x2 = lane()
+	local A2 = fighter("A5t", x2, 0)
+	local B2 = fighter("B5t", x2, -5.2, 0, 1)
+	local f2 = since()
+	press(A2, "Light")
+	Env.run(0.32)
+	local gap = (B2.HumanoidRootPart.Position - A2.HumanoidRootPart.Position).Magnitude
+	check(("from 5.2 away the step closes to the strike's distance (%.2f at the impact)"):format(gap), gap > Config.Attacks.Swing1.Ideal - 0.25 and gap < Config.Attacks.Swing1.Reach)
+	Env.run(0.5)
+	check("...and the cross lands", #hits(A2, B2, f2) == 1)
+	remove(A2)
+	remove(B2)
+	local x3 = lane()
+	local A3 = fighter("A5u", x3, 0)
+	press(A3, "Light")
+	Env.run(0.6)
+	local went = (A3.HumanoidRootPart.Position - V3.new(x3, 3, 0)).Magnitude
+	check(("nobody ahead: a short weight-shift step (%.2f studs)"):format(went), went > 0.3 and went <= Config.Attacks.Swing1.Step.Base + 0.05)
+	remove(A3)
 end
 
 ---------------------------------------------------------------------------
@@ -605,20 +629,21 @@ section("10. Networking: position reports can't extend reach; rewind is capped")
 do
 	local x = lane()
 	local A, eA = fighter("A10", x, 0, 0, -1, 0.1) -- a player with 100 ms ping
-	local B = fighter("B10", x, -5.2, 0, 1) -- out of reach of a standing straight
+	local B = fighter("B10", x, -5.4, 0, 1) -- out of reach of a standing cross, even with a full drift
 	Service.Get(B).Hum.MaxHealth, Service.Get(B).Hum.Health = 999, 999
 	local from = since()
 	Service.RequestAttack(A, { Kind = "Light", Seq = 1, Want = 1 })
 	-- a forged report 2 studs forward of where the server has a standing body
 	local p = A.HumanoidRootPart.Position + V3.new(0, 0, -2)
 	Service.ReportFrame(A, { Seq = 1, P = p, L = V3.new(0, 0, -1), V = V3.zero, Tau = 0.33 })
-	check("a report far ahead of the server's copy is ignored", eA.Job.Reports == nil)
+	local rep = eA.Job.Reports and eA.Job.Reports[1]
+	check("a report far ahead of the server's copy is pulled back to the drift limit", rep ~= nil and (rep.P - A.HumanoidRootPart.Position).Magnitude <= Config.Hitbox.ReportDrift + 1e-3, rep and (rep.P - A.HumanoidRootPart.Position).Magnitude)
 	Env.run(0.8)
-	check("so the out-of-reach victim is not hit", #hits(A, B, from) == 0)
+	check("so the out-of-reach victim is still not hit", #hits(A, B, from) == 0)
 	-- an honest report (a small lead) is accepted
 	Env.run(1.2)
 	Service.RequestAttack(A, { Kind = "Light", Seq = 2, Want = 1 })
-	Service.ReportFrame(A, { Seq = 2, P = A.HumanoidRootPart.Position + V3.new(0, 0, -0.8), L = V3.new(0, 0, -1), V = V3.zero, Tau = 0.33 })
+	Service.ReportFrame(A, { Seq = 2, P = A.HumanoidRootPart.Position + V3.new(0, 0, -0.5), L = V3.new(0, 0, -1), V = V3.zero, Tau = 0.33 })
 	check("a report within the drift allowance is accepted", eA.Job.Reports ~= nil and #eA.Job.Reports == 1)
 	Env.run(1.2)
 	-- rewind cap: B was right in front a moment ago but has since dashed 8 studs away
@@ -653,7 +678,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("12. Spacing: every chain strike connects from its own Ideal distance, and misses past it")
+section("12. Spacing: the hitbox is the limb - every strike connects from its Ideal and exactly as far as its limb reaches")
 local SEQ = { Swing1 = { "Light" }, Swing2 = { "Light", "Light" }, Swing3 = { "Light", "Light", "Light" }, Uppercut = { "Heavy" }, Sweep = { "Light", "Light", "Light", "Light" } }
 local function strikeAt(name, dist)
 	local x = lane()
@@ -692,8 +717,10 @@ for _, name in ipairs({ "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep" }) do
 	local def = Config.Attacks[name]
 	local ok, n = strikeAt(name, def.Ideal)
 	check(("%s at Ideal %.2f connects"):format(name, def.Ideal), ok and n == 1, n)
-	local ok2, n2 = strikeAt(name, def.Ideal + 1.0)
-	check(("%s from %.2f (a stud past Ideal) misses"):format(name, def.Ideal + 1.0), ok2 and n2 == 0, n2)
+	local okT, nT = strikeAt(name, def.ReachMax - 0.12)
+	check(("%s just inside its real limb's reach (%.2f) connects: a visible touch is a hit"):format(name, def.ReachMax - 0.12), okT and nT == 1, nT)
+	local ok2, n2 = strikeAt(name, def.ReachMax + 0.25)
+	check(("%s just past its real limb's reach (%.2f) misses: a visible miss is a miss"):format(name, def.ReachMax + 0.25), ok2 and n2 == 0, n2)
 end
 
 ---------------------------------------------------------------------------

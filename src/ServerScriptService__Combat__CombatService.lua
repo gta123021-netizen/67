@@ -7,22 +7,21 @@
 
 	A connecting strike, all in the server frame the limb reaches the body:
 	  1 validated: the victim is hittable (state, i-frames, Invulnerable), the limb's way to the
-	    contact point is clear of geometry, this strike hasn't touched it yet, and - once the chain is
-	    locked - it is the locked fighter
+	    contact point is clear of geometry, and this strike hasn't touched it yet (a punch stops on the
+	    first body in its path: the nearest one its limb meets)
 	  2 guard:     facing the attacker with the guard up -> blocked (25% damage, push, guard gives)
 	               unless the strike breaks guards (finisher sweep, stomp) -> guard break
 	  3 damage, then reaction side (which way the blow drove the head), then hitstun long enough for
-	    the fastest follow-up of the attacker's chain (paid from the victim's stun budget), knockback /
-	    launch
+	    the slowest follow-up of the attacker's chain (paid from the victim's stun budget), knockback
+	    straight along the ATTACKER'S FACING (the way the blow travels) / launch
 	  4 hit-stop: the attacker's chain timing is pushed back by the freeze its clip takes
 	  5 one "Hit" broadcast: every client plays the spark, sound, give and (the victim) reaction
 
-	COMBO TARGET LOCK. The second consecutive strike of a chain that connects with the same fighter
-	locks the chain onto them (Config.Lock): every later strike of that chain (lights, the uppercut,
-	the sweep) tests only that fighter's body. It belongs to the chain (its ChainId) and ends with it:
-	the window running out, the sweep, a dash / block / Ground Smash, the attacker being hit, knocked
-	down or killed, the victim dying or leaving. The attacker's client hears it on every Hit ("LK")
-	and uses it to face and space the strikes.
+	FREE-FORM. There is no target lock, no target ownership and no auto-facing: every strike tests
+	every body its limb sweeps through, from wherever its attacker stands and faces. A chain holds
+	together because its geometry does - the blow drives the victim straight along the attacker's
+	facing, the attacker's momentum carries on along the same line (CombatChoreo), so the next strike
+	finds the body where its limb lands.
 
 	STUN BUDGET. Every fighter can only be held in hitstun for Config.StunBudget.Max seconds before it
 	gets a real window to act (Config.StunImmunity): the budget refills only while the fighter has
@@ -52,7 +51,8 @@ local Rules = require(CombatFolder:WaitForChild("ComboRules"))
 local Ragdoll = require(CombatFolder:WaitForChild("Ragdoll"))
 local Motion = require(CombatFolder:WaitForChild("Motion"))
 local AnimController = require(CombatFolder:WaitForChild("AnimController"))
-local HitDetect = require(script.Parent:WaitForChild("HitDetect"))
+local Choreo = require(CombatFolder:WaitForChild("CombatChoreo"))
+local HitDetect = require(CombatFolder:WaitForChild("HitDetect"))
 local Event = CombatFolder:WaitForChild("CombatEvent") :: RemoteEvent
 
 local Service = {}
@@ -116,7 +116,6 @@ end
 
 local ATTACK_ANIMS = { "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep", "Downslam", "DashAttack" }
 local DASH_ANIMS = { "DashForward", "DashBackward", "DashLeft", "DashRight" }
-local EMPTY = table.freeze({})
 
 local function now(): number
 	return os.clock()
@@ -218,9 +217,8 @@ function Service.Register(char: Model, player: Player?): Entity?
 		Chain = Rules.New(),
 		ChainHits = 0,
 		ChainId = 0,
-		Lock = nil, -- { Target = Entity, ChainId = number }: the chain's locked fighter
-		Streak = nil, -- { Target = Entity, ChainId = number, Slot = number }: the last strike's first body
 		Attack = nil,
+		Move = nil, -- NPCs: { Step, Carry } (CombatChoreo) - players move on their own client
 		AttackSerial = 0,
 		CancelSerial = 0,
 		BlockStartAt = 0,
@@ -277,23 +275,11 @@ end
 
 local jobs: { any } = {}
 
--- nobody keeps a reference to a fighter that is gone (or dead): locks, streaks, stun owners, jobs
-local function forget(gone: Entity, includeStunOwner: boolean)
+-- nobody keeps a reference to a fighter that is gone: stun owners
+local function forget(gone: Entity)
 	for _, o in pairs(entities) do
-		if o.Lock and o.Lock.Target == gone then
-			o.Lock = nil
-		end
-		if o.Streak and o.Streak.Target == gone then
-			o.Streak = nil
-		end
-		if includeStunOwner and o.LastStunBy == gone then
+		if o.LastStunBy == gone then
 			o.LastStunBy = nil
-		end
-	end
-	for _, job in ipairs(jobs) do
-		if job.Lock == gone then
-			job.Lock = nil
-			job.LockLost = true
 		end
 	end
 end
@@ -316,10 +302,8 @@ function Service.Unregister(char: Model)
 			table.remove(jobs, i)
 		end
 	end
-	e.Lock = nil
-	e.Streak = nil
 	e.LastStunBy = nil
-	forget(e, true)
+	forget(e)
 end
 
 local function alive(e: Entity?): boolean
@@ -527,42 +511,20 @@ local function setCooldown(e: Entity, key: string, seconds: number)
 end
 
 ---------------------------------------------------------------------------
--- chains, target lock, cancelling
+-- chains, cancelling
 ---------------------------------------------------------------------------
-local function clearLock(e: Entity)
-	e.Lock = nil
-	e.Streak = nil
-end
-
--- the chain is over: its count, its slot and its target lock go with it
+-- the chain is over: its count and its slot go with it
 local function endChain(e: Entity)
 	Rules.Reset(e.Chain)
 	e.ChainHits = 0
-	clearLock(e)
 end
-
--- the fighter this entity's live chain is locked onto (nil: none, or no longer valid)
-local function currentLock(e: Entity): Entity?
-	local l = e.Lock
-	if not l then
-		return nil
-	end
-	local target = l.Target
-	if l.ChainId ~= e.ChainId or e.Chain.Slot == 0 or not alive(target) or entities[target.Char] ~= target then
-		e.Lock = nil
-		return nil
-	end
-	return target
-end
-Service.CurrentLock = currentLock
 
 -- cancels the entity's current action (strike / dash / stomp) and its combo chain
 local function interrupt(e: Entity)
 	e.AttackSerial += 1
 	e.CancelSerial += 1
 	e.Attack = nil
-	e.Step = nil
-	e.Follow = nil
+	e.Move = nil
 	endChain(e)
 	if e.Npc and e.AC then
 		e.AC:StopMany(ATTACK_ANIMS, 0.08)
@@ -612,22 +574,31 @@ end
 
 local driveNpc: (e: Entity) -> ()
 
+-- which way a blow drives its victim: straight along the attacker's facing (the way the limb
+-- travels) - so the victim slides down the attacker's line and the next strike of the chain finds
+-- it there. The Ground Smash is an area blow: straight out from the smash.
+local function driveDir(att: Entity, vic: Entity, def: any): Vector3
+	if def.Id == "Downslam" then
+		local away = vic.Root.Position - att.Root.Position
+		return flat(if Vector3.new(away.X, 0, away.Z).Magnitude > 0.2 then away else bodyFrame(att).LookVector)
+	end
+	return flat(bodyFrame(att).LookVector)
+end
+
 -- a clean hit's knockback (world, studs/s)
-local function knockVector(att: Entity, vic: Entity, k: any): Vector3
-	local acf = bodyFrame(att)
-	local away = vic.Root.Position - att.Root.Position
-	away = flat(if away.Magnitude > 0.2 then away else acf.LookVector)
-	return away * (k.Back or 0) + Vector3.new(0, k.Up or 0, 0) + acf.RightVector * (k.Side or 0)
+local function knockVector(att: Entity, vic: Entity, def: any): Vector3
+	local k = def.Knock
+	return driveDir(att, vic, def) * (k.Back or 0) + Vector3.new(0, k.Up or 0, 0)
 end
 
 -- a blocked hit's slide: straight back from the attacker, angled toward the side the blow drove
-local function blockPush(att: Entity, vic: Entity, class: any, dir: number): (Vector3, number)
+local function blockPush(att: Entity, vic: Entity, def: any, class: any, dir: number): (Vector3, number)
 	local dist = class.BlockPush or 0
 	local time = class.BlockPushTime or 0
 	if dist <= 0 or time <= 0 then
 		return Vector3.zero, 0
 	end
-	local away = flat(vic.Root.Position - att.Root.Position)
+	local away = driveDir(att, vic, def)
 	local vright = flat(vic.Root.CFrame.RightVector)
 	local d = (away + vright * dir * 0.38).Unit
 	-- Motion.Push decays (average ~0.57 of the start speed): start speed that covers `dist`
@@ -662,11 +633,11 @@ end
 -- the throw a launch gives a body (world velocities for the legs and the torso, and a tip).
 -- launch = { Back, Up, Side, LegsUp, LegsSide, Tip, Time }: horizontal and vertical tuned
 -- separately; the body tips backward (never an uncontrolled spin)
-local function launchVectors(vic: Entity, att: Entity?, launch: any): (Vector3, Vector3, Vector3)
+local function launchVectors(vic: Entity, att: Entity?, launch: any, def: any?): (Vector3, Vector3, Vector3)
 	local legs, torso, spin = Vector3.new(0, 8, 0), Vector3.new(0, 6, 0), Vector3.zero
 	if att and att.Root.Parent then
 		local acf = bodyFrame(att)
-		local away = flat(vic.Root.Position - att.Root.Position)
+		local away = if def then driveDir(att, vic, def) else flat(vic.Root.Position - att.Root.Position)
 		local right = acf.RightVector
 		local up = Vector3.yAxis
 		torso = away * (launch.Back or 0) + up * (launch.Up or 0) + right * (launch.Side or 0)
@@ -677,13 +648,13 @@ local function launchVectors(vic: Entity, att: Entity?, launch: any): (Vector3, 
 end
 
 -- knock a fighter off its feet (after `delay`: the blow's hit-stop)
-local function knockDown(vic: Entity, att: Entity?, launch: any, delay: number?)
+local function knockDown(vic: Entity, att: Entity?, launch: any, delay: number?, def: any?)
 	interrupt(vic)
 	setState(vic, "Ragdolled", nil, true)
 	vic.LastStunBy = nil -- the combo on them is over
 	vic.StunChainStart = nil
 	local serial = vic.StateSerial
-	local legs, torso, spin = launchVectors(vic, att, launch)
+	local legs, torso, spin = launchVectors(vic, att, launch, def)
 	local function go()
 		if vic.StateSerial ~= serial or not vic.Char.Parent then
 			return
@@ -798,14 +769,14 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	local t = now()
 	local class = def.ClassDef
 	local reaction, dir = reactionFor(att, vic, def, contact)
-	-- the strike's own lock (a finisher keeps the one its chain had), else the chain's
-	local lockT = job.Lock or currentLock(att)
 	local standalone = (job.Slot or 0) <= 0
+	-- Seq: the attacker's own request number (its client already showed this impact on its own
+	-- frame and matches the event to it instead of playing it twice)
 	local data: any = {
 		A = att.Char, V = vic.Char, K = def.Id, R = reaction, Dir = dir, P = contact, Rank = def.Rank,
 		B = false, G = false, RD = false, IM = false, D = 0, S = 0, KB = Vector3.zero, KT = 0, RS = def.React,
-		HS = class.Hitstop, CH = 0, Slot = job.Slot or 0,
-		LK = if lockT == vic then vic.Char else nil,
+		HS = class.Hitstop, CH = 0, Slot = job.Slot or 0, Seq = job.Seq,
+		DV = driveDir(att, vic, def), -- the way the blow drives (effects, the camera kick)
 	}
 	-- no stun for this fighter now: its escape window, its budget spent, or a restarted chain
 	local immune = not canStun(vic, t) or resetLocked(att, vic, t)
@@ -826,7 +797,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		guardBreak(vic)
 		data.S = Config.Guard.BreakStun
 		data.RS = Config.Guard.BreakReactSpeed
-		data.KB = knockVector(att, vic, def.Knock)
+		data.KB = knockVector(att, vic, def)
 		data.KB = Vector3.new(data.KB.X, 0, data.KB.Z)
 		data.KT = def.KnockTime or 0.25
 		questStat(vic.Player, "Blocks", 1)
@@ -836,7 +807,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		dmg = def.Damage * Config.Guard.DamageScale
 		data.B = true
 		data.HS = bc.BlockHitstop
-		data.KB, data.KT = blockPush(att, vic, bc, dir)
+		data.KB, data.KT = blockPush(att, vic, def, bc, dir)
 		vic.BlockStunUntil = math.max(vic.BlockStunUntil, t + (bc.BlockStun or 0) + data.HS)
 		questStat(vic.Player, "Blocks", 1)
 	else
@@ -866,7 +837,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		local held = immune or (launch ~= nil and standalone and reeling)
 		if launch and not held then
 			data.RD = true
-			knockDown(vic, att, launch, data.HS)
+			knockDown(vic, att, launch, data.HS, def)
 		elseif not held then
 			-- being hit breaks your own strike / dash / guard and your chain
 			if vic.State ~= "Stunned" then
@@ -879,11 +850,11 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 			vic.LastStunBy = att
 			vic.LastStunChain = att.ChainId
 			vic.LastStunEnd = t + data.S
-			data.KB = knockVector(att, vic, def.Knock)
+			data.KB = knockVector(att, vic, def)
 			data.KT = def.KnockTime or 0.12
 		else
 			data.IM = true
-			local kb = knockVector(att, vic, def.Knock) * 0.5
+			local kb = knockVector(att, vic, def) * 0.5
 			data.KB = Vector3.new(kb.X, math.min(kb.Y, 6), kb.Z)
 			data.KT = def.KnockTime or 0.12
 		end
@@ -957,15 +928,20 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 			Motion.Push(vic.Root, data.KB, 0)
 		end
 	end
-	-- an NPC attacker is carried along with its victim's slide (players do this on their own client)
-	if att.Npc and not data.B and not data.G and not data.RD and data.KT > 0.02 and def.Class ~= "Dash" then
-		local f = { Vec = Vector3.new(data.KB.X, 0, data.KB.Z) * Config.Hitbox.Follow, T0 = now() + data.HS, Dur = data.KT }
-		att.Follow = f
-		task.delay(data.HS, function()
-			if att.Follow == f and (att.State == "Attacking" or att.State == "ComboWindow") then
-				driveNpc(att)
-			end
-		end)
+	-- an NPC attacker carries on along its facing with the blow (players do this on their own client,
+	-- on their own impact frame): the same momentum a player's body gets (CombatChoreo)
+	if att.Npc and not data.B and not data.G and not data.RD and data.KT > 0.02 and (job.Slot or 0) > 0 and not job.Carried then
+		job.Carried = true
+		local carry = Choreo.NewCarry(def, flat(bodyFrame(att).LookVector), now(), data.HS, att.Chain)
+		if carry then
+			att.Move = att.Move or {}
+			att.Move.Carry = carry
+			task.delay(data.HS, function()
+				if att.Move and att.Move.Carry == carry and (att.State == "Attacking" or att.State == "ComboWindow") then
+					driveNpc(att)
+				end
+			end)
+		end
 	end
 	if data.KT == 0 and data.KB.Y > 0 and not data.RD then
 		data.KT = 0.01 -- vertical-only kick still goes to the owner
@@ -999,30 +975,6 @@ local function candidates(att: Entity, job: any, center: Vector3?, range: number
 	return list
 end
 
--- who this strike may hit: a locked chain tests only its locked fighter (the fast path)
-local function targetsFor(att: Entity, job: any): { Entity }
-	if job.LockLost then
-		return EMPTY
-	end
-	local lockT = job.Lock
-	if not lockT and (job.Slot or 0) > 0 then
-		local l = att.Lock
-		if l and l.ChainId == job.ChainId then
-			lockT = l.Target
-			job.Lock = lockT
-		end
-	end
-	if lockT then
-		if job.Hit[lockT.Char] or entities[lockT.Char] ~= lockT or not hittable(lockT) then
-			return EMPTY
-		end
-		job.One = job.One or {}
-		job.One[1] = lockT
-		return job.One
-	end
-	return candidates(att, job)
-end
-
 -- the limb's way to the contact point is clear of solid geometry (no blows through walls)
 local function clearTo(from: Vector3, to: Vector3): boolean
 	local d = to - from
@@ -1030,34 +982,6 @@ local function clearTo(from: Vector3, to: Vector3): boolean
 		return true
 	end
 	return workspace:Raycast(from, d, synced(losParams)) == nil
-end
-
--- the second consecutive strike of the chain whose first contact is the same fighter locks the
--- chain onto that fighter (Config.Lock.Hits). Only chain strikes count; a strike that connects
--- with nobody breaks the run (the slots stop being consecutive).
-local function noteContact(att: Entity, job: any, vic: Entity)
-	if job.Primary then
-		return
-	end
-	job.Primary = vic
-	if (job.Slot or 0) <= 0 or currentLock(att) then
-		return
-	end
-	local s = att.Streak
-	if s and s.ChainId == job.ChainId and s.Target == vic and s.Slot == job.Slot - 1 then
-		s.Count += 1
-		s.Slot = job.Slot
-		if s.Count >= Config.Lock.Hits then
-			att.Lock = { Target = vic, ChainId = job.ChainId }
-			job.Lock = vic
-		end
-	else
-		att.Streak = { Target = vic, ChainId = job.ChainId, Slot = job.Slot, Count = 1 }
-		if Config.Lock.Hits <= 1 then
-			att.Lock = { Target = vic, ChainId = job.ChainId }
-			job.Lock = vic
-		end
-	end
 end
 
 -- where the attacker is for a strike at clip time tau: its own client's reports if it sent any
@@ -1135,17 +1059,12 @@ end
 local STEP_TAU = 0.02 -- the swept range is judged in slices this long (clip time)
 
 local function finishJob(job: any)
-	local e = job.E
-	-- a chain strike that touched nobody breaks the run toward a lock
-	if (job.Slot or 0) > 0 and not job.Primary and e.Streak and e.Streak.ChainId == job.ChainId then
-		e.Streak = nil
-	end
 	if job.Dbg then
 		local def = job.Def
 		for c, d in pairs(job.Dbg) do
-			print(string.format("[HitDbg] %s#%d -> %s  closest %.2f (r %.2f) at tau %.3f  seen (%.2f, %.2f) server (%.2f, %.2f) reports %d %s%s",
-				def.Id, job.Slot or 0, c.Name, d.D, (def.Hitbox or 0.5) + Config.Hitbox.Pad, d.Tau, d.Rel.X, d.Rel.Z, d.Now.X, d.Now.Z, d.Rep,
-				if job.Hit[c] then "HIT" else "miss", if job.Lock then "  [locked]" else ""))
+			print(string.format("[HitDbg] %s#%d -> %s  closest %.2f (r %.2f) at tau %.3f  seen (%.2f, %.2f) server (%.2f, %.2f) reports %d %s",
+				def.Id, job.Slot or 0, c.Name, d.D, HitDetect.Radius(def.Id), d.Tau, d.Rel.X, d.Rel.Z, d.Now.X, d.Now.Z, d.Rep,
+				if job.Hit[c] then "HIT" else "miss"))
 		end
 		job.Dbg = nil
 	end
@@ -1180,7 +1099,7 @@ local function stepJob(job: any, t: number): boolean
 	local toTau = math.min(tau, path.To)
 	job.Prev = toTau
 	if toTau >= fromTau and job.Count < job.Max then
-		local radius = (def.Hitbox or 0.5) + Config.Hitbox.Pad
+		local radius = HitDetect.Radius(def.Id)
 		local rewind = rewindFor(e)
 		local debugHits = STUDIO and workspace:GetAttribute("CombatDebugHits")
 		local slices = math.max(1, math.ceil((toTau - fromTau) / STEP_TAU - 1e-6))
@@ -1190,7 +1109,7 @@ local function stepJob(job: any, t: number): boolean
 			local mid = (a + b) * 0.5
 			local acf = strikeFrame(job, mid)
 			local seenAt = job.Start + mid / def.Speed - rewind
-			for _, v in ipairs(targetsFor(e, job)) do
+			for _, v in ipairs(candidates(e, job)) do
 				if job.Count >= job.Max then
 					break
 				end
@@ -1217,7 +1136,6 @@ local function stepJob(job: any, t: number): boolean
 					if clearTo(acf.Position + Vector3.new(0, 1, 0), losTo) then
 						job.Hit[v.Char] = true
 						job.Count += 1
-						noteContact(e, job, v)
 						applyHit(e, v, def, contact, job)
 					end
 				end
@@ -1282,75 +1200,58 @@ end)
 ---------------------------------------------------------------------------
 -- strikes
 ---------------------------------------------------------------------------
--- NPC movers (players move on their own client): the same step-in + follow as the client's, one
--- drive carrying both so a new strike's step never cuts off the slide along with the last victim
-local function npcFollowVel(e: Entity): Vector3
-	local f = e.Follow
-	if not f then
-		return Vector3.zero
+-- NPC movers (players move on their own client): the same step-in and carry a player's body gets
+-- (CombatChoreo) - straight along the NPC's own facing, never toward anybody - one drive carrying
+-- both, so a new strike's step never cuts off the last one's carry
+local function aheadFor(e: Entity): (Vector3) -> number?
+	return function(dir: Vector3): number?
+		local roots = {}
+		for c, o in pairs(entities) do
+			if c ~= e.Char and alive(o) and o.State ~= "Ragdolled" then
+				table.insert(roots, o.Root.Position)
+			end
+		end
+		return Choreo.Ahead(e.Root.Position, dir, roots)
 	end
-	local t = now() - f.T0
-	if t < 0 or t >= f.Dur then
-		return Vector3.zero
-	end
-	local k = 1 - t / f.Dur
-	return f.Vec * (0.35 + 0.65 * k * k)
-end
-
-local function npcStepVel(e: Entity, dt: number): Vector3
-	local s = e.Step
-	if not s or s.Serial ~= e.AttackSerial or e.State ~= "Attacking" then
-		return Vector3.zero
-	end
-	local t = now() - s.T0
-	if t < 0 or t >= s.Dur or not s.Target.Root.Parent then
-		return Vector3.zero
-	end
-	local d = s.Target.Root.Position - e.Root.Position
-	local fd = Vector3.new(d.X, 0, d.Z)
-	if fd.Magnitude < 0.05 then
-		return Vector3.zero
-	end
-	local want = math.min(math.max(0, fd.Magnitude - s.Ideal), s.Budget - s.Travelled)
-	local speed = math.clamp(want / math.max(s.Dur - t, 1 / 60) * 1.15, 0, 42) * math.min(1, t / 0.04)
-	s.Travelled += speed * dt
-	return fd.Unit * speed
 end
 
 driveNpc = function(e: Entity)
-	local t = now()
-	local left = 0
-	if e.Step and e.Step.Serial == e.AttackSerial then
-		left = math.max(left, e.Step.T0 + e.Step.Dur - t)
+	local mv = e.Move
+	if not mv then
+		return
 	end
-	if e.Follow then
-		left = math.max(left, e.Follow.T0 + e.Follow.Dur - t)
-	end
+	local left = Choreo.Remaining(mv, now())
 	if left <= 0.005 then
 		return
 	end
-	local last = t
+	local last = now()
+	local ahead = aheadFor(e)
 	Motion.Drive(e.Root, left, function()
 		local n = now()
 		local dt = math.max(0, n - last)
 		last = n
-		return npcStepVel(e, dt) + npcFollowVel(e)
+		if e.Move ~= mv then
+			return Vector3.zero
+		end
+		if mv.Step and (mv.Step.Serial ~= e.AttackSerial or e.State ~= "Attacking") then
+			mv.Step = nil
+		end
+		return Choreo.Velocity(mv, n, dt, ahead)
 	end, { StopAtWalls = true, Ignore = characterList() })
 end
 
-local function npcLunge(e: Entity, def: any, target: Entity?)
-	if not target or def.MaxLunge <= 0 then
+local function npcStep(e: Entity, def: any, enter: number, start: number)
+	local step: any = Choreo.NewStep(def, enter, flat(bodyFrame(e).LookVector), start)
+	if not step then
 		return
 	end
-	local t0 = (def.LungeFrom or 0) / def.Speed
-	local dur = math.max(0.05, ((def.LungeTo or 0.3) - (def.LungeFrom or 0)) / def.Speed)
-	local serial = e.AttackSerial
-	task.delay(t0, function()
-		if e.AttackSerial ~= serial or e.State ~= "Attacking" then
-			return
+	step.Serial = e.AttackSerial
+	e.Move = e.Move or {}
+	e.Move.Step = step
+	task.delay(math.max(0, step.T0 - now()), function()
+		if e.Move and e.Move.Step == step and e.AttackSerial == step.Serial then
+			driveNpc(e)
 		end
-		e.Step = { Serial = serial, T0 = now(), Dur = dur, Target = target, Ideal = def.Ideal, Budget = def.MaxLunge, Travelled = 0 }
-		driveNpc(e)
 	end)
 end
 
@@ -1405,6 +1306,8 @@ local function runStomp(e: Entity, def: any, job: any, start: number, serial: nu
 		cancelStrike(e, job)
 		return
 	end
+	-- everyone else sees the drop's wind (the owner's client already shows it)
+	Event:FireAllClients("FX", { Kind = "Descent", A = e.Char })
 	-- the fall, until the feet are really down: the server's copy lands, or the owner reports a
 	-- touchdown the server has checked (on solid ground under it, see ReportFrame)
 	while still() and not job.Landed and airborne(e) and now() < deadline do
@@ -1432,30 +1335,34 @@ local function runStomp(e: Entity, def: any, job: any, start: number, serial: nu
 	setState(e, "Attacking", math.max(0.05, (def.Length - def.StompAt) / def.Speed - def.StompDelay), true)
 end
 
-local function startAttack(e: Entity, name: string, slot: number, start: number, target: Entity?, seq: number?, lock: Entity?): any
+-- start a strike. start = when it began (wall clock); prev = the chain strike it follows (nil: none)
+-- - the pair's transition decides where its clip enters (Config.Transitions), and every clip time
+-- of the strike (its hit, its chain point, its active frames) is counted from the clip's own zero
+local function startAttack(e: Entity, name: string, slot: number, start: number, seq: number?, prev: string?): any
 	local def = Config.Attacks[name]
+	local blend, enter = Config.Transition(prev, name)
+	local clipStart = start - enter / def.Speed
 	e.AttackSerial += 1
 	local serial = e.AttackSerial
-	local prev = e.Attack and e.Attack.Name
-	e.Attack = { Def = def, Name = name, Start = start, Serial = serial, Slot = slot }
+	e.Attack = { Def = def, Name = name, Start = clipStart, Serial = serial, Slot = slot }
 	if slot <= 1 then
 		e.ChainHits = 0 -- a fresh chain (or a standalone strike) starts a fresh count
-		e.ChainId += 1 -- ...and is a new chain for the one-chain-per-stun rule and the target lock
+		e.ChainId += 1 -- ...and is a new chain for the one-chain-per-stun rule
 	end
-	setState(e, "Attacking", math.max(0.05, start + busyFor(def) - now()), true)
+	setState(e, "Attacking", math.max(0.05, clipStart + busyFor(def) - now()), true)
 	if e.Npc and e.AC then
 		for _, k in ipairs(ATTACK_ANIMS) do
 			if k ~= def.Anim then
-				e.AC:Stop(k, 0.07)
+				e.AC:Stop(k, blend)
 			end
 		end
-		e.AC:Play(def.Anim, { Fade = Config.BlendInto(prev, name), Speed = def.Speed, Restart = true })
-		npcLunge(e, def, target)
+		e.AC:Play(def.Anim, { Fade = blend, Speed = def.Speed, Restart = true, Time = enter })
+		npcStep(e, def, enter, start)
 	end
 	local job: any = {
-		E = e, Def = def, Start = start, Cancel = e.CancelSerial, Serial = serial, Hit = {}, Count = 0, Slot = slot,
-		Anim = def.Anim, Seq = seq, ChainId = e.ChainId, Lock = lock,
-		Max = if lock then 1 else (def.MaxTargets or Config.Hitbox.MaxTargets),
+		E = e, Def = def, Start = clipStart, Cancel = e.CancelSerial, Serial = serial, Hit = {}, Count = 0, Slot = slot,
+		Anim = def.Anim, Seq = seq, ChainId = e.ChainId,
+		Max = def.MaxTargets or Config.Hitbox.MaxTargets,
 	}
 	if e.Player and seq then
 		job.WaitReport = math.min(Config.Hitbox.ReportWait, latency(e) * 2 + 0.1)
@@ -1474,28 +1381,10 @@ local function startAttack(e: Entity, name: string, slot: number, start: number,
 	return job
 end
 
--- nearest valid target in front (NPC AI + step-in for NPCs)
-function Service.FindTarget(e: Entity, range: number, angleDeg: number): Entity?
-	local best, bestD = nil, range
-	local look = flat(e.Root.CFrame.LookVector)
-	local cosA = math.cos(math.rad(angleDeg))
-	for c, o in pairs(entities) do
-		if c ~= e.Char and alive(o) then
-			local d = o.Root.Position - e.Root.Position
-			local fd = Vector3.new(d.X, 0, d.Z)
-			local dist = fd.Magnitude
-			if dist < bestD and (dist < 0.5 or look:Dot(fd.Unit) >= cosA) then
-				best, bestD = o, dist
-			end
-		end
-	end
-	return best
-end
-
 --[[ an attack request. info = { Kind = "Light" | "Heavy", Air = bool, Want = slot the client plays,
 	Seq = the client's request number (its position reports name the strike by it),
 	H = (Air) the client's height above the ground }
-	Returns ok, attack, slot, chain snapshot { Slot, Heavy, Lights, Lock } ]]
+	Returns ok, attack, slot, chain snapshot { Slot, Heavy, Lights, Enter (where the clip entered) } ]]
 function Service.RequestAttack(char: Model, info: any?): (boolean, string?, number?, any?)
 	local e = entities[char]
 	if not alive(e) then
@@ -1518,7 +1407,7 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 		if kind == "Light" and info.Air ~= true and ent.DashDir == "Forward" and dash and into >= dash.AttackFrom - 0.05 and into <= dash.AttackTo + slack and t >= ent.DashAttackUntil then
 			ent.DashAttackUntil = t + Config.Attacks.DashAttack.LengthReal + Config.Attacks.DashAttack.Cooldown
 			endChain(ent)
-			startAttack(ent, "DashAttack", 0, start, nil, info.Seq)
+			startAttack(ent, "DashAttack", 0, start, info.Seq, nil)
 			return true, "DashAttack", 0, nil
 		end
 		return false
@@ -1558,11 +1447,11 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 		if not allowed() then
 			return false
 		end
-		-- starting it ends whatever chain (and target lock) was left
+		-- starting it ends whatever chain was left
 		endChain(ent)
 		ent.DownslamUntil = t + def.LengthReal + def.Cooldown
 		setCooldown(ent, "Downslam", def.LengthReal + def.Cooldown)
-		startAttack(ent, "Downslam", 0, start, nil, info.Seq)
+		startAttack(ent, "Downslam", 0, start, info.Seq, nil)
 		return true, "Downslam", 0, nil
 	end
 	-- the chain: while a strike still owns the character only its chain point may be answered
@@ -1589,19 +1478,13 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 		-- gets exactly the chain's own timing, no faster
 		start = c.OpenAt - Config.Combo.EarlyStart
 	end
-	-- a strike that opens a new chain never inherits the old chain's lock
-	local lock = if (slot :: number) > 1 then currentLock(ent) else nil
-	if (slot :: number) <= 1 then
-		clearLock(ent)
-	end
-	Rules.Commit(ent.Chain, name, slot :: number, heavy :: boolean, lights :: number, start)
-	local target = if ent.Npc then (lock or Service.FindTarget(ent, Config.AssistRange, Config.AssistAngle)) else nil
-	startAttack(ent, name, slot :: number, start, target, info.Seq, lock)
-	if name == Config.Combo.Finisher then
-		-- the sweep ends the chain (its own strike keeps the lock it started with)
-		clearLock(ent)
-	end
-	return true, name, slot, { Slot = ent.Chain.Slot, Heavy = ent.Chain.Heavy, Lights = ent.Chain.Lights, Lock = if lock then lock.Char else nil }
+	-- the pair: the strike it follows in this chain decides how its clip enters (and so where its
+	-- chain point falls) - the attacking client works it out the same way
+	local prev = if (slot :: number) > 1 then c.Last else nil
+	local _, enter = Config.Transition(prev, name :: string)
+	Rules.Commit(ent.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, start - enter / Config.Attacks[name :: string].Speed)
+	startAttack(ent, name :: string, slot :: number, start, info.Seq, prev)
+	return true, name, slot, { Slot = ent.Chain.Slot, Heavy = ent.Chain.Heavy, Lights = ent.Chain.Lights, Enter = enter }
 end
 
 -- a player's report of where its own screen has its body during a strike (see Config.Hitbox)
@@ -1633,8 +1516,17 @@ function Service.ReportFrame(char: Model, info: any)
 	local rtt = latency(ent) * 2
 	local allow = math.min(H.ReportDriftMax, H.ReportDrift + recentSpeed(ent) * (rtt + H.Rewind))
 	local drift = p - ent.Root.Position
-	if Vector3.new(drift.X, 0, drift.Z).Magnitude > allow or math.abs(drift.Y) > (if land then H.ReportDriftLand else 8) then
+	if math.abs(drift.Y) > (if land then H.ReportDriftLand else 8) then
 		return
+	end
+	local fd = Vector3.new(drift.X, 0, drift.Z)
+	if fd.Magnitude > allow then
+		if land then
+			return
+		end
+		-- further ahead of this copy than the body can have got: pulled back to that limit (never
+		-- a reach extension, and never thrown away for the copy that trails the real body)
+		p = ent.Root.Position + fd.Unit * allow + Vector3.new(0, drift.Y, 0)
 	end
 	local look = Vector3.new(l.X, 0, l.Z)
 	if look.Magnitude < 0.5 then
@@ -1800,8 +1692,6 @@ function Service._onDied(e: Entity)
 	e.DeathHandled = true
 	interrupt(e)
 	setState(e, "Dead", nil, true)
-	-- nobody's chain stays locked onto a body that is down for good
-	forget(e, false)
 	-- the body goes limp (joints stay intact, nothing is destroyed) - thrown by the knockout blow
 	local ko = e.KOLaunch
 	e.KOLaunch = nil
@@ -1847,11 +1737,8 @@ local TIMED = { Attacking = true, ComboWindow = true, Dashing = true, Stunned = 
 -- Studio: the numbers the combat debug overlay shows (CombatClient), as character attributes
 local debugAcc = 0
 local function publishDebug(e: Entity, t: number)
-	local lk = currentLock(e)
 	local c = e.Char
 	c:SetAttribute("Dbg_Chain", string.format("#%d slot %d%s", e.ChainId, e.Chain.Slot, if e.Chain.Heavy then " +heavy" else ""))
-	c:SetAttribute("Dbg_Lock", if lk then lk.Char.Name else "")
-	c:SetAttribute("Dbg_Streak", if e.Streak then string.format("%s x%d", e.Streak.Target.Char.Name, e.Streak.Count) else "")
 	c:SetAttribute("Dbg_Budget", math.floor(e.Budget * 100 + 0.5) / 100)
 	c:SetAttribute("Dbg_Immune", math.max(0, math.floor((e.StunImmuneUntil - t) * 100 + 0.5) / 100))
 	c:SetAttribute("Dbg_Control", math.floor(controlFor(e, t) * 100 + 0.5) / 100)
@@ -1893,12 +1780,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 		if e.State == "Blocking" and e.ReleaseQueued and t >= e.BlockStunUntil then
 			dropGuard(e)
 		end
-		-- a chain whose window ran out is over, and its lock with it (kept a little past the edge
-		-- for late packets)
+		-- a chain whose window ran out is over (kept a little past the edge for late packets)
 		if e.Chain.Slot > 0 and t > e.Chain.CloseAt + Config.Combo.Slack * 2 and e.State ~= "Attacking" then
 			endChain(e)
-		elseif e.Lock then
-			currentLock(e) -- drops a lock whose fighter died or left
 		end
 		-- the stun budget refills only with real control (and only after Grace of it)
 		if e.Budget < SB.Max and e.ControlSince and t - e.ControlSince >= SB.Grace then

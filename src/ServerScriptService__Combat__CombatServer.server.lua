@@ -9,9 +9,8 @@
 	  "Pos"   { Seq, P, L, V, Tau, Land? } where this client has its body during strike Seq (the server
 	                                   judges the strike from there, within Config.Hitbox.ReportDrift)
 	The server answers the sender with CombatEvent("Ack", { Seq, Kind, Ok, Action, Slot, Chain }) so the
-	client can keep (or roll back) what it started playing (Chain.Lock = the fighter the chain is locked
-	onto, if any). Requests are rate limited and type-checked; damage, targets, the target lock, stun,
-	knockback, cooldowns and timing are never taken from the client.
+	client can keep (or roll back) what it started playing. Requests are rate limited and type-checked;
+	damage, targets, stun, knockback, cooldowns and timing are never taken from the client.
 ]]
 
 local Players = game:GetService("Players")
@@ -152,7 +151,7 @@ Request.OnServerEvent:Connect(function(player: Player, kind: any, payload: any)
 end)
 
 ---------------------------------------------------------------------------
--- practice dummies (Studio play-tests only)
+-- practice dummies (Studio play-tests only): they stand or guard - none of them attacks
 ---------------------------------------------------------------------------
 if RunService:IsStudio() and Config.StudioDummies then
 	local ok, err = pcall(function()
