@@ -58,15 +58,14 @@ HD.RawPaths = Paths
 local BODY = Config.Hitbox.Body
 
 -- the body box's half widths to its left (-X) and right (+X) at a gore stage: a lost arm's side
--- ends at the torso (the right arm goes first, then the left) - but for its nub, the arm's upper
--- half still on the shoulder, where that side keeps its full width (NubL / NubR)
-export type Shape = { L: number, R: number, NubL: boolean?, NubR: boolean? }
+-- ends at the torso, shoulder to hip - nothing hits where the arm was (the right arm goes first,
+-- then the left)
+export type Shape = { L: number, R: number }
 local WHOLE: Shape = { L = BODY.HalfWidth, R = BODY.HalfWidth }
 local THIN = Config.Hitbox.ArmlessHalfWidth or 1.1
-local NUB = Config.Hitbox.Nub or { Bottom = 0.0, Top = 1.0 }
 local SHAPES: { Shape } = {
-	{ L = BODY.HalfWidth, R = THIN, NubR = true },
-	{ L = THIN, R = THIN, NubL = true, NubR = true },
+	{ L = BODY.HalfWidth, R = THIN },
+	{ L = THIN, R = THIN },
 }
 function HD.BodyFor(stage: number?): Shape
 	if not Config.Gore.Enabled or not stage or stage < 1 then
@@ -84,85 +83,41 @@ function HD.LostLimbs(stage: number?): { [string]: boolean }
 	return LOST[math.min(stage, 2) + 1]
 end
 
--- the boxes a body is made of (body space: x from, x to, y from, y to; all HalfDepth deep): the
--- body, and a lost arm's nub standing out of the narrowed side at the shoulder
-type Box = { number }
-local BOXES: { [Shape]: { Box } } = {}
-local function boxesOf(sh: Shape): { Box }
-	local out = BOXES[sh]
-	if out then
-		return out
-	end
-	out = { { -sh.L, sh.R, BODY.Bottom, BODY.Top } }
-	if sh.NubR then
-		table.insert(out, { 0, BODY.HalfWidth, NUB.Bottom, NUB.Top })
-	end
-	if sh.NubL then
-		table.insert(out, { -BODY.HalfWidth, 0, NUB.Bottom, NUB.Top })
-	end
-	BOXES[sh] = out
-	return out
-end
-local function clampTo(p: Vector3, b: Box): Vector3
-	return Vector3.new(math.clamp(p.X, b[1], b[2]), math.clamp(p.Y, b[3], b[4]), math.clamp(p.Z, -BODY.HalfDepth, BODY.HalfDepth))
-end
--- strictly inside some box of the body (a face point there is inside the body, not on it)
-local function within(p: Vector3, boxes: { Box }): boolean
-	for _, b in ipairs(boxes) do
-		if p.X > b[1] + 1e-4 and p.X < b[2] - 1e-4 and p.Y > b[3] + 1e-4 and p.Y < b[4] - 1e-4 and math.abs(p.Z) < BODY.HalfDepth - 1e-4 then
-			return true
-		end
-	end
-	return false
-end
-
--- distance from a point (in the body's own space) to the body
+-- distance from a point (in the body's own space) to the body box
 local function pointBox(p: Vector3, shape: Shape?): number
-	local best = math.huge
-	for _, b in ipairs(boxesOf(shape or WHOLE)) do
-		best = math.min(best, (clampTo(p, b) - p).Magnitude)
-	end
-	return best
+	local sh = shape or WHOLE
+	local dx = if p.X >= 0 then math.max(p.X - sh.R, 0) else math.max(-p.X - sh.L, 0)
+	local dy = math.max(BODY.Bottom - p.Y, p.Y - BODY.Top, 0)
+	local dz = math.max(math.abs(p.Z) - BODY.HalfDepth, 0)
+	return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
--- where on the body's surface a point meets it: the nearest point of the body (a point already
--- inside is pushed out through the nearest face that is on the outside). This is where a blow lands
--- on the body - its blood and impact come from here, not from the fist a hair in front of it
+-- where on the body's surface a point meets it: the nearest point of the box (a point already
+-- inside is pushed out through the nearest face; the feet stand on the ground). This is where a
+-- blow lands on the body - its blood and impact come from here, not from the fist a hair in front
 local function surfacePoint(p: Vector3, shape: Shape?): Vector3
-	local boxes = boxesOf(shape or WHOLE)
-	local best, bestD = nil, math.huge
-	for _, b in ipairs(boxes) do
-		local c = clampTo(p, b)
-		local d = (c - p).Magnitude
-		if d < bestD then
-			best, bestD = c, d
+	local sh = shape or WHOLE
+	local x = math.clamp(p.X, -sh.L, sh.R)
+	local y = math.clamp(p.Y, BODY.Bottom, BODY.Top)
+	local z = math.clamp(p.Z, -BODY.HalfDepth, BODY.HalfDepth)
+	if x ~= p.X or y ~= p.Y or z ~= p.Z then
+		return Vector3.new(x, y, z)
+	end
+	-- inside: out through the nearest face
+	local faces = {
+		{ sh.R - p.X, Vector3.new(sh.R, p.Y, p.Z) },
+		{ p.X + sh.L, Vector3.new(-sh.L, p.Y, p.Z) },
+		{ BODY.HalfDepth - p.Z, Vector3.new(p.X, p.Y, BODY.HalfDepth) },
+		{ p.Z + BODY.HalfDepth, Vector3.new(p.X, p.Y, -BODY.HalfDepth) },
+		{ BODY.Top - p.Y, Vector3.new(p.X, BODY.Top, p.Z) },
+	}
+	local best = faces[1]
+	for i = 2, #faces do
+		if faces[i][1] < best[1] then
+			best = faces[i]
 		end
 	end
-	if bestD > 0 then
-		return best :: Vector3
-	end
-	-- inside: out through the nearest face on the body's outside (never the side of the torso its
-	-- nub covers; the feet stand on the ground)
-	local out, outD = p, math.huge
-	for _, b in ipairs(boxes) do
-		local faces = {
-			Vector3.new(b[2], p.Y, p.Z),
-			Vector3.new(b[1], p.Y, p.Z),
-			Vector3.new(p.X, p.Y, BODY.HalfDepth),
-			Vector3.new(p.X, p.Y, -BODY.HalfDepth),
-			Vector3.new(p.X, b[4], p.Z),
-		}
-		if b[3] > BODY.Bottom then
-			table.insert(faces, Vector3.new(p.X, b[3], p.Z))
-		end
-		for _, f in ipairs(faces) do
-			local d = (f - p).Magnitude
-			if d < outD and not within(f, boxes) then
-				out, outD = f, d
-			end
-		end
-	end
-	return out
+	return best[2]
 end
 HD.SurfacePoint = surfacePoint
 

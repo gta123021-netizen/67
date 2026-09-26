@@ -240,21 +240,6 @@ local function childNamed(m, n)
 	end
 	return out
 end
--- the nubs hanging on a body's arms (in the gore folder, welded to the hidden real arm)
-local function nubsOf(P)
-	local r, l = nil, nil
-	for _, n in ipairs(gibs("Model", "GoreNub")) do
-		local part = n.PrimaryPart
-		local w = part and part:FindFirstChildOfClass("Weld")
-		if w and w.Part0 == P["Right Arm"] then
-			r = n
-		elseif w and w.Part0 == P["Left Arm"] then
-			l = n
-		end
-	end
-	return r, l
-end
-
 local function soundNames()
 	local out = {}
 	for _, s in ipairs(fxLog.Sound) do
@@ -461,8 +446,17 @@ do
 	-- a player's arms growing back (the server's stage steps back): newest first, each with the
 	-- place's heal burst on the new arm and its sound
 	local function stumps()
-		local r, l = nubsOf(P)
-		return if r then 1 else 0, if l then 1 else 0
+		local r, l = 0, 0
+		for _, c in ipairs(m:GetChildren()) do
+			if not c._p.Destroyed then
+				if c.Name == "right.shoulder" then
+					r += 1
+				elseif c.Name == "left.shoulder" then
+					l += 1
+				end
+			end
+		end
+		return r, l
 	end
 	local function regrowOn(arm, from)
 		local n, on = 0, true
@@ -475,14 +469,14 @@ do
 		end
 		return n > 0 and on, n
 	end
-	Env.run(GC.BleedTime + 0.5) -- (the stumps done bleeding: anything after this is the regrowth's)
+	Env.run(GC.BleedTime + GC.DripTime + 0.5) -- (the stumps done bleeding and dripping: anything after this is the regrowth's)
 	local e1 = #Client.emits
 	table.clear(fxLog.Sound)
 	local g0 = #gibs("Model", "GoreArm")
 	m:SetAttribute("GoreStage", 1)
 	Env.run(0.3)
 	local r1, l1 = stumps()
-	check("stage 2 -> 1: the LEFT arm grows back (the right stays gone), its nub gone", Gore.StageOf(m) == 1 and P["Left Arm"].LocalTransparencyModifier == 0 and P["Right Arm"].LocalTransparencyModifier == 1 and l1 == 0 and r1 == 1, ("%d %d"):format(r1, l1))
+	check("stage 2 -> 1: the LEFT arm grows back (the right stays gone), its stump gone", Gore.StageOf(m) == 1 and P["Left Arm"].LocalTransparencyModifier == 0 and P["Right Arm"].LocalTransparencyModifier == 1 and l1 == 0 and r1 == 1, ("%d %d"):format(r1, l1))
 	local ok1, n1 = regrowOn(P["Left Arm"], e1)
 	check(("... with the place's heal burst on the new arm (%d emitters of Regrow) and the flesh knitting"):format(n1), ok1 and soundNames() == "GoreRegrow")
 	local blood = 0
@@ -505,8 +499,7 @@ do
 		end
 	end
 	local ok0 = regrowOn(P["Right Arm"], e0)
-	local rn, ln = stumps()
-	check("stage 1 -> 0: the right arm too - whole again, every nub gone", Gore.StageOf(m) == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and leftovers == 0 and rn == 0 and ln == 0, leftovers)
+	check("stage 1 -> 0: the right arm too - whole again, every stump gone", Gore.StageOf(m) == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and leftovers == 0, leftovers)
 	check("... its own heal burst and sound", ok0 and soundNames() == "GoreRegrow", tostring(ok0) .. " " .. soundNames())
 	m:SetAttribute("GoreStage", 1)
 	Env.run(0.4)
@@ -523,9 +516,13 @@ do
 	-- (a body this client has never seen, arriving with the stage already set)
 	local late, _, LP = rig("LateJoin", { Attrs = { CombatEntity = true, GoreStage = 2 } })
 	Env.run(0.3)
-	local rn, ln = nubsOf(LP)
-	local stumps = (if rn then 1 else 0) + (if ln then 1 else 0)
-	check("a body first seen at stage 2: both arms hidden, both nubs on", Gore.StageOf(late) == 2 and LP["Right Arm"].LocalTransparencyModifier == 1 and LP["Left Arm"].LocalTransparencyModifier == 1 and stumps == 2, stumps)
+	local stumps = 0
+	for _, c in ipairs(late:GetChildren()) do
+		if (c.Name == "right.shoulder" or c.Name == "left.shoulder") and not c._p.Destroyed then
+			stumps += 1
+		end
+	end
+	check("a body first seen at stage 2: both arms hidden, both stumps on", Gore.StageOf(late) == 2 and LP["Right Arm"].LocalTransparencyModifier == 1 and LP["Left Arm"].LocalTransparencyModifier == 1 and stumps == 2, stumps)
 	local thrown = 0
 	for _, g in ipairs(gibs("Model", "GoreArm")) do
 		if not gibs0[g] then
@@ -537,7 +534,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("5  ARM: torn at its middle - the forearm thrown, the nub left on the shoulder")
+section("5  ARM: torn off, thrown, the stump on the shoulder")
 ---------------------------------------------------------------------------
 local function armCase(label, opts, drive, side)
 	resetLogs()
@@ -567,10 +564,9 @@ local function armCase(label, opts, drive, side)
 		return
 	end
 	local copy = gib:FindFirstChild(arm.Name)
-	local half = V3.new(arm.Size.X, arm.Size.Y * 0.5, arm.Size.Z)
-	check(label .. ": ... it is a copy of THAT arm's lower half (its name, colour, half its length), visible", copy ~= nil and copy.Color == arm.Color and near(copy.Size, half) and copy.LocalTransparencyModifier == 0)
+	check(label .. ": ... it is a copy of THAT arm (its name, colour, size), visible", copy ~= nil and copy.Color == arm.Color and near(copy.Size, arm.Size) and copy.LocalTransparencyModifier == 0)
 	check(label .. ": ... the real arm hidden on this client only (Transparency untouched)", arm.LocalTransparencyModifier == 1 and arm.Transparency == 0)
-	check(label .. ": ... starts exactly where the forearm was", copy and sameFrame(copy.CFrame, armCf * CF.new(0, -arm.Size.Y * 0.25, 0)))
+	check(label .. ": ... starts exactly where the arm was", copy and sameFrame(copy.CFrame, armCf))
 	check(label .. ": ... on real physics that never touches a fighter", copy and not copy.Anchored and copy.CanCollide and copy.CollisionGroup == "Debris" and not copy.CanQuery and not copy.CanTouch and not copy.Massless)
 	check(label .. ": ... no joint came along", copy and copy:FindFirstChildOfClass("Weld") == nil and copy:FindFirstChildOfClass("Motor6D") == nil)
 	local ghum = gib:FindFirstChildOfClass("Humanoid")
@@ -598,77 +594,31 @@ local function armCase(label, opts, drive, side)
 		check(label .. ": ... welded to the arm copy, the weld holding exactly that place", w and w.Part0 == copy and w.Part1 == wound and sameFrame(copy.CFrame * w.C0, wound.CFrame))
 		check(label .. ": ... never collides, never blocks a hit, weighs nothing", not wound.CanCollide and not wound.CanQuery and wound.Massless and not wound.Anchored)
 	end
-	-- the nub: the upper half, on the shoulder, torn open at its end
-	local rn, ln = nubsOf(P)
-	local nubModel = if side == "Right" then rn else ln
-	local nub = nubModel and nubModel:FindFirstChild(arm.Name)
-	check(label .. ": ... the upper half stays on the shoulder (a nub: that arm's colour, half its length)", nub ~= nil and nub.Color == arm.Color and near(nub.Size, half) and nub.LocalTransparencyModifier == 0 and nub.Transparency == 0)
-	if nub then
-		local w = nub:FindFirstChildOfClass("Weld")
-		check(label .. ": ... exactly where the upper arm was, welded to the arm (it swings with the shoulder)", sameFrame(nub.CFrame, arm.CFrame * CF.new(0, arm.Size.Y * 0.25, 0)) and w and w.Part0 == arm and sameFrame(arm.CFrame * w.C0, nub.CFrame))
-		check(label .. ": ... dressed like the NPC, never collides, weighs nothing, tagged as a wound", nubModel:FindFirstChildOfClass("Humanoid") ~= nil and (nubModel:FindFirstChildOfClass("Shirt") ~= nil) == (opts.Shirt == true) and not nub.CanCollide and nub.Massless and nubModel:GetAttribute("OverkillGore") == true)
-		local torn = nil
-		for _, c in ipairs(nubModel:GetChildren()) do
-			if c.Name == (if side == "Right" then "right.arm" else "left.arm") then
-				torn = c
-			end
+	local stump = nil
+	for _, c in ipairs(m:GetChildren()) do
+		if c.Name == (if side == "Right" then "right.shoulder" else "left.shoulder") and not c._p.Destroyed then
+			stump = c
 		end
-		local lt = torn and nub.CFrame:PointToObjectSpace(torn.CFrame.Position)
-		check(label .. ": ... its torn end is the kit's arm end (flesh and bone), turned to face down at the nub's bottom", torn ~= nil and torn.ClassName == "UnionOperation" and lt.Y < 0 and torn.CFrame.UpVector:Dot(nub.CFrame.UpVector) < -0.99, lt)
-		local att = nub:FindFirstChild("GoreBleed")
+	end
+	check(label .. ": ... the shoulder stump is the kit's piece, on the body", stump ~= nil and stump.ClassName == "UnionOperation")
+	if stump then
+		local want, k = expected(if side == "Right" then KIT.RightStump else KIT.LeftStump, torso, STD.Torso)
+		check(label .. ": ... exactly where the kit puts it on this torso (scaled " .. string.format("%.2f,%.2f,%.2f", k.X, k.Y, k.Z) .. ")", sameFrame(stump.CFrame, want), tostring(stump.CFrame) .. " vs " .. tostring(want))
+		local local_ = torso.CFrame:PointToObjectSpace(stump.CFrame.Position)
+		check(label .. ": ... on the correct shoulder", (side == "Right" and local_.X > 0) or (side == "Left" and local_.X < 0))
+		local w = stump:FindFirstChildOfClass("Weld")
+		check(label .. ": ... welded to the torso (follows every pose)", w and w.Part0 == torso and sameFrame(torso.CFrame * w.C0, stump.CFrame))
+		check(label .. ": ... sized for this body", near(stump.Size, V3.new(KIT.RightStump.Size.X * k.X, KIT.RightStump.Size.Y * k.Y, KIT.RightStump.Size.Z * k.Z), 1e-3))
+		check(label .. ": ... tagged as a wound (a portrait of the fighter leaves it out)", stump:GetAttribute("OverkillGore") == true)
+		check(label .. ": ... the kit's own joint never came along", stump:FindFirstChildOfClass("Weld") == w and #childNamed(stump, "Weld") == 1)
+		local att = stump:FindFirstChild("GoreBleed")
 		local spurts = 0
 		for _, e in ipairs(Client.emits) do
 			if e.Effect == "Blood" and att and near(e.CFrame.Position, att.WorldPosition, 1e-3) then
 				spurts += 1
 			end
 		end
-		check(label .. ": ... and it bleeds from there (the place's Blood effect spurting from the torn end)", att ~= nil and spurts > 0 and att.WorldCFrame.UpVector:Dot(nub.CFrame.UpVector) < -0.99, spurts)
-		-- EVERY POSE: the nub and its torn end ride on the (hidden) arm through their welds, so wherever
-		-- the arm goes - any swing, any ragdoll twist - they fill only the space the real arm filled
-		-- there (never poking out of it, never cutting into the torso further than the arm did), and
-		-- the torn end always covers the cut
-		if torn then
-			local wn = nub:FindFirstChildOfClass("Weld")
-			local wt = torn:FindFirstChildOfClass("Weld")
-			local function corners(cf, size)
-				local out = {}
-				for _, sx in ipairs({ -1, 1 }) do
-					for _, sy in ipairs({ -1, 1 }) do
-						for _, sz in ipairs({ -1, 1 }) do
-							table.insert(out, cf * V3.new(size.X / 2 * sx, size.Y / 2 * sy, size.Z / 2 * sz))
-						end
-					end
-				end
-				return out
-			end
-			local worst, poses, uncovered = 0, 0, 0
-			local function rnd(a, b)
-				return a + math.random() * (b - a)
-			end
-			for _ = 1, 60 do
-				poses += 1
-				-- a pose: the arm anywhere, turned any way (what the shoulder's animation / a ragdoll does)
-				local pose = CF.new(rnd(-20, 20), rnd(0, 10), rnd(-20, 20)) * CF.Angles(rnd(-3.1, 3.1), rnd(-3.1, 3.1), rnd(-3.1, 3.1))
-				local nubCf = pose * wn.C0
-				local tornCf = nubCf * wt.C0
-				for _, c in ipairs(corners(nubCf, nub.Size)) do
-					local l = pose:PointToObjectSpace(c)
-					worst = math.max(worst, math.abs(l.X) - arm.Size.X / 2, math.abs(l.Y) - arm.Size.Y / 2, math.abs(l.Z) - arm.Size.Z / 2)
-				end
-				local lowest = math.huge
-				for _, c in ipairs(corners(tornCf, torn.Size)) do
-					local l = pose:PointToObjectSpace(c)
-					-- (the kit's piece is a hair wider than an arm: 1.02 x 1.06 - it wraps the arm's skin)
-					worst = math.max(worst, math.abs(l.X) - arm.Size.X / 2 * 1.035, math.abs(l.Y) - arm.Size.Y / 2, math.abs(l.Z) - arm.Size.Z / 2 * 1.035)
-					lowest = math.min(lowest, nubCf:PointToObjectSpace(c).Y)
-				end
-				if lowest > -nub.Size.Y / 2 + 0.02 then
-					uncovered += 1
-				end
-			end
-			check(label .. (": ... in %d random poses the nub and its torn end never leave the space the arm filled (worst %.4f studs out)"):format(poses, worst), worst <= 1e-3, worst)
-			check(label .. ": ... and the torn end always covers the cut (never a hollow arm end)", uncovered == 0, uncovered)
-		end
+		check(label .. ": ... and it bleeds (the place's Blood effect spurting from the stump)", att ~= nil and spurts > 0, spurts)
 	end
 	local give = fxLog.Give[#fxLog.Give]
 	check(label .. ": ... the body jerks with it", give and give.Char == m)
@@ -833,18 +783,17 @@ section("8  any R6 body: no templates at all, odd builds, death without Hit")
 do
 	Env.combatFolder._children.Gore = nil
 	resetLogs()
-	local m, hum, PB = rig("Bare")
+	local m, hum = rig("Bare")
 	setHealth(hum, 0)
 	Env.run(1)
 	check("no gore kit in the place: every stage still plays (plain flesh stand-ins), no errors", Gore.StageOf(m) == 3 and soundNames() == "GoreTear,GoreTear,GoreBurst" and #warns == 0, table.concat(warns, " | "))
 	local stand = false
-	local rn = nubsOf(PB)
-	for _, c in ipairs(rn and rn:GetChildren() or {}) do
-		if c.Name == "right.arm" and c.ClassName == "Part" then
+	for _, c in ipairs(m:GetChildren()) do
+		if c.Name == "right.shoulder" and c.ClassName == "Part" then
 			stand = true
 		end
 	end
-	check("... the stand-in torn end is on the nub", stand)
+	check("... the stand-in stump is there", stand)
 	remove(m)
 	Env.combatFolder._children.Gore = templatesFolder
 end
@@ -914,7 +863,7 @@ do
 		table.insert(names, n)
 	end
 	table.sort(names)
-	check("... the pieces used: arm ends (on the nubs and the forearms), neck, skull base, chunks", used["right.arm"] and used["left.arm"] and used.neck and used.head, table.concat(names, ","))
+	check("... the pieces used: shoulders, arm ends, neck, skull base, chunks", used["right.shoulder"] and used["left.shoulder"] and used["right.arm"] and used["left.arm"] and used.neck and used.head, table.concat(names, ","))
 	local kitChunks = 0
 	for _, inst in ipairs(Client.all) do
 		if inst.Name == "GoreChunk" and inst.ClassName == "UnionOperation" then
@@ -1007,145 +956,188 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("11  both nubs at once: every shoulder pose, any height or heading; first person; what's worn")
+section("11  full severing: both arms ripped off whole, the stumps, the bleeding, hair, late joins, regrowth")
 ---------------------------------------------------------------------------
-do
-	resetLogs()
-	local m, hum, P = rig("Double", { Shirt = true, Watch = true })
-	-- a pad worn on the right shoulder (the nub keeps the shoulder: it stays), and the watch on the
-	-- wrist (it goes with the forearm)
-	local ra = P["Right Arm"]
-	local sa = Client.new("Attachment")
-	sa.Name = "RightShoulderAttachment"
-	sa.CFrame = CF.new(0, 1, 0)
-	sa.Parent = ra
+local function attach(part, name, cf)
+	local a = Client.new("Attachment")
+	a.Name = name
+	a.CFrame = cf or CF.identity
+	a.Parent = part
+	return a
+end
+-- an accessory worn by an attachment only (a rigid accessory: no weld to find it by)
+local function wornBy(m, part, attName, n)
+	attach(part, attName)
 	local acc = Client.new("Accessory")
-	acc.Name = "Pad"
-	local pad = Client.new("Part")
-	pad.Name = "Handle"
-	pad.CFrame = ra.CFrame * CF.new(0, 1, 0)
-	pad.Parent = acc
-	local pa = Client.new("Attachment")
-	pa.Name = "RightShoulderAttachment"
-	pa.Parent = pad
-	local pw = Client.new("Weld")
-	pw.Name = "AccessoryWeld"
-	pw.Part0 = pad
-	pw.Part1 = ra
-	pw.Parent = pad
+	acc.Name = n
+	local h = Client.new("Part")
+	h.Name = "Handle"
+	h.CFrame = part.CFrame
+	h.Parent = acc
+	attach(h, attName)
 	acc.Parent = m
-	setHealth(hum, 5)
-	Env.run(0.8)
-	local rn, ln = nubsOf(P)
-	check("both arms gone: two nubs, one on each shoulder", Gore.StageOf(m) == 2 and rn ~= nil and ln ~= nil)
-	check("the shoulder pad stays on (the nub is still there to wear it); the watch went with the forearm", pad.LocalTransparencyModifier == 0 and P.Watch.LocalTransparencyModifier == 1, pad.LocalTransparencyModifier)
-	local function parts(nubModel, arm)
-		local nub = nubModel:FindFirstChild(arm.Name)
-		local torn
-		for _, c in ipairs(nubModel:GetChildren()) do
-			if c:IsA("UnionOperation") then
-				torn = c
+	return h
+end
+local function stumpsOn(m)
+	local r, l = nil, nil
+	for _, c in ipairs(m:GetChildren()) do
+		if not c._p.Destroyed then
+			if c.Name == "right.shoulder" then
+				r = c
+			elseif c.Name == "left.shoulder" then
+				l = c
 			end
 		end
-		return nub, nub:FindFirstChildOfClass("Weld"), torn, torn and torn:FindFirstChildOfClass("Weld")
 	end
-	local R = { parts(rn, P["Right Arm"]) }
-	local L = { parts(ln, P["Left Arm"]) }
-	check("... each a nub with its torn end, each welded (they ride their arms)", R[1] and R[2] and R[3] and R[4] and L[1] and L[2] and L[3] and L[4])
-	local function corners(cf, size)
-		local out = {}
+	return r, l
+end
+do
+	resetLogs()
+	local m, hum, P = rig("Severed", { Shirt = true, Watch = true, Hat = true })
+	local pad = wornBy(m, P["Left Arm"], "LeftShoulderAttachment", "Pad")
+	local hair = wornBy(m, P.Head, "HairAttachment", "Hair")
+	local arms = { Right = P["Right Arm"].CFrame, Left = P["Left Arm"].CFrame }
+	local gibs0 = #gibs("Model", "GoreArm")
+	setHealth(hum, 5)
+	Env.run(0.8)
+	check("both arms ripped off: stage 2, both hidden", Gore.StageOf(m) == 2 and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 1)
+	check("no nub anywhere: nothing of either arm stays on the body", #gibs("Model", "GoreNub") == 0)
+	-- the two whole arms, thrown
+	local thrown = {}
+	for _, g in ipairs(gibs("Model", "GoreArm")) do
+		local c = g.PrimaryPart
+		if c then
+			thrown[c.Name] = c
+		end
+	end
+	local rc, lc = thrown["Right Arm"], thrown["Left Arm"]
+	check("... two arms thrown, each the WHOLE arm (full length, its colour), visible", #gibs("Model", "GoreArm") - gibs0 == 2 and rc and lc and near(rc.Size, P["Right Arm"].Size) and near(lc.Size, P["Left Arm"].Size) and rc.Color == P["Right Arm"].Color and rc.LocalTransparencyModifier == 0 and lc.LocalTransparencyModifier == 0)
+	check("... each started exactly where its arm hung (the whole arm, from the shoulder)", rc and lc and sameFrame(rc.CFrame, arms.Right) and sameFrame(lc.CFrame, arms.Left))
+	check("... thrown on real physics that never touches a fighter, no joint to the body", rc and lc and not rc.Anchored and rc.CanCollide and rc.CollisionGroup == "Debris" and not rc.CanQuery and not rc.CanTouch and rc:FindFirstChildOfClass("Weld") == nil and lc:FindFirstChildOfClass("Motor6D") == nil)
+	check("... flung up and away, tumbling", rc and lc and rc.AssemblyLinearVelocity.Y > 5 and lc.AssemblyLinearVelocity.Y > 5 and rc.AssemblyAngularVelocity.Magnitude > 1)
+	-- everything worn on the arms went with them; the head's things stay (it is still on)
+	check("everything worn on an arm goes with it: the wrist's watch and the shoulder's pad", P.Watch.LocalTransparencyModifier == 1 and pad.LocalTransparencyModifier == 1)
+	check("... the hat and the hair stay (the head is still on)", P.Hat.LocalTransparencyModifier == 0 and hair.LocalTransparencyModifier == 0)
+	-- the stumps: the kit's shoulder caps, in the body, welded to the torso, never sticking out
+	local rs, ls = stumpsOn(m)
+	check("two shoulder stumps (the kit's pieces), in the body itself (first person hides them with you)", rs and ls and rs.ClassName == "UnionOperation" and ls.ClassName == "UnionOperation" and rs.Parent == m and ls.Parent == m)
+	local torso = P.Torso
+	local worstOut = 0
+	for _, s in ipairs({ rs, ls }) do
+		local w = s:FindFirstChildOfClass("Weld")
+		check(("... %s welded to the torso (every pose, any height or speed carries it)"):format(s.Name), w and w.Part0 == torso and sameFrame(torso.CFrame * w.C0, s.CFrame))
+		check(("... %s never collides, never blocks a hit, weighs nothing"):format(s.Name), not s.CanCollide and not s.CanQuery and not s.CanTouch and s.Massless)
+		-- (its corners, in the torso's space: within the torso, a thin skin at most)
 		for _, sx in ipairs({ -1, 1 }) do
 			for _, sy in ipairs({ -1, 1 }) do
 				for _, sz in ipairs({ -1, 1 }) do
-					table.insert(out, cf * V3.new(size.X / 2 * sx, size.Y / 2 * sy, size.Z / 2 * sz))
+					local c = torso.CFrame:PointToObjectSpace(s.CFrame * V3.new(s.Size.X / 2 * sx, s.Size.Y / 2 * sy, s.Size.Z / 2 * sz))
+					worstOut = math.max(worstOut, math.abs(c.X) - torso.Size.X / 2, math.abs(c.Y) - torso.Size.Y / 2, math.abs(c.Z) - torso.Size.Z / 2)
 				end
 			end
 		end
-		return out
 	end
-	local function rnd(a, b)
-		return a + math.random() * (b - a)
-	end
-	-- out of the arm's own box (the torn end wraps the skin: 3.5% round)
-	local function outOf(armCf, armSize, cf, size, skin)
-		local worst = -math.huge
-		for _, c in ipairs(corners(cf, size)) do
-			local l = armCf:PointToObjectSpace(c)
-			worst = math.max(worst, math.abs(l.X) - armSize.X / 2 * skin, math.abs(l.Y) - armSize.Y / 2, math.abs(l.Z) - armSize.Z / 2 * skin)
-		end
-		return worst
-	end
-	-- the R6 shoulders (Motor6D C0 / C1), any rotation of each arm on its own, the body anywhere: low
-	-- ground, high towers, far out on the map, any heading, tilted (a dash, a fall, a ragdoll)
-	local SH = {
-		Right = { CF.new(1, 0.5, 0) * CF.Angles(0, math.pi / 2, 0), CF.new(-0.5, 0.5, 0) * CF.Angles(0, math.pi / 2, 0) },
-		Left = { CF.new(-1, 0.5, 0) * CF.Angles(0, -math.pi / 2, 0), CF.new(0.5, 0.5, 0) * CF.Angles(0, -math.pi / 2, 0) },
-	}
-	local HEIGHTS = { -450, -40, 0, 3, 60, 900, 4000 }
-	local worst, poses, uncovered, apart = -math.huge, 0, 0, 0
-	for i = 1, 700 do
-		local y = HEIGHTS[(i % #HEIGHTS) + 1]
-		local torso = CF.new(rnd(-3000, 3000), y, rnd(-3000, 3000)) * CF.Angles(rnd(-0.6, 0.6), rnd(-math.pi, math.pi), rnd(-0.6, 0.6))
-		local frames = {}
-		for side, M in pairs(SH) do
-			local arm = P[side .. " Arm"]
-			local armCf = torso * M[1] * CF.Angles(rnd(-math.pi, math.pi), rnd(-math.pi, math.pi), rnd(-math.pi, math.pi)) * M[2]:Inverse()
-			local S = if side == "Right" then R else L
-			local nubCf = armCf * S[2].C0
-			local tornCf = nubCf * S[4].C0
-			worst = math.max(worst, outOf(armCf, arm.Size, nubCf, S[1].Size, 1), outOf(armCf, arm.Size, tornCf, S[3].Size, 1.035))
-			local lowest = math.huge
-			for _, c in ipairs(corners(tornCf, S[3].Size)) do
-				lowest = math.min(lowest, nubCf:PointToObjectSpace(c).Y)
+	check(("... both stay on the torso: at most %.3f studs past its skin, nowhere near where the arms were"):format(worstOut), worstOut <= 0.05 and worstOut < 1.1 - 1.0 + 0.05, worstOut)
+	-- bleeding: spurts from each stump, then a drip, then nothing
+	local function bloodFrom(att, from, to)
+		local n = 0
+		for _, e in ipairs(Client.emits) do
+			if e.T >= from and e.T < to and (e.Effect == "Blood" or e.Effect == "BloodHeavy") and near(e.CFrame.Position, att.WorldPosition, 1e-3) then
+				n += 1
 			end
-			if lowest > -S[1].Size.Y / 2 + 0.02 then
-				uncovered += 1
-			end
-			frames[side] = nubCf
 		end
-		-- the two nubs stay on their own shoulders: their centres never nearer than their shoulders allow
-		if (frames.Right.Position - frames.Left.Position).Magnitude < 0.99 then
-			apart += 1
-		end
-		poses += 1
+		return n
 	end
-	check(("%d poses x 2 nubs (heights %d..%d studs, 3000 studs out): nub and torn end never leave their arm's space (worst %.4f studs out)"):format(poses, HEIGHTS[1], HEIGHTS[#HEIGHTS], worst), worst <= 2e-3, worst)
-	check("... the torn end always covers the cut, on both", uncovered == 0, uncovered)
-	check("... and the two never meet (each stays on its own shoulder)", apart == 0, apart)
-	check("... never collide, never block a hit or a ray, weigh nothing (a dash or a fall never feels them)", not R[1].CanCollide and not R[1].CanQuery and not R[1].CanTouch and R[1].Massless and not L[1].CanCollide and not L[1].CanQuery and not L[1].CanTouch and L[1].Massless and not R[3].CanCollide and not L[3].CanCollide)
-	-- the arm taken away (streamed out, removed by something else): its nub goes too, never left falling
-	local larm = P["Left Arm"]
-	larm.Parent = nil
-	larm._p.AncestryChanged:Fire(larm, nil)
-	check("the left arm taken away: its nub goes with it (never left behind)", ln.Parent == nil and rn.Parent ~= nil)
+	local ra, la = rs:FindFirstChild("GoreBleed"), ls:FindFirstChild("GoreBleed")
+	local t0 = Env.now() - 0.8
+	Env.run(GC.BleedTime + GC.DripTime + 2)
+	local sprayR, sprayL = bloodFrom(ra, t0, t0 + GC.BleedTime), bloodFrom(la, t0, t0 + GC.BleedTime)
+	local oozeR = bloodFrom(ra, t0 + GC.BleedTime + 0.5, t0 + GC.BleedTime + GC.DripTime)
+	local after = bloodFrom(ra, t0 + GC.BleedTime + GC.DripTime + 1, math.huge) + bloodFrom(la, t0 + GC.BleedTime + GC.DripTime + 1, math.huge)
+	check(("each stump pumps blood (%d / %d spurts over %d s), then keeps dripping (%d more), then stops"):format(sprayR, sprayL, GC.BleedTime, oozeR), sprayR >= 5 and sprayL >= 5 and oozeR > 0 and after == 0, after)
+	check("... out of the shoulder, a little up (never into the body), on each side", ra.WorldCFrame.UpVector:Dot(torso.CFrame.RightVector) > 0.8 and la.WorldCFrame.UpVector:Dot(torso.CFrame.RightVector) < -0.8 and ra.WorldCFrame.UpVector.Y > 0.2 and la.WorldCFrame.UpVector.Y > 0.2)
+	local rl, ll = torso.CFrame:PointToObjectSpace(ra.WorldPosition), torso.CFrame:PointToObjectSpace(la.WorldPosition)
+	check(("... from the stump's open face at the shoulder (x %.2f / %.2f, y %.2f), not from inside the body"):format(rl.X, ll.X, rl.Y), rl.X > 0.95 and ll.X < -0.95 and rl.Y > 0 and rl.Y < 1 and ll.Y > 0 and ll.Y < 1)
+	-- the head goes: the hair (held only by where it attaches) goes that same frame
+	Gore.Hit(m, 0, V3.new(0, 0, -1), 3)
+	check("the head bursts: the hair and the hat vanish that same frame", P.Head.LocalTransparencyModifier == 1 and hair.LocalTransparencyModifier == 1 and P.Hat.LocalTransparencyModifier == 1)
 	remove(m)
-	check("the body gone: the other nub goes too", rn.Parent == nil)
+	check("the body gone: its stumps go with it", rs.Parent == m and m.Parent == nil)
 end
 do
-	-- your own body, both nubs, in first person: the camera hides your body (the head's
-	-- LocalTransparencyModifier) and the nubs with it; zooming back out shows them again
+	-- the body leaves while its stump is still pumping: the bleeding stops at once
 	resetLogs()
-	local m, hum, P = rig("Me")
-	local was = Env.Players.LocalPlayer
-	Env.Players.LocalPlayer = { Name = "Me", Character = m }
-	setHealth(hum, 5)
-	Env.run(0.8)
-	local rn, ln = nubsOf(P)
-	local rp, lp = rn and rn:FindFirstChild("Right Arm"), ln and ln:FindFirstChild("Left Arm")
-	check("your own two nubs, seen from outside", rp and lp and rp.LocalTransparencyModifier == 0 and lp.LocalTransparencyModifier == 0)
-	P.Head.LocalTransparencyModifier = 1
-	local tornHidden = true
-	for _, c in ipairs(rn:GetChildren()) do
-		if c:IsA("BasePart") and c.LocalTransparencyModifier ~= 1 then
-			tornHidden = false
+	local m, hum, P = rig("LeavesBleeding")
+	setHealth(hum, 70)
+	Env.run(1)
+	local rs = stumpsOn(m)
+	local att = rs and rs:FindFirstChild("GoreBleed")
+	remove(m)
+	local n0 = #Client.emits
+	Env.run(3)
+	local more = 0
+	for i = n0 + 1, #Client.emits do
+		if att and near(Client.emits[i].CFrame.Position, att.WorldPosition, 1e-3) then
+			more += 1
 		end
 	end
-	check("first person: both nubs and their torn ends hide with your body (never floating in view)", rp.LocalTransparencyModifier == 1 and lp.LocalTransparencyModifier == 1 and tornHidden)
-	P.Head.LocalTransparencyModifier = 0.4
-	check("... fading with it as the camera zooms", rp.LocalTransparencyModifier == 0.4 and lp.LocalTransparencyModifier == 0.4)
-	P.Head.LocalTransparencyModifier = 0
-	check("... and back when you zoom out", rp.LocalTransparencyModifier == 0 and lp.LocalTransparencyModifier == 0)
-	Env.Players.LocalPlayer = was
+	check("a body that leaves mid-bleed stops bleeding at once (no blood from nowhere)", rs ~= nil and more == 0, more)
+end
+do
+	-- a late join / a body streamed in with one arm already gone: the stump and a drip, nothing replayed
+	resetLogs()
+	local thrown0 = #gibs("Model", "GoreArm")
+	local e0 = #Client.emits
+	local m, _, P = rig("LateOne", { Attrs = { CombatEntity = true, GoreStage = 1 } })
+	Env.run(0.3)
+	local rs, ls = stumpsOn(m)
+	check("first seen with one arm gone: just the right stump, the right arm hidden, the left whole", rs ~= nil and ls == nil and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 0)
+	local spurts = 0
+	for i = e0 + 1, #Client.emits do
+		if Client.emits[i].Effect == "BloodHeavy" then
+			spurts += 1
+		end
+	end
+	check("... no arm thrown, no tearing sound, no tearing spray", #gibs("Model", "GoreArm") == thrown0 and #fxLog.Sound == 0 and spurts == 0, ("%d %d %d"):format(#gibs("Model", "GoreArm") - thrown0, #fxLog.Sound, spurts))
+	Env.run(4)
+	local drips = 0
+	for _, d in ipairs(Blood.Drops) do
+		drips += 1
+	end
+	check("... the stump still drips a little", drips > 0 or #Client.emits > 0)
+	-- the player's arm grows back: the stump goes, the arm returns
+	m:SetAttribute("GoreStage", 0)
+	Env.run(0.3)
+	local rs2 = stumpsOn(m)
+	check("its arm grown back: the stump is gone, the arm shown again", rs2 == nil and P["Right Arm"].LocalTransparencyModifier == 0 and rs._p.Destroyed == true)
+	remove(m)
+end
+do
+	-- torn off again and again (a player losing the same arm after each regrowth): never two stumps,
+	-- never a stump left over
+	resetLogs()
+	local m, _, P = rig("Again", { Attrs = { CombatEntity = true, GoreStage = 0 } })
+	local most = 0
+	for _ = 1, 4 do
+		m:SetAttribute("GoreStage", 2)
+		Env.run(0.8)
+		local count = 0
+		for _, c in ipairs(m:GetChildren()) do
+			if (c.Name == "right.shoulder" or c.Name == "left.shoulder") and not c._p.Destroyed then
+				count += 1
+			end
+		end
+		most = math.max(most, count)
+		m:SetAttribute("GoreStage", 0)
+		Env.run(0.3)
+	end
+	local left = 0
+	for _, c in ipairs(m:GetChildren()) do
+		if (c.Name == "right.shoulder" or c.Name == "left.shoulder") and not c._p.Destroyed then
+			left += 1
+		end
+	end
+	check(("torn off and grown back 4 times: never more than two stumps (%d), none left whole again (%d)"):format(most, left), most == 2 and left == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0)
 	remove(m)
 end
 

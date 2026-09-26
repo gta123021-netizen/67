@@ -37,17 +37,20 @@
     inside one, never over an edge) and gone, water / glass / thin walls, outward spray, no particle
     reaching a surface, the drop pool, no splatter code left
   - `lune run tests/gore_test.luau` - the gore: thresholds, order, players' arms growing back with the heal
-    effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup; the nubs in
-    random poses per rig and both nubs at once through 700 shoulder poses (heights -450..4000, 3000 studs
-    out, any heading): never outside the arm's own space, the torn end always over the cut; first person,
-    shoulder accessories, an arm taken away
+    effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup; both arms
+    ripped off whole (nothing left on the arm), the stumps on the torso (never sticking out), bleeding
+    from their open face then dripping, everything worn on the arm gone with it, the hair gone with the
+    head, late joins, a body leaving mid-bleed, torn off and grown back again and again
   - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout;
     the Sparring Dummy's spot, its brain (walks up, a beat to notice, fights, keeps away with no arms, its leash)
   - `lune run tests/limbs_test.luau` - the server's limb rules: stages, lost limbs hidden, players' arms
     growing back (never an NPC's), one-arm damage and guard chip, one-handed single strikes, no guard and
-    no attacks without arms, players too, tools stowed, shoulder accessories kept; the hitboxes with nubs,
-    and 32,697 blows (every stage, steps of +-1.6, any heading, 4000 studs up) whose contact is always on
-    what is left of the body and whose fist is always within reach, never inside it
+    no attacks without arms, players too, tools stowed; 32,235 blows (every stage, steps of +-1.6, any
+    heading, 4000 studs up) whose contact is always on what is left of the body and whose fist is always
+    within reach, never inside it; 75,153 blows (every move, every stage, 8 headings) none of which lands
+    where a lost arm was; the thrower's lost hand never striking; one-armed and armless fighters mashing
+    every input, every matchup (one arm vs one arm, none vs none, an armless victim under a full chain),
+    an arm torn off mid-swing and mid-chain, an arm grown back mid-fight
   - `lune run tests/guard_sync_test.luau` - the guard and the escape window judged as the attacker's screen
     saw them (a last-instant raise or drop), so its damage number is the one dealt
   - `lune run tests/limb_status_test.luau` - the limb pills: yours over the hotbar and the tags over others
@@ -119,9 +122,9 @@
     attack of any kind (not even the Ground Smash) - it moves and dashes, 15% faster and its dash back
     30% sooner (`NoArms.MoveSpeed` / `DashCooldown`) to get away while its arms grow back; any attack
     press shakes the limb pill. The Sparring Dummy with no arms keeps its distance.
-  - hitboxes follow the body: below its nub a side whose arm is gone is only as wide as the torso (the
-    nub, the arm's upper half, is still there to hit: `Config.Hitbox.Nub`), a strike never lands with a
-    limb its thrower has lost, and a lost arm's ragdoll collider stays off
+  - hitboxes follow the body: a side whose arm is gone is only as wide as the torso, shoulder to hip -
+    nothing can hit where the arm was - a strike never lands with a limb its thrower has lost (one
+    already thrown when its arm goes never lands), and a lost arm's ragdoll collider stays off
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
   - (a strike never swings a missing arm; `Config.CanUse`, `Config.CanStrike`)
 - Your limb pill over the hotbar is the HUD's own status pill (the hero / coin / level pills' builder):
@@ -134,12 +137,11 @@
   that screen predicts with the same rules (the guard up long enough, the `Escape` attribute, one chain
   per stun). A blow the server never confirms is taken back; a limb this screen tore off that the
   server didn't is quietly put back.
-- An arm tears at the elbow: the forearm, dressed in its sleeve, is thrown with the blow on real physics
-  with the kit's torn end; the upper half stays on the shoulder as a nub (its sleeve, and the kit's torn
-  end - flesh and bone - over the cut), welded to the hidden arm so it swings with it. In every pose it
-  fills only the space the arm filled (no clipping), it never collides or blocks a hit, first person
-  hides it with your body, and whatever is worn on the shoulder stays on it. It pumps blood for 7 s and
-  keeps dripping for 25 s more (`BleedTime` / `DripTime`).
+- An arm is ripped off whole at the shoulder: a dressed copy of it (its sleeve, the kit's torn end on
+  top) is thrown with the blow on real physics, and everything worn on it goes too. The shoulder keeps
+  the kit's raw stump, inside the torso's outline (it never sticks out), welded to it and hidden with
+  your body in first person; it pumps blood out of its open face for 7 s and keeps dripping for 25 s
+  more (`BleedTime` / `DripTime`), stopping at once if the body leaves.
 - The burst leaves the neck stump and skull base, with droplets, chunks and a fountain; the hair, hats
   and face accessories go the same frame (matched by where they attach, not only by their weld). The
   kit's torso hole is not used.

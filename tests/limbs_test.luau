@@ -152,7 +152,7 @@ do
 	end })
 	eB.Hum:TakeDamage(30)
 	check("an accessory held on the lost arm is hidden with it", watchHandle.Transparency == 1)
-	check("... but not one worn on its shoulder: the nub (the arm's upper half) still wears it", padHandle.Transparency == 0 and padHandle:GetAttribute("GoreHidden") == nil)
+	check("... and one worn on its shoulder too (the whole arm is gone, shoulder and all)", padHandle.Transparency == 1 and padHandle:GetAttribute("GoreHidden") == 0)
 	check("... and what each looked like before is kept on it (the HUD's portraits show the fighter whole)", arm:GetAttribute("GoreHidden") == 0 and watchHandle:GetAttribute("GoreHidden") == 0)
 	B:Destroy()
 	Env.step()
@@ -417,22 +417,15 @@ do
 		end
 		check(("every blow's contact lies on the body's surface (%d), its fist within the limb's reach of it (%d)"):format(onSurface, fistOut), ok and onSurface > 10 and fistOut == onSurface)
 	end
-	-- ...at every limb stage (the nubs), every step up or down, every heading, anywhere on the map:
-	-- the contact always on what is there of the body - never in the air where a lost forearm was,
-	-- never inside it - and the fist's own point always within its reach
+	-- ...at every limb stage, every step up or down, every heading, anywhere on the map: the contact
+	-- always on what is there of the body - never in the air where a lost arm was, never inside it -
+	-- and the fist's own point always within its reach
 	do
-		local B, NB, THIN = Config.Hitbox.Body, Config.Hitbox.Nub, Config.Hitbox.ArmlessHalfWidth
+		local B, THIN = Config.Hitbox.Body, Config.Hitbox.ArmlessHalfWidth
 		local function boxes(stage)
 			local L = if stage >= 2 then THIN else B.HalfWidth
 			local R = if stage >= 1 then THIN else B.HalfWidth
-			local out = { { -L, R, B.Bottom, B.Top } }
-			if stage >= 1 then
-				table.insert(out, { 0, B.HalfWidth, NB.Bottom, NB.Top })
-			end
-			if stage >= 2 then
-				table.insert(out, { -B.HalfWidth, 0, NB.Bottom, NB.Top })
-			end
-			return out
+			return { { -L, R, B.Bottom, B.Top } }
 		end
 		local function onBody(l, bx)
 			local on, deep, e = false, false, 2e-3
@@ -488,8 +481,7 @@ do
 		end
 		check(("%d blows (%d whole / %d one arm / %d none; steps of +-1.6, any heading, 4000 studs up): every contact on what is left of the body (%d off), every fist within reach and outside it (%d)"):format(total, perStage[1], perStage[2], perStage[3], bad, far), total > 1000 and bad == 0 and far == 0)
 	end
-	-- across a body: a blow at the shoulder still meets a lost arm's nub (its upper half stays on); one
-	-- lower down, where only the forearm that is gone was, now misses
+	-- across a body: a blow that would only have touched an arm that is gone now misses - at any height
 	local function across(key, stage)
 		local hits = 0
 		for dx = -2.6, 2.6, 0.05 do
@@ -500,10 +492,86 @@ do
 		end
 		return hits
 	end
-	local j0, j1, j2 = across("Swing2", 0), across("Swing2", 1), across("Swing2", 2)
-	check(("a jab (shoulder height) swept across a body: %d offsets land whole, %d / %d with one / both arms lost - the nubs still take it"):format(j0, j1, j2), j0 > 0 and j1 == j0 and j2 == j0)
-	local d0, d1, d2 = across("DashAttack", 0), across("DashAttack", 1), across("DashAttack", 2)
-	check(("a dash strike (waist height) swept across: %d land whole, %d with one arm lost, %d with none - only the forearms' space is gone"):format(d0, d1, d2), d0 > d1 and d1 > d2 and d2 > 0)
+	for _, key in ipairs({ "Swing2", "Uppercut", "DashAttack" }) do
+		local k0, k1, k2 = across(key, 0), across(key, 1), across(key, 2)
+		check(("%s swept across a body: %d offsets land whole, %d with one arm gone, %d with none - what only an arm took now misses"):format(key, k0, k1, k2), k0 > k1 and k1 > k2 and k2 > 0)
+	end
+	-- EVERY move x every stage x offsets across and along x steps up / down x headings: nothing ever
+	-- lands where a lost arm was. A hit on a narrower body is always a hit on a wider one (never a
+	-- blow landing only because an arm is gone), its contact is on the torso's side (never out in
+	-- the arm's space), and the blows lost are exactly those whose contact was on the missing arm
+	do
+		local B, THIN = Config.Hitbox.Body, Config.Hitbox.ArmlessHalfWidth
+		local total, inArm, extra, lostOk, lost, byStage = 0, 0, 0, true, 0, { 0, 0, 0 }
+		for _, key in ipairs({ "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep", "DashAttack", "Downslam" }) do
+			local p = HD.Paths[key]
+			for _, rise in ipairs({ -1.4, -0.7, 0, 0.7, 1.4 }) do
+				for _, turn in ipairs({ 0, 0.8, 1.57, 2.4, 3.14, -0.8, -1.57, -2.4 }) do
+					for dz = 2.0, 4.2, 0.3 do
+						for dx = -2.4, 2.4, 0.3 do
+							local v = CF.new(dx, 3 + rise, -dz) * CF.Angles(0, turn, 0)
+							local was = { HD.Sweep(key, acf, v, p.From, p.To, HD.Radius(key), 0, 0) }
+							for stage = 0, 2 do
+								local hit, at = HD.Sweep(key, acf, v, p.From, p.To, HD.Radius(key), stage, 0)
+								if hit then
+									total += 1
+									byStage[stage + 1] += 1
+									local l = v:PointToObjectSpace(at)
+									local R = if stage >= 1 then THIN else B.HalfWidth
+									local L = if stage >= 2 then THIN else B.HalfWidth
+									if l.X > R + 2e-3 or l.X < -L - 2e-3 then
+										inArm += 1
+									end
+									if not was[1] then
+										extra += 1
+									end
+								elseif stage > 0 and was[1] then
+									-- lost: the whole body's contact was out where the arm was
+									lost += 1
+									local l0 = v:PointToObjectSpace(was[2])
+									if math.abs(l0.X) <= THIN - 0.05 then
+										lostOk = false
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		check(("%d blows (%d whole, %d one arm, %d none; every move, steps of +-1.4, 8 headings): none ever lands in a lost arm's space (%d)"):format(total, byStage[1], byStage[2], byStage[3], inArm), total > 5000 and inArm == 0, inArm)
+		check(("... a missing arm never makes a blow land that wouldn't have (%d)"):format(extra), extra == 0, extra)
+		check(("... and the %d blows lost to missing arms are all ones that touched only the arm's side"):format(lost), lost > 0 and lostOk)
+	end
+	-- the thrower's lost hand never strikes: every move, every offset - a right-hand move with no right
+	-- arm never lands, an arm move with no arms never lands; the left hand's moves land just as before
+	do
+		local rightMiss, armsMiss, leftSame, n = true, true, true, 0
+		for _, key in ipairs({ "Swing1", "Swing2", "Swing3", "Uppercut", "DashAttack" }) do
+			local p = HD.Paths[key]
+			for dx = -2.4, 2.4, 0.2 do
+				for dz = 2.0, 4.2, 0.2 do
+					local v = CF.lookAt(V3.new(dx, 3, -dz), V3.new(dx, 3, 0))
+					local h0 = HD.Sweep(key, acf, v, p.From, p.To, HD.Radius(key), 0, 0)
+					local h1 = HD.Sweep(key, acf, v, p.From, p.To, HD.Radius(key), 0, 1)
+					local h2 = HD.Sweep(key, acf, v, p.From, p.To, HD.Radius(key), 0, 2)
+					n += 1
+					if (key == "Swing1" or key == "DashAttack") and h1 then
+						rightMiss = false
+					end
+					if h2 then
+						armsMiss = false
+					end
+					if (key == "Swing2" or key == "Uppercut") and h0 ~= h1 then
+						leftSame = false
+					end
+				end
+			end
+		end
+		check(("the thrower's lost hand never lands (%d placements x 5 moves): no right straight or dash strike without the right arm"):format(n // 5), rightMiss)
+		check("... no arm strike at all without arms", armsMiss)
+		check("... and the left hand's straight and uppercut land exactly as they did with both", leftSame)
+	end
 end
 do
 	local x = lane()
@@ -636,6 +704,298 @@ do
 	A:Destroy()
 	P:Destroy()
 	Q:Destroy()
+	Env.step()
+end
+
+---------------------------------------------------------------------------
+section("7  one arm and no arms: every input mashed, every matchup")
+---------------------------------------------------------------------------
+-- the Hits one fighter dealt another since event `from`
+local function hitsBy(A, B, from)
+	local out = {}
+	for i = from + 1, #Env.events do
+		local ev = Env.events[i]
+		if ev.Kind == "Hit" and ev.Data.A == A and (B == nil or ev.Data.V == B) then
+			table.insert(out, ev.Data)
+		end
+	end
+	return out
+end
+-- a fighter at a stage (0 whole, 1 one arm, 2 none): the wounds that take its arms
+local function atStage(e, stage)
+	if stage >= 1 then
+		e.Hum:TakeDamage(if stage == 1 then 30 else 55)
+	end
+	return e.GoreStage == stage
+end
+-- mash every input for `secs`: M1, M2, jump + M1, the guard, and a dash every so often. Returns
+-- what started (names), the guard ever up, the dashes taken and the gaps between them
+local function mash(A, secs, withBlock)
+	local e = Service.Get(A)
+	local started, blocked, dashes, gaps, lastDash = {}, false, 0, {}, nil
+	local t0 = Env.now()
+	local flip = false
+	while Env.now() - t0 < secs do
+		for _, info in ipairs({ { Kind = "Light" }, { Kind = "Heavy" }, { Kind = "Light", Air = true, H = 5 } }) do
+			local ok, name, slot = Service.RequestAttack(A, info)
+			if ok then
+				table.insert(started, { Name = name, Slot = slot })
+			end
+		end
+		if withBlock then
+			Service.RequestBlock(A, true)
+			if e.State == "Blocking" then
+				blocked = true
+			end
+			Service.RequestBlock(A, false)
+		end
+		flip = not flip
+		if Service.RequestDash(A, if flip then "Forward" else "Left") then
+			dashes += 1
+			if lastDash then
+				table.insert(gaps, Env.now() - lastDash)
+			end
+			lastDash = Env.now()
+			-- (and at once M1: a dash strike, if it has the hand for it)
+			local ok, name, slot = Service.RequestAttack(A, { Kind = "Light" })
+			if ok then
+				table.insert(started, { Name = name, Slot = slot })
+			end
+		end
+		Env.step()
+	end
+	return started, blocked, dashes, gaps
+end
+local function minOf(t)
+	local m = math.huge
+	for _, v in ipairs(t) do
+		m = math.min(m, v)
+	end
+	return m
+end
+do
+	-- no arms, next to a whole fighter, mashing everything for 5 s
+	local x = lane()
+	local A, eA = fighter("M0a", x, 0, -1)
+	local B, eB = fighter("M0b", x, -3.4, 1)
+	eB.Hum.MaxHealth, eB.Hum.Health = 5000, 5000
+	check("(no arms)", atStage(eA, 2))
+	local from, hp = #Env.events, eB.Hum.Health
+	local started, blocked, dashes, gaps = mash(A, 5, true)
+	check(("no arms, every input mashed for 5 s: nothing starts (%d), no blow dealt, no guard ever up"):format(#started), #started == 0 and #hitsBy(A, nil, from) == 0 and eB.Hum.Health == hp and not blocked)
+	-- (a forward dash, then a side one: each waits out the last one's lock and the cooldown)
+	local want = math.min(Config.Dash.Forward.Lock, Config.Dash.Left.Lock) + Config.Dash.Cooldown * Config.Gore.NoArms.DashCooldown
+	check(("... it still dashes (%d), every %.2f s at the soonest (lock + cooldown x%.1f = %.2f)"):format(dashes, minOf(gaps), Config.Gore.NoArms.DashCooldown, want), dashes >= 4 and math.abs(minOf(gaps) - want) < 0.05, minOf(gaps))
+	check("... and ends able to act (never stuck in a state)", eA.State == "Idle" or eA.State == "Dashing")
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+do
+	-- a whole fighter's dashes, for comparison: the armless one's come sooner
+	local x = lane()
+	local A = fighter("M1a", x, 0, -1)
+	local gaps, last, flip = {}, nil, false
+	local t0 = Env.now()
+	while Env.now() - t0 < 5 do
+		flip = not flip
+		if Service.RequestDash(A, if flip then "Forward" else "Left") then
+			if last then
+				table.insert(gaps, Env.now() - last)
+			end
+			last = Env.now()
+		end
+		Env.step()
+	end
+	local whole = minOf(gaps)
+	check(("a whole fighter dashes every %.2f s at the soonest: the armless one's come %.2f s sooner"):format(whole, Config.Dash.Cooldown * (1 - Config.Gore.NoArms.DashCooldown)), math.abs(whole - (math.min(Config.Dash.Forward.Lock, Config.Dash.Left.Lock) + Config.Dash.Cooldown)) < 0.05, whole)
+	A:Destroy()
+	Env.step()
+end
+do
+	-- one arm, mashing everything: only the left hand's single strikes and the Ground Smash
+	local x = lane()
+	local A, eA = fighter("M2a", x, 0, -1)
+	local B, eB = fighter("M2b", x, -3.4, 1)
+	eB.Hum.MaxHealth, eB.Hum.Health = 5000, 5000
+	check("(one arm)", atStage(eA, 1))
+	local from = #Env.events
+	local started = mash(A, 6, false)
+	local names, allowed, singles = {}, true, true
+	for _, s in ipairs(started) do
+		names[s.Name] = (names[s.Name] or 0) + 1
+		if s.Name ~= G.OneArm.Light and s.Name ~= G.OneArm.Heavy and s.Name ~= "Downslam" then
+			allowed = false
+		end
+		if s.Slot ~= 1 and s.Name ~= "Downslam" then
+			singles = false
+		end
+	end
+	local list = {}
+	for n, c in pairs(names) do
+		table.insert(list, n .. " x" .. c)
+	end
+	table.sort(list)
+	check(("one arm, every input mashed for 6 s: only the left hand's strikes and the smash (%s)"):format(table.concat(list, ", ")), #started >= 3 and allowed, table.concat(list, ","))
+	check("... never the right straight, the hook, the sweep or the dash strike; every strike a single (slot 1)", singles and not names.Swing1 and not names.Swing3 and not names.Sweep and not names.DashAttack)
+	local hits = hitsBy(A, B, from)
+	local handOk = #hits > 0
+	for _, h in ipairs(hits) do
+		if h.K ~= G.OneArm.Light and h.K ~= G.OneArm.Heavy and h.K ~= "Downslam" then
+			handOk = false
+		end
+	end
+	check(("... and every blow that landed (%d) was one of those"):format(#hits), handOk)
+	Env.run(1.5)
+	check("... it can still raise its guard", Service.RequestBlock(A, true) and eA.State == "Blocking")
+	Service.RequestBlock(A, false)
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+do
+	-- an armless victim takes a whole fighter's full chain: every strike lands (it can't block),
+	-- each for x1.25 of what a whole victim takes
+	local x = lane()
+	local A = fighter("M3a", x, 0, -1)
+	local W, eW = fighter("M3w", x, -3.4, 1)
+	eW.Hum.MaxHealth, eW.Hum.Health = 5000, 5000
+	local first = strike(A, W, x)
+	W:Destroy()
+	Env.step()
+	local V, eV = fighter("M3v", x, -3.4, 1)
+	check("(no arms)", atStage(eV, 2))
+	eV.Hum.MaxHealth, eV.Hum.Health = 5000, 5000
+	local h = strike(A, V, x)
+	check(("an armless victim: a clean blow does x%.2f (%.1f vs %.1f)"):format(Config.Gore.NoArms.DamageTaken, h and h.D or 0, first and first.D or 0), h and first and math.abs(h.D - first.D * Config.Gore.NoArms.DamageTaken) < 0.01)
+	-- a whole chain, the victim trying to block the whole time
+	Env.run(1.5)
+	Env.place(A, x, 0, 0, -1)
+	Env.place(V, x, -3.4, 0, 1)
+	local from = #Env.events
+	local presses, guard = 0, false
+	for _ = 1, 300 do
+		Service.RequestBlock(V, true)
+		if eV.State == "Blocking" then
+			guard = true
+		end
+		-- (one whole chain: its four strikes, then the finisher throws the victim clear)
+		if presses < 4 and Service.RequestAttack(A, { Kind = "Light" }) then
+			presses += 1
+		end
+		Env.step()
+	end
+	local got, blockedAny = hitsBy(A, V, from), false
+	for _, d in ipairs(got) do
+		if d.B or d.G then
+			blockedAny = true
+		end
+	end
+	check(("... a full chain on it while it holds block: %d strikes, %d land, none blocked, its guard never up"):format(presses, #got), presses == 4 and #got == 4 and not blockedAny and not guard, ("%d/%d"):format(#got, presses))
+	A:Destroy()
+	V:Destroy()
+	Env.step()
+end
+do
+	-- one arm against one arm, both mashing M1: both land single lefts on each other
+	local x = lane()
+	local A, eA = fighter("M4a", x, 0, -1)
+	local B, eB = fighter("M4b", x, -3.4, 1)
+	check("(both one-armed)", atStage(eA, 1) and atStage(eB, 1))
+	eA.Hum.MaxHealth, eA.Hum.Health = 5000, 5000
+	eB.Hum.MaxHealth, eB.Hum.Health = 5000, 5000
+	local from = #Env.events
+	for _ = 1, 240 do
+		Service.RequestAttack(A, { Kind = "Light" })
+		Service.RequestAttack(B, { Kind = "Light" })
+		Env.step()
+	end
+	local ab, ba = hitsBy(A, B, from), hitsBy(B, A, from)
+	local ok = #ab > 0 and #ba > 0
+	for _, h in ipairs(ab) do
+		ok = ok and h.K == G.OneArm.Light
+	end
+	for _, h in ipairs(ba) do
+		ok = ok and h.K == G.OneArm.Light
+	end
+	check(("one arm vs one arm, both mashing M1 for 4 s: %d and %d blows, every one a left straight"):format(#ab, #ba), ok)
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+do
+	-- no arms against no arms: nothing either can do to the other
+	local x = lane()
+	local A, eA = fighter("M5a", x, 0, -1)
+	local B, eB = fighter("M5b", x, -3.4, 1)
+	check("(both armless)", atStage(eA, 2) and atStage(eB, 2))
+	local ha, hb, from = eA.Hum.Health, eB.Hum.Health, #Env.events
+	for _ = 1, 180 do
+		Service.RequestAttack(A, { Kind = "Light" })
+		Service.RequestAttack(B, { Kind = "Heavy" })
+		Service.RequestAttack(A, { Kind = "Light", Air = true, H = 5 })
+		Env.step()
+	end
+	check("no arms vs no arms, mashing for 3 s: not a blow either way", #hitsBy(A, nil, from) == 0 and #hitsBy(B, nil, from) == 0 and eA.Hum.Health == ha and eB.Hum.Health == hb)
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+do
+	-- the right arm torn off in the middle of a chain: the next press is a single left, never the
+	-- chain's next strike; and a right straight already thrown when the arm goes never lands
+	local x = lane()
+	local A, eA = fighter("M6a", x, 0, -1)
+	local B, eB = fighter("M6b", x, -3.4, 1)
+	eB.Hum.MaxHealth, eB.Hum.Health = 5000, 5000
+	local h = strike(A, B, x)
+	check("(a whole fighter's opener lands)", h ~= nil and h.K == "Swing1")
+	Env.place(A, x, 0, 0, -1)
+	Env.place(B, x, -3.4, 0, 1)
+	local ok0, n0 = Service.RequestAttack(A, { Kind = "Light" })
+	check("(a right straight starts)", ok0 and n0 == "Swing1", n0)
+	local from = #Env.events
+	eA.Hum:TakeDamage(30) -- (its right arm is torn off before the straight connects)
+	check("(the right arm goes mid-swing)", eA.GoreStage == 1)
+	Env.run(1)
+	local landed = false
+	for _, d in ipairs(hitsBy(A, B, from)) do
+		if d.K == "Swing1" then
+			landed = true
+		end
+	end
+	check("a right straight already thrown when its arm is torn off never lands (no hand to land it)", not landed)
+	Env.run(1)
+	Env.place(A, x, 0, 0, -1)
+	Env.place(B, x, -3.4, 0, 1)
+	local ok, name, slot = Service.RequestAttack(A, { Kind = "Light" })
+	check(("... and its next press is a single left (%s, slot %s), never the chain's next"):format(tostring(name), tostring(slot)), ok and name == G.OneArm.Light and slot == 1)
+	A:Destroy()
+	B:Destroy()
+	Env.step()
+end
+do
+	-- a player's right arm grows back mid-fight: M1 is the right straight again, and it chains
+	local x = lane()
+	local A, eA = fighter("M7a", x, 0, -1, true)
+	local B, eB = fighter("M7b", x, -3.4, 1)
+	eB.Hum.MaxHealth, eB.Hum.Health = 5000, 5000
+	check("(a player with one arm)", atStage(eA, 1))
+	Env.run(Config.Gore.Regrow.Time + 0.5)
+	check("(its arm grown back)", eA.GoreStage == 0)
+	Env.place(A, x, 0, 0, -1)
+	Env.place(B, x, -3.4, 0, 1)
+	local started = {}
+	for _ = 1, 120 do
+		local ok, name, slot = Service.RequestAttack(A, { Kind = "Light" })
+		if ok then
+			table.insert(started, name .. ":" .. slot)
+		end
+		Env.step()
+	end
+	check(("arm grown back: M1 is the right straight again and chains (%s)"):format(table.concat(started, " ")), started[1] == "Swing1:1" and started[2] ~= nil and string.sub(started[2], -1) == "2")
+	A:Destroy()
+	B:Destroy()
 	Env.step()
 end
 

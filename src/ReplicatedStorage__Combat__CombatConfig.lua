@@ -414,11 +414,9 @@ Config.Hitbox = {
 	-- R6: torso 2 wide and 1 deep (the idle stance turns it 13 deg, a shoulder forward), arms out to
 	-- 1.5 each side, head up to 2.1 above the root, feet at -3
 	Body = { HalfWidth = 1.5, Bottom = -3.0, Top = 2.1, HalfDepth = 0.58 },
-	-- a side whose arm is gone ends at the torso (2 wide, turned 13 deg in the idle stance)...
+	-- a side whose arm is gone ends at the torso (2 wide, turned 13 deg in the idle stance): nothing
+	-- can hit where the arm was, top to bottom
 	ArmlessHalfWidth = 1.1,
-	-- ...except where its nub is: the lost arm's upper half stays on the shoulder, so from the nub's
-	-- bottom (the arm's middle) up to the shoulder that side keeps its full width
-	Nub = { Bottom = 0.0, Top = 1.0 },
 	-- added to every limb radius
 	Pad = 0.1,
 	-- the capsule is pulled in at the tip by this share of its radius, so its rounded end sits on
@@ -568,8 +566,8 @@ Config.Blood = {
 --              and no attack of any kind (not even the Ground Smash): it moves and dashes, nothing
 --              else - faster (NoArms.MoveSpeed) and its dash back sooner (NoArms.DashCooldown), to
 --              get away while its arms grow back
---   (a body missing an arm is that much narrower to hit on that side below its nub:
---   Config.Hitbox.ArmlessHalfWidth / Nub)
+--   (a body missing an arm is that much narrower to hit on that side, shoulder to hip:
+--   Config.Hitbox.ArmlessHalfWidth)
 --   Regrow      a PLAYER's lost arms grow back, one at a time, Regrow.Time seconds each (the last one
 --               lost first), counted from when its last arm went or came back - never an NPC's,
 --               never the head. A regrown arm takes the same share of damage again to lose

@@ -924,16 +924,8 @@ end
 
 -- worn on `part`: held by a weld / constraint to it, or attached where it attaches (its handle has
 -- an attachment named like one of the part's own - HairAttachment, HatAttachment... on the head -
--- which still holds once a dying body's joints have broken: the hair goes the instant the head does).
--- Never what sits on an arm's shoulder: the nub - the arm's upper half - keeps it
+-- which still holds once a dying body's joints have broken: the hair goes the instant the head does)
 local function wornOn(h: BasePart, part: BasePart): boolean
-	if string.find(part.Name, "Arm") then
-		for _, a in ipairs(h:GetChildren()) do
-			if a:IsA("Attachment") and string.find(a.Name, "ShoulderAttachment") and part:FindFirstChild(a.Name) then
-				return false
-			end
-		end
-	end
 	for _, a in ipairs(h:GetChildren()) do
 		if a:IsA("Attachment") then
 			local mine = part:FindFirstChild(a.Name)
