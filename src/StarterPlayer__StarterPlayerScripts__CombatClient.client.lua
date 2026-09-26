@@ -1301,9 +1301,12 @@ local function armless(): boolean
 	return ctx ~= nil and Config.ArmsAt(ctx.Char:GetAttribute("GoreStage")) == 0
 end
 
-local function tryBlock()
-	if armless() and not inputBlocked() then
-		limbDenied()
+-- pressed: the key itself (not the every-frame retry while it is held)
+local function tryBlock(pressed: boolean?)
+	if armless() then
+		if pressed and not inputBlocked() then
+			limbDenied() -- (once per press, never on the held key's retries)
+		end
 		return
 	end
 	if inputBlocked() or (ctx.State ~= "Idle" and ctx.State ~= "ComboWindow") or now() < ctx.BlockRetryAt or now() < ctx.ReblockAt or armless() then
@@ -2141,7 +2144,7 @@ local function blockDown()
 		return
 	end
 	ctx.BlockHeld = true
-	tryBlock()
+	tryBlock(true)
 end
 local function blockUp()
 	if not ctx then

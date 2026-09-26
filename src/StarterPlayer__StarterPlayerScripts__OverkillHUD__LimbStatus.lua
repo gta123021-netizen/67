@@ -165,14 +165,23 @@ return function(ctx: any)
 					right = grown
 				end
 			end
-			glyph.Set(right, left)
+			-- (only what changed: the figure a pixel at a time, the socket a second at a time)
+			local rq, lq = math.floor(right * 64 + 0.5), math.floor(left * 64 + 0.5)
+			if rq ~= api.LastR or lq ~= api.LastL then
+				api.LastR, api.LastL = rq, lq
+				glyph.Set(right, left)
+			end
 			local showSocket = secs ~= nil
 			if socket.Button.Visible ~= showSocket then
 				socket.Button.Visible = showSocket
 				api.Fit()
 			end
 			if secs then
-				socket.SetText(("%ds"):format(math.ceil(secs - 1e-3)))
+				local text = ("%ds"):format(math.ceil(secs - 1e-3))
+				if text ~= api.LastText then
+					api.LastText = text
+					socket.SetText(text)
+				end
 			end
 		end
 		return api
