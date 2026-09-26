@@ -7,12 +7,11 @@
 	Tool attributes you can set:
 	  amount  (number)  -> shows "x3" on the slot
 
-	The row ends with the combat ability slot: GROUND SMASH (jump + M1) and its cooldown.
+	(The Ground Smash - jump + M1 - is part of the basic moveset: it has no slot of its own.)
 ]]
 
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
-local RunService = game:GetService("RunService")
 
 local KEYS = {
 	[Enum.KeyCode.One] = 1,
@@ -232,146 +231,6 @@ return function(ctx: any)
 	for i = 1, SLOTS do
 		hotSlots[i] = makeSlot(hotbar, 106, i)
 		hotSlots[i].Button.Name = "Slot" .. i
-	end
-
-	---------------------------------------------------------------------------
-	-- GROUND SMASH: the combat ability's slot at the end of the hotbar row. It is the hotbar's own
-	-- slot (plate, corners, outline, the chip on its top edge) with the ability's colour ring 6 in
-	-- from the edge, like the dock tiles'. While it recharges the slot dims, a shade drains down
-	-- it and the seconds left count down; ready again, it pops once and a shine runs across it.
-	-- It follows the SERVER's cooldown (the character's CombatCD_Downslam attribute, set when the
-	-- server approves a smash, in server time) - never a local guess.
-	---------------------------------------------------------------------------
-	local ABILITY = 106
-	local SMASH, SMASH_D = C.Gold, C.GoldDeep
-	-- (a little extra room from the tool slots, only while there are any)
-	local abilityGap = new("Frame", { Name = "AbilityGap", BackgroundTransparency = 1, Size = UDim2.fromOffset(10, 1), LayoutOrder = 90, Visible = false, Parent = hotbar })
-	local ability = new("Frame", { Name = "GroundSmash", BackgroundTransparency = 1, Size = UDim2.fromOffset(ABILITY, ABILITY + 12), LayoutOrder = 100, ZIndex = 12, Parent = hotbar })
-	local abBody = new("Frame", { Name = "Body", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, 0), Size = UDim2.fromOffset(ABILITY, ABILITY), BackgroundTransparency = 1, ZIndex = 12, Parent = ability })
-	local abScale = Kit.fx(abBody)
-	local abPlate = Kit.plate({ Name = "Plate", Parent = abBody, Size = UDim2.fromScale(1, 1), Radius = 22, Stroke = 4, ZIndex = 12, Gradient = { C.Navy600, C.Navy800 } })
-	local ringW = 2.5 * 1.35
-	local ringStrokes = Kit.edgeStrokes(abPlate, UDim.new(0, 22), {
-		{ 6 + ringW / 2, SMASH },
-		{ 6 - ringW / 2, { C.Navy600, C.Navy800, 90 } },
-	}, 13)
-	local ring = ringStrokes[1]
-	local abIcon = Kit.image({
-		Name = "Icon",
-		Image = Theme.Icon.Boot,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(0.58, 0.58),
-		Rotation = -12,
-		ZIndex = 14,
-		Parent = abPlate,
-	})
-	-- the recharge shade: clipped to the slot's shape, as tall as the share of the cooldown left
-	local shadeClip = new("CanvasGroup", { Name = "Shade", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = abPlate })
-	Kit.corner(shadeClip, 22)
-	local shade = new("Frame", {
-		Name = "Fill",
-		BackgroundColor3 = C.Night,
-		BackgroundTransparency = 0.25,
-		BorderSizePixel = 0,
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.fromScale(0, 1),
-		Size = UDim2.fromScale(1, 0),
-		ZIndex = 15,
-		Parent = shadeClip,
-	})
-	local cdText = Kit.text({ Name = "Seconds", Text = "", TextSize = 36, ZIndex = 17, Stroke = 3.5, Visible = false, Parent = abPlate })
-	local abSheen = Kit.addShine(abPlate, 22)
-	Kit.outlineOnTop(abPlate, 20)
-	-- its name on the top edge, where a tool slot has its key
-	local abChip = Kit.plate({
-		Name = "Name",
-		Parent = abBody,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0, -8),
-		Size = UDim2.new(0, 0, 0, 28),
-		AutomaticSize = Enum.AutomaticSize.X,
-		Radius = UDim.new(1, 0),
-		Stroke = 3,
-		ZIndex = 21,
-		Gradient = { SMASH, SMASH_D },
-	})
-	Kit.padding(abChip, 12, 0, 12, 0)
-	local abChipGrad = abChip:FindFirstChildOfClass("UIGradient")
-	Kit.text({ Text = "SMASH", TextSize = 16, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 22, Stroke = 2.4, Parent = abChip })
-
-	local cooling = false
-	local function cooldownLeft(): (number, number)
-		local c = player.Character
-		local untilT = c and c:GetAttribute("CombatCD_Downslam")
-		local len = c and c:GetAttribute("CombatCDLen_Downslam")
-		if type(untilT) ~= "number" then
-			return 0, 1
-		end
-		return math.max(0, untilT - workspace:GetServerTimeNow()), if type(len) == "number" and len > 0 then len else 1
-	end
-	local function paintAbility(pulse: boolean)
-		local left, len = cooldownLeft()
-		if left > 0 then
-			if not cooling then
-				cooling = true
-				cdText.Visible = true
-				abIcon.ImageTransparency = 0.55
-				ring.Color = Kit.darken(SMASH, 0.45)
-				if abChipGrad then
-					abChipGrad.Color = ColorSequence.new(C.Navy500, C.Navy700)
-				end
-			end
-			shade.Size = UDim2.fromScale(1, math.clamp(left / len, 0, 1))
-			cdText.Text = if left >= 1 then tostring(math.ceil(left)) else string.format("%.1f", left)
-		elseif cooling then
-			cooling = false
-			shade.Size = UDim2.fromScale(1, 0)
-			cdText.Visible = false
-			abIcon.ImageTransparency = 0
-			ring.Color = SMASH
-			if abChipGrad then
-				abChipGrad.Color = ColorSequence.new(SMASH, SMASH_D)
-			end
-			if pulse then
-				-- ready: one pop, the ring flashes and a shine runs across (the HUD's own motion)
-				abScale.Scale = 1.12
-				tween(abScale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
-				ring.Color = Color3.new(1, 1, 1)
-				tween(ring, 0.4, { Color = SMASH })
-				Kit.playShine(abSheen)
-				Kit.wiggle(abIcon, 0.6)
-			end
-		end
-	end
-	local stepConn: RBXScriptConnection? = nil
-	local function watchCooldown()
-		if stepConn or not cooling then
-			return
-		end
-		stepConn = RunService.RenderStepped:Connect(function()
-			paintAbility(true)
-			if not cooling and stepConn then
-				stepConn:Disconnect()
-				stepConn = nil
-			end
-		end)
-	end
-	local cdConn: RBXScriptConnection? = nil
-	local function hookCooldown(c: Model)
-		if cdConn then
-			cdConn:Disconnect()
-		end
-		paintAbility(false) -- the new body's own cooldown (a respawn starts ready): no pulse
-		cdConn = c:GetAttributeChangedSignal("CombatCD_Downslam"):Connect(function()
-			paintAbility(true)
-			watchCooldown()
-		end)
-		watchCooldown()
-	end
-	player.CharacterAdded:Connect(hookCooldown)
-	if player.Character then
-		hookCooldown(player.Character)
 	end
 
 	-- name of the equipped item, floating above the hotbar
@@ -800,13 +659,11 @@ return function(ctx: any)
 	-- render
 	---------------------------------------------------------------------------
 	render = function()
-		local anyTool = false
 		for i = 1, SLOTS do
 			local s = hotSlots[i]
 			local tool = hot[i]
 			paint(s, tool, i)
 			local vis = tool ~= nil or bagOpen
-			anyTool = anyTool or vis
 			if vis and not s.Button.Visible then
 				s.Button.Visible = true
 				s.Scale.Scale = 0.5
@@ -815,7 +672,6 @@ return function(ctx: any)
 				s.Button.Visible = vis
 			end
 		end
-		abilityGap.Visible = anyTool
 		local query = box.Text:lower()
 		local shown = 0
 		for k, tool in ipairs(bagList) do

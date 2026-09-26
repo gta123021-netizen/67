@@ -547,6 +547,7 @@ local moduleFiles = {
 	["ReplicatedStorage/Combat/CombatFX"] = "ReplicatedStorage__Combat__CombatFX.lua",
 	["ReplicatedStorage/Combat/CombatGore"] = "ReplicatedStorage__Combat__CombatGore.lua",
 	["ServerScriptService/Combat/CombatService"] = "ServerScriptService__Combat__CombatService.lua",
+	["ServerScriptService/Combat/TrainingDummies"] = "ServerScriptService__Combat__TrainingDummies.lua",
 	["ReplicatedStorage/OverkillUI/Theme"] = "ReplicatedStorage__OverkillUI__Theme.lua",
 }
 modules["ReplicatedStorage/Combat/Motion"] = Motion

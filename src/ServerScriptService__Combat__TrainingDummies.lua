@@ -6,8 +6,8 @@
 	  Training Dummy    stands still - combo practice
 	  Guard Dummy       keeps its guard up (and puts it back up after a guard break)
 	They have Config.DummyHealth: one full string knocks one out on its finisher (the KO throw, the
-	KO call-out), they heal back to full a moment after the last hit, and a knocked-out dummy is
-	back on its own spot a few seconds later.
+	KO call-out). They never heal: the damage (and the gore it shows) stays until the dummy is
+	knocked out, and only then is a fresh one back on its own spot a few seconds later.
 ]]
 
 local Players = game:GetService("Players")
@@ -175,9 +175,9 @@ function Dummies.Start(Service: any)
 		e.Kind = kind.Kind
 		e.Home = ground
 		e.AC:Play("CombatIdle", { Fade = 0.2 })
-		-- practice dummies heal back to full a moment after the last hit, and the standing ones go
-		-- back to their spot (a combo carries a dummy across the ground - it shouldn't end up in a
-		-- lake or off the island)
+		-- practice dummies never heal (they only come back whole by respawning after a knockout);
+		-- a standing one goes back to its spot a moment after the last hit (a combo carries a dummy
+		-- across the ground - it shouldn't end up in a lake or off the island)
 		local lastHurt = 0
 		local hp = e.Hum.Health
 		e.Hum.HealthChanged:Connect(function(h)
@@ -191,9 +191,6 @@ function Dummies.Start(Service: any)
 			while model.Parent do
 				task.wait(0.5)
 				if e.Hum.Health > 0 and os.clock() - lastHurt > 2.5 then
-					if e.Hum.Health < e.Hum.MaxHealth then
-						e.Hum.Health = e.Hum.MaxHealth
-					end
 					local settled = e.State == "Idle" or e.State == "Blocking"
 					if settled and e.Root.Parent and (e.Root.Position - homeCf.Position).Magnitude > 2.5 then
 						e.Root.AssemblyLinearVelocity = Vector3.zero

@@ -516,19 +516,20 @@ Config.RequestRate = 25 -- max combat requests per second per player
 Config.StudioDummies = true -- practice dummies (a still one and a guarding one) near the spawn in Studio
 
 ---------------------------------------------------------------------------
--- blood (client-side, cosmetic; CombatBlood). A clean blow squeezes blood out of the struck surface
--- in a SPLASH CROWN: every drop leaves outward, at a shallow angle to the surface (Crown: between
--- that many degrees from the surface's outward normal), all round the wound - never back into the
--- body - and is carried along by the struck part's own motion: back with a straight, sideways with a
--- hook, up with an uppercut. Mist, streaks and blobs are particle bursts that fade before they could
--- reach any surface; the droplets fly true ballistic paths under the WORLD's gravity
--- (workspace.Gravity) with air drag, integrated exactly, and leave splatters flat on whatever they
--- land on, stretched the way they travelled. Splatters dry darker, fade and are reused.
---   Eject { min, max }   speed the drops leave the wound at (studs/s)
---   Crown { min, max }   angle from the wound's outward normal they leave at (degrees)
+-- blood (client-side, cosmetic; CombatBlood). A clean blow bursts the place's own blood effects
+-- (ReplicatedStorage.Combat.VFX: Blood and BloodHeavy, from the Yona blood pack) out of the struck
+-- surface: aimed outward from the wound - never back into the body - and carried the way the
+-- struck part is thrown: back with a straight, sideways with a hook, up with an uppercut. Every
+-- particle that moves fades before it could reach a floor, a wall or a ceiling: nothing lands,
+-- nothing is left behind.
+--   Effects              the VFX effects a blow of this tier bursts: Name, Scale (size and speed),
+--                        Count (emit-count multiplier)
+--   Eject { min, max }   speed the blood leaves the wound at (studs/s)
+--   Crown { min, max }   angle from the wound's outward normal it leaves at (degrees)
 --   Carry / Side / Lift  the struck part's velocity after the blow (studs/s): along the blow, to the
 --                        side the head was driven, up
---   Mist / Streaks       particle counts; Drops = flying droplets; Size = droplet size factor
+-- (The NPC gore's bleeding also throws droplets - small wet parts on exact ballistic paths under
+-- the world's gravity (workspace.Gravity) with air Drag - that are gone where they land.)
 ---------------------------------------------------------------------------
 Config.Blood = {
 	Enabled = true,
@@ -537,21 +538,24 @@ Config.Blood = {
 	Gravity = nil, -- nil: the world's own (workspace.Gravity)
 	Drag = 2.0, -- air drag on the droplets (1/s): terminal speed = gravity / drag
 	Tiers = {
-		Light = { Mist = 10, Streaks = 5, Drops = 6, Eject = { 8, 15 }, Crown = { 40, 80 }, Carry = 10, Side = 2.5, Lift = 3, Size = 1 },
-		Hook = { Mist = 13, Streaks = 7, Drops = 7, Eject = { 8, 15 }, Crown = { 40, 80 }, Carry = 6, Side = 12, Lift = 3, Size = 1.05 },
-		Heavy = { Mist = 20, Streaks = 11, Drops = 10, Eject = { 9, 17 }, Crown = { 35, 75 }, Carry = 5, Side = 1.5, Lift = 17, Size = 1.25, Splash = true },
-		Finisher = { Mist = 26, Streaks = 14, Drops = 13, Eject = { 9, 17 }, Crown = { 40, 80 }, Carry = 12, Side = 3, Lift = 5, Size = 1.35, Splash = true, Pool = true },
-		Body = { Mist = 14, Streaks = 7, Drops = 7, Eject = { 6, 13 }, Crown = { 45, 82 }, Carry = 12, Side = 2, Lift = 2, Size = 1.1 },
+		Light = { Effects = { { Name = "Blood", Scale = 0.8, Count = 0.75 } }, Eject = { 8, 15 }, Crown = { 40, 80 }, Carry = 10, Side = 2.5, Lift = 3 },
+		Hook = { Effects = { { Name = "Blood", Scale = 0.9, Count = 0.9 } }, Eject = { 8, 15 }, Crown = { 40, 80 }, Carry = 6, Side = 12, Lift = 3 },
+		Heavy = { Effects = { { Name = "BloodHeavy", Scale = 1, Count = 1 } }, Eject = { 9, 17 }, Crown = { 35, 75 }, Carry = 5, Side = 1.5, Lift = 17 },
+		Finisher = { Effects = { { Name = "BloodHeavy", Scale = 1.15, Count = 1.25 }, { Name = "Blood", Scale = 1, Count = 1 } }, Eject = { 9, 17 }, Crown = { 40, 80 }, Carry = 12, Side = 3, Lift = 5 },
+		Body = { Effects = { { Name = "Blood", Scale = 0.85, Count = 0.8 } }, Eject = { 6, 13 }, Crown = { 45, 82 }, Carry = 12, Side = 2, Lift = 2 },
 	},
-	Splat = { Min = 0.45, Max = 1.9, Hold = 9, Fade = 2.2, Cap = 70 }, -- floor splatters: size (studs), seconds, most at once
+	-- false (the default): a droplet is gone where it lands and nothing is left behind. true: it
+	-- leaves a splatter on the floor / wall (Splat), and a knocked-out body a pool
+	Stains = false,
+	Splat = { Min = 0.45, Max = 1.9, Hold = 9, Fade = 2.2, Cap = 70 }, -- floor splatters (Stains): size (studs), seconds, most at once
 	View = 160, -- nothing is built farther than this from the camera
 }
 
 ---------------------------------------------------------------------------
 -- gore (CombatGore): the damage an NPC has taken, on its body - never on a player
 --   Stages      health shares at which each stage plays, in order: the right arm torn off, the
---               left arm, the jaw snapped, the head burst (the last one on the killing blow only)
---   GibLife     seconds a severed arm / chunk / tooth lies on the ground before it fades away
+--               left arm, the head burst (the last one on the killing blow only)
+--   GibLife     seconds a severed arm / chunk lies on the ground before it fades away
 --   BleedTime   seconds a stump keeps pumping blood (slowing with every beat)
 --   Stagger     seconds between stages when one blow earns several
 --   BurstDrops  droplets the burst head throws (they land and splat)
@@ -559,7 +563,7 @@ Config.Blood = {
 ---------------------------------------------------------------------------
 Config.Gore = {
 	Enabled = true,
-	Stages = { 0.75, 0.5, 0.25, 0 },
+	Stages = { 0.75, 0.5, 0 },
 	GibLife = 10,
 	BleedTime = 4,
 	Stagger = 0.14,
@@ -712,15 +716,11 @@ Config.Sounds = {
 	SlamSettle = { -- slabs grinding back down into the ground
 		{ Id = DEBRIS_SMALL, Volume = 0.35, Speed = 0.7, Var = 0.06, Len = 0.8, Fade = 0.4, Reach = 110 },
 	},
-	-- gore: flesh tearing, bone cracking, a head bursting
+	-- gore: flesh tearing, a head bursting
 	GoreTear = { -- an arm torn off: the crack of the joint, a wet rip, cloth tearing
 		{ Id = CRACK, Volume = 0.8, Speed = 1.25, Var = 0.06, Len = 0.3, Fade = 0.12, Reach = 110 },
 		{ Id = HIT_STRONG, Volume = 0.9, Speed = 0.8, Var = 0.06, Len = 0.35, Fade = 0.15, Eq = { 4, 0, -4 }, Reach = 110 },
 		{ Id = CLOTH, Volume = 0.45, Speed = 1.4, Var = 0.08, Len = 0.2, Fade = 0.08, Eq = { -8, 0, -2 }, Delay = 0.02 },
-	},
-	GoreSnap = { -- the jaw breaking: a sharp crack and a wet thud
-		{ Id = CRACK, Volume = 0.95, Speed = 1.55, Var = 0.06, Len = 0.22, Fade = 0.1, Eq = { -4, 0, 4 }, Reach = 110 },
-		{ Id = PUNCH, Volume = 0.8, Speed = 0.85, Var = 0.06, Len = 0.25, Fade = 0.1, Eq = { 4, 0, -6 }, Reach = 110 },
 	},
 	GoreBurst = { -- the head bursting: a heavy wet blast, bone breaking, the bits raining down
 		{ Id = HIT_STRONG2, Volume = 1.3, Speed = 0.7, Var = 0.05, Len = 0.5, Fade = 0.25, Eq = { 8, 0, -4 }, Drive = 0.25, Reach = 160 },

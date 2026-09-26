@@ -3,14 +3,18 @@
 	The Ground Smash, start to finish. Client-side and cosmetic only: every client builds its own
 	copy when it hears about a smash (the smasher from its own touchdown frame).
 
-	  Shatter.Descent(char, height)   the drop: air rushing up past the falling body, speed lines, a
-	                                  faint trail - nothing on the ground yet. Returns { Stop }.
+	  Shatter.Descent(char, height)   the drop: speed lines rushing up past the falling body -
+	                                  nothing on the ground yet. Returns { Stop }.
 	  Shatter.Play(ground, attacker)  the touchdown and everything it sets off
 	  Shatter.Preview(ground, parent) the finished fracture standing still (Studio inspection)
 
-	THE SEQUENCE (seconds after touchdown)
-	  0.00  IMPACT      a flash of light, the air under the foot squeezed out in a ring of dust hugging
-	                    the ground, the first cracks flashing out from the foot, the boom and its bass
+	THE SEQUENCE (seconds after touchdown). Every particle is one of the place's own effects
+	(ReplicatedStorage.Combat.VFX, from the imported packs) - aimed, sized and timed here, never made
+	  0.00  IMPACT      a flash of light, the heavy hit flash (HitFlashHeavy) with its ring and lines
+	                    (Impact), the ground cracking in a black flash under the foot (FloorCrack, the
+	                    Big pack's crack) and black shards of it thrown out along the ground to the rim;
+	                    the cracks that stay for the hold spread over the whole broken ground
+	                    (GroundCrack1, GroundCrack2); the boom and its bass
 	  0.00  FRACTURE    fissures run outward from the foot - 6 to 9 main ones, each wandering and
 	        -0.30       tapering, forking now and then, some reaching the rim and some stopping short
 	                    (never symmetric) - progressively, at the speed of the break. They follow the
@@ -19,10 +23,11 @@
 	  0.02  DEBRIS      the ground between the fissures heaves up in fractured slabs (the floor's own
 	        BURST       surface on packed earth, outer edges lifted: a raised rim round a sunken,
 	                    darkened centre); medium rocks are thrown in heavy arcs, small ones faster and
-	                    further, and a spray of grit - all in the ground's own material and colour
-	  0.05  SHOCKWAVE   a ring runs across the ground and ends exactly on the radius
-	  0.05  DUST        dust rolls out along the ground and a cloud rises from the centre, tinted
-	        -2.0        like the ground, expanding as it fades
+	                    further - all in the ground's own material and colour
+	  0.05  SHOCKWAVE   the shock ring runs out across the ground (ShockRing)
+	  0.05  SMOKE       dust rolls out along the ground and a cloud of smoke is thrown out after it
+	        -1.0        (GroundDust, DustBurst), billowing OUTWARD in rings to the rim (DustPuff); a
+	                    little of it rises over the centre - all tinted like the ground
 	  0.40  ROCK SETTLE the thrown rocks land, bounce once, roll to rest on the surface they hit; the
 	        -1.2        slabs sag back a little as they settle
 	  ...   HOLD        the crater and its fissures stay
@@ -402,97 +407,27 @@ local function tween(part: BasePart, from: CFrame, to: CFrame, delay: number, du
 end
 
 ---------------------------------------------------------------------------
--- particles (made once; aimed and burst per smash)
+-- effects: the place's own (ReplicatedStorage.Combat.VFX, from the imported packs), aimed, sized
+-- and timed here - no particle is made in code. The flash of light under the foot is a light
 ---------------------------------------------------------------------------
-local rig: Attachment? = nil
-local E: { [string]: ParticleEmitter } = {}
+local VFX = require(CombatFolder:WaitForChild("CombatVFX"))
 local light: PointLight? = nil
-
-local function nseq(points: { { number } }): NumberSequence
-	local kps = {}
-	for _, p in ipairs(points) do
-		table.insert(kps, NumberSequenceKeypoint.new(p[1], p[2], p[3] or 0))
-	end
-	return NumberSequence.new(kps)
-end
-
-local function particles(): Attachment
-	if rig and rig.Parent then
-		return rig
+local function flashLight(): PointLight
+	local l = light
+	if l and l.Parent then
+		return l
 	end
 	local a = Instance.new("Attachment")
-	a.Name = "ShatterParticles"
+	a.Name = "ShatterLight"
 	a.Parent = workspace.Terrain
-	local function em(name: string, props: any)
-		local e = Instance.new("ParticleEmitter")
-		e.Name = name
-		e.Enabled = false
-		e.Rate = 0
-		e.LockedToPart = false
-		e.EmissionDirection = Enum.NormalId.Top
-		e.LightInfluence = 1
-		for k, v in pairs(props) do
-			(e :: any)[k] = v
-		end
-		e.Parent = a
-		E[name] = e
-	end
-	-- the air squeezed out from under the foot: fast, low, stopping short
-	em("Compress", {
-		Texture = "rbxassetid://16669188960", FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
-		FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
-		Size = nseq({ { 0, 0.9 }, { 0.4, 2.2 }, { 1, 2.8 } }), Transparency = nseq({ { 0, 0.25 }, { 0.6, 0.5 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(0.35, 0.6), Speed = NumberRange.new(26, 34), Drag = 6,
-		SpreadAngle = Vector2.new(6, 6), RotSpeed = NumberRange.new(-60, 60), Rotation = NumberRange.new(-180, 180),
-	})
-	-- dust rolling out along the ground behind the shockwave
-	em("DustRing", {
-		Texture = "rbxassetid://16669188960", FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
-		FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
-		Size = nseq({ { 0, 1.6 }, { 0.35, 3.6 }, { 1, 5 } }), Transparency = nseq({ { 0, 0.3 }, { 0.5, 0.55 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(1.0, 1.6), Speed = NumberRange.new(14, 22), Drag = 2.6,
-		Acceleration = Vector3.new(0, 1.8, 0), SpreadAngle = Vector2.new(10, 10), RotSpeed = NumberRange.new(-35, 35),
-		Rotation = NumberRange.new(-180, 180),
-	})
-	-- the cloud rising from the centre
-	em("Column", {
-		Texture = "rbxassetid://9171262291",
-		Size = nseq({ { 0, 2.5 }, { 0.4, 6 }, { 1, 8 } }), Transparency = nseq({ { 0, 0.35 }, { 0.5, 0.6 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(1.4, 2.2), Speed = NumberRange.new(3, 7), Drag = 1.5,
-		Acceleration = Vector3.new(0, 1.2, 0), SpreadAngle = Vector2.new(35, 35), RotSpeed = NumberRange.new(-20, 20),
-		Rotation = NumberRange.new(-180, 180),
-	})
-	-- grit: the micro debris
-	em("Grit", {
-		Texture = "rbxassetid://6760190948",
-		Size = nseq({ { 0, 0.22 }, { 1, 0.16 } }), Transparency = nseq({ { 0, 0 }, { 0.85, 0 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(0.6, 1.1), Speed = NumberRange.new(18, 52), Drag = 0.6,
-		Acceleration = Vector3.new(0, -120, 0), SpreadAngle = Vector2.new(38, 38), RotSpeed = NumberRange.new(-400, 400),
-		Rotation = NumberRange.new(-180, 180),
-	})
-	-- the shockwave: a flat ring whose edge ends exactly on the radius
-	em("Shock", {
-		Texture = "rbxassetid://16950679789", Orientation = Enum.ParticleOrientation.VelocityPerpendicular,
-		Size = nseq({ { 0, 1.2 }, { 0.7, R * 2 }, { 1, R * 2.06 } }), Transparency = nseq({ { 0, 0.1 }, { 0.6, 0.35 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(0.34, 0.34), Speed = NumberRange.new(0.01, 0.01), LightEmission = 0.2,
-		Rotation = NumberRange.new(-180, 180),
-	})
-	-- the first cracks, flashing out from the foot on the touchdown frame
-	em("FirstCrack", {
-		Texture = "rbxassetid://16937229477", Orientation = Enum.ParticleOrientation.VelocityPerpendicular,
-		Size = nseq({ { 0, 1.2 }, { 1, R * 1.1 } }), Transparency = nseq({ { 0, 0 }, { 0.7, 0.3 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(0.32, 0.32), Speed = NumberRange.new(0.01, 0.01), Rotation = NumberRange.new(-180, 180),
-		Color = ColorSequence.new(Color3.new(0, 0, 0)),
-	})
-	local l = Instance.new("PointLight")
-	l.Brightness = 0
-	l.Range = 16
-	l.Color = Color3.fromRGB(255, 238, 208)
-	l.Shadows = false
-	l.Parent = a
-	light = l
-	rig = a
-	return a
+	local nl = Instance.new("PointLight")
+	nl.Brightness = 0
+	nl.Range = 16
+	nl.Color = Color3.fromRGB(255, 238, 208)
+	nl.Shadows = false
+	nl.Parent = a
+	light = nl
+	return nl
 end
 
 local function frameAlong(pos: Vector3, dir: Vector3): CFrame
@@ -711,13 +646,14 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 	local center = ground.Position
 	local nrm = ground.Normal
 	local water = ground.Material == Enum.Material.Water
-	local _, col = surfaceOf(ground)
-	local a = particles()
-	local groundFrame = frameAlong(center + nrm * 0.15, nrm)
+	local groundFrame = frameAlong(center + nrm * 0.12, nrm)
+	local fx = R / 7.2 -- (the effects' sizes below are for the default radius)
 
-	-- IMPACT: the flash, the air squeezed out, the first cracks
-	a.CFrame = frameAlong(center + nrm * 1.4, nrm)
-	local l = light :: PointLight
+	-- IMPACT: a flash of light, the heavy hit flash and its ring and lines, the ground cracking in a
+	-- black flash under the foot and shards of it thrown out along the ground
+	local l = flashLight()
+	local lightAt = l.Parent :: Attachment
+	lightAt.CFrame = frameAlong(center + nrm * 1.4, nrm)
 	l.Brightness = 3.2
 	task.spawn(function()
 		local t0 = os.clock()
@@ -727,31 +663,30 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 		end
 		l.Brightness = 0
 	end)
-	E.Compress.Color = tint(col, if water then 0.8 else 0.45)
-	for i = 1, 14 do
-		local d = rotY(Vector3.new(1, 0, 0), i / 14 * math.pi * 2 + rng:NextNumber(-0.1, 0.1))
-		local out = (d + nrm * 0.12).Unit
-		a.CFrame = frameAlong(center + nrm * 0.45 + d * 0.5, out)
-		E.Compress:Emit(1)
-	end
-	if not water then
-		a.CFrame = groundFrame
-		E.FirstCrack:Emit(2)
-	end
+	VFX.Play("HitFlashHeavy", frameAlong(center + nrm * 1.2, nrm), { Scale = 1.4 })
+	VFX.Play("Impact", frameAlong(center + nrm * 0.6, nrm), { Scale = 2.4 })
 	if water then
-		-- (water can't break: just the burst of spray and the shock across it)
+		-- (water can't break: the hit and the shock across it)
 		task.delay(0.05, function()
-			a.CFrame = groundFrame
-			E.Shock:Emit(1)
-			E.DustRing.Color = tint(Color3.fromRGB(220, 235, 245), 0.2)
-			for i = 1, 12 do
-				local d = rotY(Vector3.new(1, 0, 0), i / 12 * math.pi * 2)
-				a.CFrame = frameAlong(center + d * 0.8 + nrm * 0.4, (d + nrm * 0.3).Unit)
-				E.DustRing:Emit(1)
-			end
+			VFX.Play("ShockRing", groundFrame, { Scale = 2.2 * fx })
 		end)
 		return
 	end
+	VFX.Play("FloorCrack", groundFrame, { Scale = 1.9 * fx })
+	VFX.Play("BigCrack", frameAlong(center + nrm * 0.35, nrm), {
+		Scale = 0.72 * fx,
+		Only = { Impact2 = true, Ash1 = true }, -- (the black crack and its shards: not the pack's lava glow or fire)
+		Counts = { Impact2 = 1, Ash1 = 22 },
+		MaxLife = function(_e: ParticleEmitter, speed: number): number?
+			-- the shards fly out to the rim of the broken ground, no further
+			return if speed > 1 then R * 1.25 / speed else nil
+		end,
+	})
+	-- the cracks that stay for the hold, spread over the whole broken ground
+	local lasting: { Attachment? } = {
+		VFX.Play("GroundCrack1", groundFrame, { Scale = 2 * R / 30 }),
+		VFX.Play("GroundCrack2", groundFrame * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0), { Scale = 2 * R / 30 * 0.82 }),
+	}
 
 	local segs, slabs, mat, colr, variant, dark, stony, earth = build(ground, attacker, rng)
 	local placed: { { Part: BasePart, Final: CFrame, Sunk: CFrame, Dist: number } } = {}
@@ -859,24 +794,36 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 		throw(rng:NextNumber(0.25, 0.48), { 9, 19 }, { 18, 32 }, rng:NextNumber() < 0.4) -- small: faster, further
 	end
 	run()
-	E.Grit.Color = ColorSequence.new(colr:Lerp(Color3.new(0, 0, 0), 0.25))
-	a.CFrame = frameAlong(center + nrm * 0.4, nrm)
-	E.Grit:Emit(26)
 	sound("SlamDebris", center)
 
-	-- SHOCKWAVE + DUST: the ring runs out to the radius, the dust rolls out behind it and rises
+	-- SHOCKWAVE + SMOKE: the shock ring runs out across the ground, the dust rolls out along it and
+	-- a cloud of smoke is thrown out after it (tinted like the ground), billowing outward in rings to
+	-- the rim; a little of it rises over the centre
+	local dust = tint(colr, 0.5)
 	task.delay(0.05, function()
-		a.CFrame = groundFrame
-		E.Shock:Emit(1)
-		E.DustRing.Color = tint(colr, 0.55)
-		for i = 1, 16 do
-			local d = rotY(Vector3.new(1, 0, 0), i / 16 * math.pi * 2 + rng:NextNumber(-0.12, 0.12))
-			a.CFrame = frameAlong(center + d * 0.9 + nrm * 0.5, (d + nrm * 0.18).Unit)
-			E.DustRing:Emit(1)
-		end
-		E.Column.Color = tint(colr, 0.6)
-		a.CFrame = frameAlong(center + nrm * 1, nrm)
-		E.Column:Emit(5)
+		VFX.Play("ShockRing", groundFrame, { Scale = 2.2 * fx })
+		VFX.Play("GroundDust", groundFrame, { Scale = 0.7 * fx, Color = dust })
+		VFX.Play("DustBurst", groundFrame, { Scale = 1.5 * fx, Color = dust })
+	end)
+	local spin = rng:NextNumber(0, math.pi * 2)
+	for ring = 1, 3 do
+		local r = R * (0.25 + 0.3 * ring)
+		local n = 4 + ring * 2
+		task.delay(0.06 + ring * 0.08, function()
+			for i = 1, n do
+				local ang = spin + ring * 0.5 + i / n * math.pi * 2
+				local g = floorAt(center + Vector3.new(math.cos(ang), 0, math.sin(ang)) * r, center.Y, 1.5)
+				if g and g.Material ~= Enum.Material.Water then
+					VFX.Play("DustPuff", CFrame.new(g.Position + g.Normal * 0.9), { Scale = (0.55 + 0.1 * ring) * fx, Count = 0.3, Color = dust })
+				end
+			end
+		end)
+	end
+	task.delay(0.12, function()
+		VFX.Play("DustPuff", CFrame.new(center + nrm * 1.7), { Scale = 0.9 * fx, Count = 0.4, Color = dust })
+	end)
+	task.delay(0.26, function()
+		VFX.Play("DustPuff", CFrame.new(center + nrm * 3.3), { Scale = 1.1 * fx, Count = 0.3, Color = dust })
 	end)
 	task.delay(0.55, function()
 		sound("SlamSettle", center)
@@ -890,6 +837,14 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 		end
 		done = true
 		local speed = if fast then 0.25 else 1
+		if fast then
+			-- (a new smash on top of this one: its lasting cracks go at once)
+			for _, c in ipairs(lasting) do
+				if c then
+					c:Destroy()
+				end
+			end
+		end
 		-- rocks sink first
 		for _, p in ipairs(rocks) do
 			for i = #flights, 1, -1 do
@@ -942,67 +897,11 @@ end
 ---------------------------------------------------------------------------
 function Shatter.Descent(char: Model, _height: number?): any
 	local root = char:FindFirstChild("HumanoidRootPart")
-	local torso = char:FindFirstChild("Torso") or root
-	if not (root and root:IsA("BasePart") and torso and torso:IsA("BasePart")) then
+	if not (root and root:IsA("BasePart")) then
 		return { Stop = function() end }
 	end
-	local made: { Instance } = {}
-	local a = Instance.new("Attachment")
-	a.Name = "SmashDescent"
-	a.Parent = root
-	table.insert(made, a)
-	-- speed lines streaming up past the body
-	local lines = Instance.new("ParticleEmitter")
-	lines.Texture = "rbxassetid://7216979807"
-	lines.Orientation = Enum.ParticleOrientation.VelocityParallel
-	lines.EmissionDirection = Enum.NormalId.Top
-	lines.Rate = 55
-	lines.Lifetime = NumberRange.new(0.08, 0.14)
-	lines.Speed = NumberRange.new(55, 85)
-	lines.SpreadAngle = Vector2.new(6, 6)
-	lines.Size = nseq({ { 0, 0 }, { 0.3, 2.6 }, { 1, 0 } })
-	lines.Transparency = nseq({ { 0, 0.55 }, { 1, 1 } })
-	lines.LightEmission = 0.3
-	lines.LockedToPart = false
-	lines.Parent = a
-	-- the air pressing up under the feet (grows as the ground comes up)
-	local feet = Instance.new("Attachment")
-	feet.Name = "SmashDescentFeet"
-	feet.Position = Vector3.new(0, -3.2, 0)
-	feet.Parent = root
-	table.insert(made, feet)
-	local cushion = Instance.new("ParticleEmitter")
-	cushion.Texture = "rbxassetid://10337713824"
-	cushion.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
-	cushion.EmissionDirection = Enum.NormalId.Top
-	cushion.Rate = 16
-	cushion.Lifetime = NumberRange.new(0.12, 0.18)
-	cushion.Speed = NumberRange.new(0.5, 1)
-	cushion.Size = nseq({ { 0, 1 }, { 1, 3.4 } })
-	cushion.Transparency = nseq({ { 0, 0.72 }, { 1, 1 } })
-	cushion.LockedToPart = true
-	cushion.RotSpeed = NumberRange.new(-200, 200)
-	cushion.Rotation = NumberRange.new(-180, 180)
-	cushion.Parent = feet
-	-- a faint trail down the body
-	local t0 = Instance.new("Attachment")
-	t0.Position = Vector3.new(0, 0.9, 0)
-	t0.Parent = torso
-	local t1 = Instance.new("Attachment")
-	t1.Position = Vector3.new(0, -0.9, 0)
-	t1.Parent = torso
-	table.insert(made, t0)
-	table.insert(made, t1)
-	local trail = Instance.new("Trail")
-	trail.Attachment0 = t0
-	trail.Attachment1 = t1
-	trail.Lifetime = 0.14
-	trail.FaceCamera = true
-	trail.LightEmission = 0.25
-	trail.Transparency = nseq({ { 0, 0.75 }, { 1, 1 } })
-	trail.Color = ColorSequence.new(Color3.fromRGB(235, 235, 240))
-	trail.Parent = torso
-	table.insert(made, trail)
+	-- the pack's speed lines (VFX SpeedLines) streaming up past the falling body
+	local lines = VFX.Attach("SpeedLines", root, CFrame.new(0, -0.5, 0))
 	sound("SlamDescent", root.Position)
 	local stopped = false
 	local function stop()
@@ -1010,14 +909,7 @@ function Shatter.Descent(char: Model, _height: number?): any
 			return
 		end
 		stopped = true
-		lines.Enabled = false
-		cushion.Enabled = false
-		trail.Enabled = false
-		task.delay(0.3, function()
-			for _, inst in ipairs(made) do
-				inst:Destroy()
-			end
-		end)
+		lines.Stop()
 	end
 	task.delay(2, stop) -- never outlives a fall
 	return { Stop = stop }

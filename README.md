@@ -33,10 +33,13 @@
   - `lune run tests/blood_test.luau` - the blood's physics: exact flight, splatters on every surface and never
     over an edge, water / glass / thin walls, outward spray, stain shapes, drying, pooling, the cap
   - `lune run tests/gore_test.luau` - the NPC gore: thresholds, order, NPC-only, heal restore, every piece's
-    seat on scaled / stretched / turned rigs, gibs, jaw, head burst, cleanup
+    seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
+  - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout
   - `lune run tests/shatter_test.luau` - the Ground Smash visuals on flat ground, slopes, bumps, platforms,
-    steps, walls, ledges, water; pools, overlap, the descent
+    steps, walls, ledges, water; the place's effects only, smoke rolling outward; pools, overlap, the descent
   - `python3 tests/gore_kit_check.py <place.rbxl>` - CombatGore's measured kit offsets against the place
+  - `tests/sim/vfx_templates.luau` - the place's effects the tests burst, exported by
+    `python3 tools/export_vfx.py <place.rbxl> tests/sim/vfx_templates.luau <names...>`
   (`SEED=n lune run ...` draws another random sample for the randomized suites)
 
 ## What changed in v47 (free-form combat, blood, gore, Ground Smash)
@@ -64,25 +67,41 @@
 - Layered, recorded combat sounds; a subtle directional camera kick per blow.
 
 ### Blood (`CombatBlood`)
-- Droplets fly exact ballistic paths with air drag, land on whatever they meet (floor, slope, wall,
-  ceiling) and leave a splatter fitted flat to that surface, shaped by the impact angle; they dry darker,
-  fade and return to a pool. Water swallows them; glass and decorations don't stop them.
-- The spray leaves the wound outward, carried the way the blow drove it, tiered by the blow.
+- Every clean hit bursts the place's own blood effects (`VFX.Blood`, `VFX.BloodHeavy`, from the Yona blood
+  pack), tiered by the blow and aimed out of the wound the way the struck part is thrown (back with a
+  straight, sideways with a hook, up with an uppercut). No particle is made in code.
+- Each moving particle's path (its emitter's speed, spread, gravity and drag) is traced through the world
+  first and its life cut short, so it fades before it could reach a floor, wall or ceiling: nothing lands
+  and nothing is left on the floor.
+- The gore's bleeding uses the same effects; its droplets are gone where they land. (Floor splatters and
+  pools still exist behind `Config.Blood.Stains`, off by default.)
 
 ### NPC gore (`CombatGore`) - NPCs only, never players
 - As an R6 NPC's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
-  (50%), the jaw snaps (25%), and the killing blow bursts the head in a thick red mist.
+  (50%), and the killing blow bursts the head in a thick red mist.
 - Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the
-  shoulders keep the kit's stumps, pumping blood. The smashed-jaw head takes the NPC's own skin colour,
-  with teeth thrown and flesh hanging. The burst leaves the neck stump and skull base, with droplets,
-  chunks and a fountain. The kit's torso hole is never used.
-- Works on any R6 NPC: every piece is fitted to that body's own part sizes and pose. Practice dummies
-  healed back to full are whole again.
+  shoulders keep the kit's stumps, pumping blood. The burst leaves the neck stump and skull base, with
+  droplets, chunks and a fountain. The kit's torso hole and the smashed-jaw model are not used.
+- Works on any R6 NPC: every piece is fitted to that body's own part sizes and pose.
+
+### HUD
+- The Ground Smash's slot and cooldown badge are gone from the hotbar: the smash is part of the basic
+  moveset (its cooldown still applies, unseen).
+
+### Practice dummies
+- The still and guarding dummies never heal: their damage (and its gore) stays until they are knocked
+  out, and a fresh one respawns on its spot a few seconds after the knockout.
 
 ### Ground Smash
 - Branching fissures that follow the ground and end on the gameplay radius (stopping at steps, walls,
   ledges and water), heaved slabs in the floor's own material, rocks on real arcs that land and rest,
-  a shockwave that ends on the radius, dust, and a smooth fade back into pooled pieces.
+  and a smooth fade back into pooled pieces.
+- Every particle is one of the place's own effects, programmed here (none made in code): the heavy hit
+  flash and impact ring, the Big pack's black crack flash with its shards thrown out to the rim, the Yona
+  ground cracks lasting over the whole broken ground, the Anime shock ring, and the smoke - dust rolling
+  out along the ground, a cloud thrown out after it and puffs billowing outward in rings to the rim, a
+  little rising over the centre, all tinted like the ground. The drop streams the pack's speed lines.
+- No HUD slot: the smash is part of the basic moveset and its cooldown runs unseen.
 
 ## What changed in v46 (combat refinement + HUD spacing)
 

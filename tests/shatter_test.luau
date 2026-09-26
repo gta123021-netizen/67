@@ -10,8 +10,10 @@
 	  4  thrown rocks come to rest ON a surface (never under the ground, never inside a wall,
 	     never floating), bounce off walls, sink into water, and are gone off a ledge; none is
 	     thrown at a fighter standing in the circle
-	  5  the shockwave's ring ends exactly on the radius; the dust, column, grit and the first
-	     cracks are emitted; the sounds of every phase play and exist in the config
+	  5  every particle is one of the place's own effects (none made in code): the impact, the
+	     crack flash and its shards (stopping at the rim), the lasting cracks covering the broken
+	     ground, the shock ring, and the smoke rolling OUTWARD to the rim with a little rising over
+	     the centre; the sounds of every phase play and exist in the config
 	  6  a smash on water only sprays; one out of view builds nothing
 	  7  after the hold everything fades back into its pools; a new smash on an old one clears the
 	     old one first; smash after smash never builds past the pools' caps
@@ -21,6 +23,8 @@
 ]]
 local Env = require("./sim/env")
 local Client = require("./sim/client")(Env)
+local TEMPLATES = require("./sim/vfx_templates")
+Client.vfxFolder(TEMPLATES)
 local roblox = require("@lune/roblox")
 local V3, CF = Env.Vector3, Env.CFrame
 local Enum = roblox.Enum
@@ -256,23 +260,98 @@ smash("flat", nil, nil, function(info, center)
 		end
 	end
 	check("flat: ... every one exists in Config.Sounds", ok)
-	local kinds = {}
-	for _, e in ipairs(Client.emits) do
-		kinds[e.Emitter.Name] = (kinds[e.Emitter.Name] or 0) + e.Count
-	end
-	check("flat: impact dust ring, first cracks, grit, shockwave, rolling dust and the column", (kinds.Compress or 0) >= 12 and (kinds.FirstCrack or 0) >= 1 and (kinds.Grit or 0) >= 20 and (kinds.Shock or 0) == 1 and (kinds.DustRing or 0) >= 12 and (kinds.Column or 0) >= 3)
-	local shock = nil
-	for _, e in ipairs(Client.emits) do
-		if e.Emitter.Name == "Shock" then
-			shock = e.Emitter
+	local fs = require("@lune/fs")
+	check("flat: CombatShatter makes no particle emitter of its own", not string.find(fs.readFile("src/ReplicatedStorage__Combat__CombatShatter.lua"), 'Instance.new("ParticleEmitter")', 1, true))
+	local known = {}
+	for name, list in pairs(TEMPLATES) do
+		for _, t in ipairs(list) do
+			known[name .. "/" .. t.Name] = t.Texture
 		end
 	end
-	local kps = shock and shock.Size.Keypoints
-	local peak = 0
-	for _, k in ipairs(kps or {}) do
-		peak = math.max(peak, k.Value)
+	local effects, foreign = {}, 0
+	for _, e in ipairs(Client.emits) do
+		effects[e.Effect] = (effects[e.Effect] or 0) + e.Count
+		if known[tostring(e.Effect) .. "/" .. e.Emitter.Name] ~= e.Emitter.Texture then
+			foreign += 1
+		end
 	end
-	check("flat: the shockwave ring's edge ends on the radius (diameter 2R at full size)", shock ~= nil and math.abs(kps[2].Value - 2 * R) < 1e-6 and peak <= 2 * R * 1.07, peak)
+	check("flat: every particle is one of the place's own effects", #Client.emits > 0 and foreign == 0, foreign)
+	local missing = {}
+	for _, n in ipairs({ "HitFlashHeavy", "Impact", "FloorCrack", "BigCrack", "GroundCrack1", "GroundCrack2", "ShockRing", "GroundDust", "DustBurst", "DustPuff" }) do
+		if not effects[n] then
+			table.insert(missing, n)
+		end
+	end
+	check("flat: the impact, crack flash and shards, lasting cracks, shock ring, rolling dust and smoke all play", #missing == 0, table.concat(missing, ","))
+	local lava, sizes, shardReach = false, {}, 0
+	for _, e in ipairs(Client.emits) do
+		if e.Effect == "BigCrack" and (e.Emitter.Name == "Impact1" or e.Emitter.Name == "Fire1") then
+			lava = true
+		end
+		if e.Effect == "GroundCrack1" or e.Effect == "GroundCrack2" then
+			sizes[e.Effect] = e.Emitter.Size.Keypoints[1].Value
+		end
+		if e.Effect == "BigCrack" and e.Emitter.Name == "Ash1" then
+			shardReach = e.Speed.Max * e.Lifetime.Max
+		end
+	end
+	check("flat: the Big pack's crack without its lava glow or fire", not lava)
+	check(("flat: the lasting cracks span the broken ground (%.1f and %.1f studs across, radius %s)"):format(sizes.GroundCrack1 or 0, sizes.GroundCrack2 or 0, R), sizes.GroundCrack1 and math.abs(sizes.GroundCrack1 - 2 * R) < 1e-3 and sizes.GroundCrack2 > R)
+	check(("flat: the crack's shards fly out to the rim, no further (%.2f of %.2f)"):format(shardReach, R * 1.25), shardReach > R * 0.8 and shardReach <= R * 1.25 + 1e-3)
+	-- the smoke: rolled out along the ground to the rim (its own speed, drag and life), puffs
+	-- billowing on rings further out each beat, and a little rising over the centre
+	local function reach(e)
+		local v, d, t = e.Speed.Max, 0, 0
+		while t < e.Lifetime.Max do
+			local h = math.min(1 / 240, e.Lifetime.Max - t)
+			d += v * h
+			v *= 0.5 ^ (e.Drag * h)
+			t += h
+		end
+		return d
+	end
+	local rolled = {}
+	for _, e in ipairs(Client.emits) do
+		if (e.Effect == "DustBurst" and e.Emitter.Name == "Smoke2") or (e.Effect == "GroundDust" and e.Emitter.Name == "Dust") then
+			rolled[e.Effect] = reach(e)
+		end
+	end
+	check(("flat: the dust and smoke roll out to the rim (%.1f, %.1f studs; radius %s)"):format(rolled.GroundDust or 0, rolled.DustBurst or 0, R), rolled.GroundDust and rolled.DustBurst and rolled.GroundDust > R * 0.8 and rolled.GroundDust < R * 1.35 and rolled.DustBurst > R * 0.8 and rolled.DustBurst < R * 1.35)
+	local outward, up, rings = 0, 0, {}
+	for _, e in ipairs(Client.emits) do
+		if e.Effect == "DustPuff" then
+			local p = e.CFrame.Position
+			local r = V3.new(p.X, 0, p.Z).Magnitude
+			if r < 0.5 then
+				if p.Y > 1.4 then
+					up += 1
+				end
+			else
+				outward += 1
+				table.insert(rings, { R = r, T = e.T, Y = p.Y })
+			end
+		end
+	end
+	local order, low = true, true
+	for _, a in ipairs(rings) do
+		for _, b in ipairs(rings) do
+			if a.R > b.R + 0.5 and a.T < b.T - 1e-6 then
+				order = false
+			end
+		end
+		if a.Y > 1.3 then
+			low = false
+		end
+	end
+	check(("flat: the smoke billows OUTWARD in rings (%d puffs), each ring later and further out, hugging the ground"):format(outward), outward >= 18 and order and low)
+	check(("flat: ... and a little rises over the centre (%d puffs)"):format(up), up >= 2 and up < outward)
+	local tinted = true
+	for _, e in ipairs(Client.emits) do
+		if (e.Effect == "DustPuff" or e.Effect == "DustBurst" or e.Effect == "GroundDust") and typeof(e.Emitter.Color) ~= "ColorSequence" then
+			tinted = false
+		end
+	end
+	check("flat: the dust and smoke are tinted like the ground", tinted)
 	-- the break runs outward at its speed: a piece farther out appears later
 	world(nil)
 	Shatter.Play(V3.new(0, 0.05, 0), nil)
@@ -437,9 +516,9 @@ do
 	Env.run(0.5)
 	local kinds = {}
 	for _, e in ipairs(Client.emits) do
-		kinds[e.Emitter.Name] = true
+		kinds[e.Effect] = true
 	end
-	check("on water: no fissures, slabs or rocks - only the spray and the shock", #pieces("Fissure", true) == 0 and #pieces("Slab", true) == 0 and #pieces("Rock", true) == 0 and kinds.Shock and kinds.DustRing)
+	check("on water: no fissures, slabs, rocks, cracks or dust - only the hit and the shock across it", #pieces("Fissure", true) == 0 and #pieces("Slab", true) == 0 and #pieces("Rock", true) == 0 and kinds.ShockRing and kinds.Impact and not kinds.GroundCrack1 and not kinds.DustBurst and not kinds.DustPuff)
 	world(nil)
 	ws.CurrentCamera.CFrame = CF.new(0, 12, 600)
 	Shatter.Play(V3.new(0, 0.05, 0), nil)
@@ -472,6 +551,13 @@ do
 		end
 	end
 	check("a smash on an old one: the old fissures are cleared (" .. stale .. " left where they were)", stale == 0, stale)
+	local cracks = 0
+	for _, c in ipairs(ws.Terrain:GetChildren()) do
+		if (c.Name == "GroundCrack1" or c.Name == "GroundCrack2") and not c._p.Destroyed then
+			cracks += 1
+		end
+	end
+	check("... and its lasting cracks with them (only the new smash's 2 remain)", cracks == 2, cracks)
 	local maxR = 0
 	for _, p in ipairs(pieces("Fissure", true)) do
 		local a, b = ends(p)
@@ -512,17 +598,28 @@ do
 	torso.CFrame = CF.new(0, 20, 0)
 	torso.Parent = m
 	m.Parent = ws
+	local function lines()
+		for _, c in ipairs(ws.Terrain:GetChildren()) do
+			if c.Name == "SpeedLines" and not c._p.Destroyed then
+				return c
+			end
+		end
+		return nil
+	end
 	local d = Shatter.Descent(m, 20)
-	local att = root:FindFirstChild("SmashDescent")
-	check("descent: speed lines, the air cushion and a trail on the falling body", att and att:FindFirstChildOfClass("ParticleEmitter") and root:FindFirstChild("SmashDescentFeet") and torso:FindFirstChildOfClass("Trail"))
+	local sl = lines()
+	check("descent: the pack's speed lines stream round the falling body (a volume that follows it)", sl ~= nil and sl.ClassName == "Part" and sl.Transparency == 1 and not sl.CanCollide and sl:FindFirstChildOfClass("ParticleEmitter").Enabled == true)
+	root.CFrame = CF.new(3, 12, -2)
+	Env.step(1 / 60)
+	check("descent: ... following it as it falls", sl and (sl.CFrame.Position - (root.CFrame * V3.new(0, -0.5, 0))).Magnitude < 1e-6)
 	check("descent: its sound plays", sounds[#sounds] and sounds[#sounds].Name == "SlamDescent")
 	d.Stop()
-	check("descent: on touchdown everything stops at once", att:FindFirstChildOfClass("ParticleEmitter").Enabled == false and torso:FindFirstChildOfClass("Trail").Enabled == false)
+	check("descent: on touchdown the lines stop at once", sl:FindFirstChildOfClass("ParticleEmitter").Enabled == false)
 	Env.run(0.4)
-	check("descent: ... and is cleaned up", root:FindFirstChild("SmashDescent") == nil and root:FindFirstChild("SmashDescentFeet") == nil and torso:FindFirstChildOfClass("Trail") == nil)
+	check("descent: ... and are cleaned up", lines() == nil)
 	local d2 = Shatter.Descent(m, 20)
 	Env.run(2.5)
-	check("descent: never outlives a fall (stops by itself)", root:FindFirstChild("SmashDescent") == nil)
+	check("descent: never outlives a fall (stops by itself)", lines() == nil)
 	d2.Stop() -- (twice is harmless)
 	local bare = Client.new("Model")
 	check("descent on a body without parts: a harmless no-op", type(Shatter.Descent(bare).Stop) == "function")

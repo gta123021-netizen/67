@@ -165,7 +165,7 @@ return function(Env)
 	function proto:Emit(n)
 		local parent = self._p.Parent
 		local cf = if parent then parent.WorldCFrame else CF.identity
-		table.insert(Client.emits, { Emitter = self, Count = n, CFrame = cf, Lifetime = self.Lifetime, Speed = self.Speed, Accel = self.Acceleration, Drag = self.Drag, Spread = self.SpreadAngle, T = Env.now() })
+		table.insert(Client.emits, { Emitter = self, Effect = parent and parent.Name, Count = n, CFrame = cf, Lifetime = self.Lifetime, Speed = self.Speed, Accel = self.Acceleration, Drag = self.Drag, Spread = self.SpreadAngle, T = Env.now() })
 	end
 	function proto:Play() end
 	function proto:Stop() end
@@ -297,6 +297,41 @@ return function(Env)
 	end }
 	Env.extraGlobals.Vector2 = roblox.Vector2
 	Env.extraGlobals.typeof = typeof
+
+	-- the place's own effects (tests/sim/vfx_templates.luau, exported from the place) as
+	-- ReplicatedStorage.Combat.VFX: one Attachment per effect holding its ParticleEmitters
+	function Client.vfxFolder(templates)
+		local folder = Client.new("Folder")
+		folder.Name = "VFX"
+		for name, emitters in pairs(templates) do
+			local a = Client.new(emitters.Class or "Attachment")
+			a.Name = name
+			a.Parent = folder
+			for _, t in ipairs(emitters) do
+				local e = Client.new("ParticleEmitter")
+				e.Name = t.Name
+				e.Texture = t.Texture
+				e.Enabled = false
+				e.Lifetime = roblox.NumberRange.new(t.Lifetime[1], t.Lifetime[2])
+				e.Speed = roblox.NumberRange.new(t.Speed[1], t.Speed[2])
+				local kps = {}
+				for _, k in ipairs(t.Size) do
+					table.insert(kps, roblox.NumberSequenceKeypoint.new(k[1], k[2], k[3]))
+				end
+				e.Size = roblox.NumberSequence.new(kps)
+				e.Drag = t.Drag
+				e.Acceleration = V3.new(t.Acceleration[1], t.Acceleration[2], t.Acceleration[3])
+				e.SpreadAngle = roblox.Vector2.new(t.Spread[1], t.Spread[2])
+				e.EmissionDirection = t.EmissionDirection
+				e.Orientation = t.Orientation
+				e:SetAttribute("EmitCount", t.EmitCount)
+				e:SetAttribute("EmitDelay", t.EmitDelay)
+				e.Parent = a
+			end
+		end
+		Env.combatFolder._children.VFX = folder
+		return folder
+	end
 
 	-- the workspace as the modules see it: anything parented to it is found by name
 	local function parentToWorkspace(inst)

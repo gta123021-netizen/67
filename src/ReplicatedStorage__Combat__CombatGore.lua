@@ -4,8 +4,7 @@
 	Config.Gore.Stages its body comes apart, in this order and never out of it -
 	  1  the right arm is torn off at the shoulder (health <= 75%)
 	  2  the left arm (<= 50%)
-	  3  the jaw snaps and hangs (<= 25%)
-	  4  the killing blow bursts the head in a huge bloody mist (0)
+	  3  the killing blow bursts the head in a huge bloody mist (0)
 	A blow that takes several stages at once plays each of them in turn (a beat apart), in order.
 
 	Client-side and cosmetic: every client builds its own, from the same health every client sees
@@ -16,23 +15,23 @@
 	What each stage does
 	  ARM   the real arm is hidden (locally) and a copy of it - its colour, its sleeve (the NPC's
 	        Shirt) - is torn away with the blow: thrown along the way the blow drove, tumbling, a torn
-	        wound on its top end (the gore kit's arm end) trailing blood and shedding drops that splat
-	        where they land; it hits the ground, rolls and comes to rest (real physics on this client,
-	        colliding with the world, never with a fighter). On the torso the shoulder is a raw stump
-	        (the kit's shoulder cap) that pumps blood in pulses, slowing, and drips
-	  JAW   the head snaps back, the head is swapped for the smashed-jaw head (tinted to the NPC's own
-	        skin), teeth fly out, raw flesh hangs and swings from the broken jaw, blood pours and drips
-	  HEAD  the head bursts: a thick red mist, a spray of droplets all round (they land and splat),
-	        chunks of flesh and bits of skull thrown out on real arcs; what is left is the neck's torn
-	        stump with the base of the skull, and a fountain of blood that dies down in pulses
+	        wound on its top end (the gore kit's arm end) trailing blood and shedding drops; it hits
+	        the ground, rolls and comes to rest (real physics on this client, colliding with the world,
+	        never with a fighter). On the torso the shoulder is a raw stump (the kit's shoulder cap)
+	        that pumps blood in pulses, slowing, and drips
+	  HEAD  the head bursts: a thick red mist, a spray of droplets all round, chunks of flesh and
+	        bits of skull thrown out on real arcs; what is left is the neck's torn stump with the base
+	        of the skull, and a fountain of blood that dies down in pulses
+	  (all the blood is the place's own blood effects - ReplicatedStorage.Combat.VFX Blood and
+	  BloodHeavy - through CombatBlood; the droplets are gone where they land)
 	  (the hole in the torso from the gore kit is never used)
 	The pieces thrown off fade out and are gone after Config.Gore.GibLife; an NPC healed back to
-	full (the practice dummies) is whole again.
+	full is whole again.
 
 	  Gore.Start()                      watch every NPC in the workspace (CombatClient calls it)
 	  Gore.Hit(npc, health, drive)      a blow just landed and left the NPC `health` (drive: the way
 	                                    it travels): its stage plays on the blow, not a round trip later
-	  Gore.StageOf(npc)                 how far that NPC has come apart (0..4)
+	  Gore.StageOf(npc)                 how far that NPC has come apart (0..3)
 ]]
 
 local Players = game:GetService("Players")
@@ -64,8 +63,6 @@ local KIT = {
 	RightEnd = { Name = "right.arm", Pos = Vector3.new(0.029, 0.215, 0.041), Rot = rot({ -1, 0, 0, 0, 1, 0, 0, 0, -1 }), Size = Vector3.new(1.021, 1.626, 1.06) },
 	LeftEnd = { Name = "left.arm", Pos = Vector3.new(-0.004, 0.214, 0.007), Rot = rot({ 1, 0, 0, 0, 1, 0, 0, 0, 1 }), Size = Vector3.new(1.021, 1.626, 1.06) },
 	Chunk = { Name = "debry", Size = Vector3.new(1.041, 0.96, 1.06) },
-	-- (in the head's frame: the smashed-jaw head)
-	Jaw = { Pos = Vector3.new(0.008, -0.016, -0.095), Rot = rot({ 0, 0, -1, 0, 1, 0, 1, 0, 0 }), Size = Vector3.new(1.2105, 1.3682, 1.2155) },
 }
 Gore.Kit = KIT
 
@@ -73,19 +70,15 @@ Gore.Kit = KIT
 local STD = { Torso = Vector3.new(2, 2, 1), Arm = Vector3.new(1, 2, 1), Head = Vector3.new(2, 1, 1) }
 
 local FLESH = Color3.fromRGB(120, 12, 14)
-local RAW = Color3.fromRGB(178, 70, 72)
 local BONE = Color3.fromRGB(232, 226, 210)
 local BLOOD = Config.Blood.Color
 
 ---------------------------------------------------------------------------
--- templates (ReplicatedStorage.Combat.Gore: the gore kit and the smashed-jaw head)
+-- templates (ReplicatedStorage.Combat.Gore: the gore kit)
 ---------------------------------------------------------------------------
-local function templates(): (Instance?, Instance?)
+local function templates(): Instance?
 	local g = CombatFolder:FindFirstChild("Gore")
-	if not g then
-		return nil, nil
-	end
-	return g:FindFirstChild("GoreKit"), g:FindFirstChild("JawHead")
+	return if g then g:FindFirstChild("GoreKit") else nil
 end
 
 -- a part the size (and colour) the kit piece should have on this body: the kit's own piece if the
@@ -202,57 +195,29 @@ local function expire(inst: Instance, life: number)
 	end)
 end
 
--- pulsing arterial bleeding from a stump: spurts in time with a slowing heartbeat, droplets that
--- land and splat, a steady drip; dies down over `dur`
-local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength: number)
-	local spurt = Instance.new("ParticleEmitter")
-	spurt.Texture = "rbxassetid://4509687978"
-	spurt.Orientation = Enum.ParticleOrientation.VelocityParallel
-	spurt.Color = ColorSequence.new(BLOOD, Config.Blood.Dry)
-	spurt.Size = nseq({ { 0, 0.16, 0.04 }, { 1, 0.3, 0.06 } })
-	spurt.Squash = nseq({ { 0, 0 }, { 1, -2 } })
-	spurt.Transparency = nseq({ { 0, 0 }, { 0.75, 0.2 }, { 1, 1 } })
-	spurt.Lifetime = NumberRange.new(0.18, 0.3)
-	spurt.Speed = NumberRange.new(7 * strength, 13 * strength)
-	spurt.SpreadAngle = Vector2.new(14, 14)
-	spurt.Acceleration = Vector3.new(0, -(Config.Blood.Gravity or workspace.Gravity), 0)
-	spurt.Drag = Config.Blood.Drag / math.log(2)
-	spurt.EmissionDirection = Enum.NormalId.Top
-	spurt.Rate = 0
-	spurt.Enabled = false
-	spurt.Parent = att
-	local drip = Instance.new("ParticleEmitter")
-	drip.Texture = "rbxassetid://271522063"
-	drip.Orientation = Enum.ParticleOrientation.VelocityParallel
-	drip.Color = ColorSequence.new(BLOOD)
-	drip.Size = nseq({ { 0, 0.07 }, { 1, 0.05 } })
-	drip.Lifetime = NumberRange.new(0.25, 0.4)
-	drip.Speed = NumberRange.new(0.5, 1.5)
-	drip.Acceleration = Vector3.new(0, -(Config.Blood.Gravity or workspace.Gravity) * 0.5, 0)
-	drip.EmissionDirection = Enum.NormalId.Bottom
-	drip.Rate = 10 * strength
-	drip.Parent = att
+-- pulsing arterial bleeding from a stump: a spurt of the place's own blood effect (VFX Blood) in
+-- time with a slowing heartbeat, droplets thrown with it, a drip between beats; dies down over `dur`
+local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength: number, body: Instance?)
 	local t0 = os.clock()
 	task.spawn(function()
-		local beat = 0
 		while att.Parent and os.clock() - t0 < dur do
 			local k = 1 - (os.clock() - t0) / dur
-			beat += 1
-			spurt:Emit(math.max(1, math.floor(10 * strength * k)))
 			local p = att.WorldPosition
 			local d = dir()
+			Blood.Burst(p, d, "Blood", 0.42 * strength * (0.55 + 0.45 * k), 0.25 + 0.45 * k, body)
 			for _ = 1, math.max(1, math.floor(3 * strength * k + 0.5)) do
 				local v = (d + Vector3.new((math.random() - 0.5) * 0.4, math.random() * 0.3, (math.random() - 0.5) * 0.4)).Unit * ((6 + math.random() * 6) * strength * (0.4 + 0.6 * k))
 				Blood.Launch(p, v, 0.1 + math.random() * 0.06)
 			end
-			-- the heart slows as it empties
-			task.wait(0.55 + (1 - k) * 0.45)
+			-- the heart slows as it empties; the wound drips between beats
+			local gap = 0.55 + (1 - k) * 0.45
+			task.delay(gap * 0.5, function()
+				if att.Parent then
+					Blood.Launch(att.WorldPosition, Vector3.new(0, -1, 0), 0.07 + math.random() * 0.03)
+				end
+			end)
+			task.wait(gap)
 		end
-		drip.Rate = 0
-		task.delay(1, function()
-			spurt:Destroy()
-			drip:Destroy()
-		end)
 	end)
 end
 
@@ -396,7 +361,7 @@ local function tearArm(b: Body, side: string)
 	end)
 	bleed(tail, function()
 		return copy.CFrame.UpVector
-	end, 1.2, 0.55)
+	end, 1.2, 0.55, gib)
 	expire(gib, GC.GibLife)
 	-- the stump on the shoulder, pumping blood
 	local stump = fit(if side == "Right" then KIT.RightStump else KIT.LeftStump, torso, STD.Torso)
@@ -408,106 +373,11 @@ local function tearArm(b: Body, side: string)
 	a.Parent = stump
 	bleed(a, function()
 		return (out + Vector3.new(0, 0.5, 0)).Unit
-	end, GC.BleedTime, 1)
+	end, GC.BleedTime, 1, b.Model)
 	-- the burst of the tear itself
 	Blood.Spray(arm.Position + Vector3.new(0, arm.Size.Y * 0.4, 0), drive, "Finisher", b.Model, if side == "Right" then 1 else -1)
 	sound("GoreTear", arm.Position)
 	give(b.Model, { Roll = if side == "Right" then -14 else 14, Yaw = if side == "Right" then 10 else -10, NeckYaw = if side == "Right" then -18 else 18 }, 12)
-end
-
-local function snapJaw(b: Body)
-	local head = b.Head
-	if not head.Parent then
-		return
-	end
-	local _, jawTpl = templates()
-	local s = head.Size.Y / STD.Head.Y
-	local jaw: BasePart
-	if jawTpl and jawTpl:IsA("BasePart") then
-		-- the smashed head in the NPC's own skin: its surface map (Overlay) draws the wound, the
-		-- torn flesh and the teeth over the part's own colour, which shows as the skin
-		jaw = jawTpl:Clone() :: BasePart
-		jaw.Color = head.Color
-	else
-		jaw = Instance.new("Part")
-		jaw.Color = head.Color
-	end
-	jaw.Name = "GoreJaw"
-	jaw.Size = KIT.Jaw.Size * s
-	jaw.Anchored = false
-	jaw.CanCollide = false
-	jaw.CanQuery = false
-	jaw.CanTouch = false
-	jaw.Massless = true
-	weldTo(jaw, head, head.CFrame * CFrame.new(KIT.Jaw.Pos * s) * KIT.Jaw.Rot)
-	jaw.Parent = b.Model
-	table.insert(b.Added, jaw)
-	hide(b, head)
-	for _, d in ipairs(head:GetChildren()) do
-		if d:IsA("Decal") then
-			hide(b, d)
-		end
-	end
-	-- the broken jaw: raw flesh hanging off it (swinging on its own), the blood of the wound
-	local front = -head.CFrame.LookVector
-	local base = head.CFrame * CFrame.new(0, -0.42 * s, -0.42 * s)
-	local wound = kitPiece("neck", Vector3.new(0.3, 0.85, 0.5) * s, FLESH)
-	weldTo(wound, head, base * CFrame.Angles(0, 0, math.pi / 2))
-	wound.Parent = b.Model
-	table.insert(b.Added, wound)
-	for i = 1, 3 do
-		local strand = Instance.new("Part")
-		strand.Name = "GoreFlesh"
-		strand.Material = Enum.Material.SmoothPlastic
-		strand.Color = if i == 2 then RAW else FLESH
-		strand.Size = Vector3.new(0.14, 0.34 + i * 0.07, 0.12) * s
-		strand.CanCollide = false
-		strand.CanQuery = false
-		strand.CanTouch = false
-		strand.Massless = true
-		strand.CFrame = base * CFrame.new((i - 2) * 0.22 * s, -strand.Size.Y * 0.5, 0)
-		local a0 = Instance.new("Attachment")
-		a0.Position = Vector3.new((i - 2) * 0.22 * s, 0, 0)
-		a0.Parent = wound
-		local a1 = Instance.new("Attachment")
-		a1.Position = Vector3.new(0, strand.Size.Y * 0.5, 0)
-		a1.Parent = strand
-		local ball = Instance.new("BallSocketConstraint")
-		ball.Attachment0 = a0
-		ball.Attachment1 = a1
-		ball.LimitsEnabled = true
-		ball.UpperAngle = 50
-		ball.Parent = strand
-		strand.Parent = b.Model
-		table.insert(b.Added, strand)
-	end
-	-- teeth thrown out of the mouth
-	for _ = 1, 5 do
-		local t = Instance.new("Part")
-		t.Name = "GoreTooth"
-		t.Color = BONE
-		t.Material = Enum.Material.SmoothPlastic
-		t.Size = Vector3.new(0.12, 0.16, 0.1) * s
-		t.CollisionGroup = "Debris"
-		t.CanQuery = false
-		t.CanTouch = false
-		t.CFrame = base
-		t.Parent = holder()
-		t.AssemblyLinearVelocity = (front * -1 + b.Drive + Vector3.new((math.random() - 0.5) * 1.4, 0.6 + math.random(), (math.random() - 0.5) * 1.4)).Unit * (10 + math.random() * 8)
-		t.AssemblyAngularVelocity = Vector3.new(math.random(), math.random(), math.random()) * 20
-		expire(t, GC.GibLife)
-	end
-	local a = Instance.new("Attachment")
-	a.Name = "GoreBleed"
-	a.CFrame = CFrame.Angles(math.pi, 0, 0) -- pouring down
-	a.Parent = wound
-	bleed(a, function()
-		return (Vector3.new(0, -0.3, 0) + b.Drive * 0.4).Unit
-	end, GC.BleedTime * 0.8, 0.7)
-	Blood.Spray(base.Position, b.Drive, "Heavy", b.Model, 1)
-	sound("GoreSnap", head.Position)
-	-- the head snaps up and back
-	give(b.Model, { Pitch = 12, NeckPitch = 42, NeckYaw = (math.random() - 0.5) * 30 }, 11)
 end
 
 local function burstHead(b: Body)
@@ -515,7 +385,7 @@ local function burstHead(b: Body)
 	local torso = b.Torso
 	local s = head.Size.Y / STD.Head.Y
 	local at = head.Position
-	-- the head, its jaw, its face and everything worn on it: gone
+	-- the head, its face and everything worn on it: gone
 	hide(b, head)
 	for _, d in ipairs(head:GetChildren()) do
 		if d:IsA("Decal") then
@@ -525,13 +395,6 @@ local function burstHead(b: Body)
 	for _, h in ipairs(accessoriesOn(b.Model, head)) do
 		hide(b, h)
 	end
-	for i = #b.Added, 1, -1 do
-		local p = b.Added[i]
-		if p.Name == "GoreJaw" or p.Name == "GoreFlesh" or (p:IsA("BasePart") and p.Name == "neck" and p:FindFirstChildOfClass("Weld") and (p:FindFirstChildOfClass("Weld") :: Weld).Part0 == head) then
-			p:Destroy()
-			table.remove(b.Added, i)
-		end
-	end
 	-- what is left: the neck's torn stump and the base of the skull
 	local neck = fit(KIT.NeckStump, torso, STD.Torso)
 	neck.Parent = b.Model
@@ -539,43 +402,13 @@ local function burstHead(b: Body)
 	local skull = fit(KIT.SkullBase, torso, STD.Torso, BONE)
 	skull.Parent = b.Model
 	table.insert(b.Added, skull)
-	-- THE MIST: a thick red cloud blown out with the blow, a dense core inside it
-	local mistAtt = Instance.new("Attachment")
-	mistAtt.Name = "GoreMist"
-	mistAtt.WorldPosition = at
-	mistAtt.Parent = workspace.Terrain
-	local function cloud(name: string, count: number, props: any)
-		local e = Instance.new("ParticleEmitter")
-		e.Name = name
-		e.Enabled = false
-		e.Rate = 0
-		e.LockedToPart = false
-		e.EmissionDirection = Enum.NormalId.Top
-		e.SpreadAngle = Vector2.new(180, 180)
-		e.LightInfluence = 1
-		for k, v in pairs(props) do
-			(e :: any)[k] = v
-		end
-		e.Parent = mistAtt
-		e:Emit(count)
-	end
-	cloud("Mist", 34, {
-		Texture = "rbxassetid://16669188960", FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
-		Color = ColorSequence.new(Color3.fromRGB(120, 6, 8), Color3.fromRGB(64, 4, 6)),
-		Size = nseq({ { 0, 1.6 * s }, { 0.4, 4.6 * s }, { 1, 6.5 * s } }), Transparency = nseq({ { 0, 0.15 }, { 0.5, 0.45 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(1.1, 2.1), Speed = NumberRange.new(5, 13), Drag = 3.2, Acceleration = Vector3.new(0, -3, 0),
-		Rotation = NumberRange.new(-180, 180), RotSpeed = NumberRange.new(-40, 40),
-	})
-	cloud("Core", 18, {
-		Texture = "rbxassetid://241576804", Color = ColorSequence.new(Color3.fromRGB(140, 8, 10), Color3.fromRGB(80, 4, 6)),
-		Size = nseq({ { 0, 0.9 * s }, { 0.3, 2.4 * s }, { 1, 3.2 * s } }), Transparency = nseq({ { 0, 0 }, { 0.6, 0.3 }, { 1, 1 } }),
-		Lifetime = NumberRange.new(0.35, 0.7), Speed = NumberRange.new(14, 26), Drag = 5,
-		Rotation = NumberRange.new(-180, 180),
-	})
-	task.delay(2.4, function()
-		mistAtt:Destroy()
-	end)
-	-- droplets all round (they land and splat), thrown mostly with the blow and up
+	-- THE MIST: the place's own blood effects (VFX BloodHeavy, Blood) burst big: a thick red cloud
+	-- blown up and out with the blow, a second one driven along it, the splash inside them
+	local up = (Vector3.new(0, 1, 0) + b.Drive * 0.6).Unit
+	Blood.Burst(at, up, "BloodHeavy", 1.9 * s, 1.8, b.Model)
+	Blood.Burst(at, (b.Drive + Vector3.new(0, 0.35, 0)).Unit, "BloodHeavy", 1.5 * s, 1.2, b.Model)
+	Blood.Burst(at, up, "Blood", 1.6 * s, 1.5, b.Model)
+	-- droplets all round, thrown mostly with the blow and up
 	for _ = 1, GC.BurstDrops do
 		local dir = Blood.Cone((Vector3.new(0, 0.9, 0) + b.Drive * 0.7).Unit, 95)
 		Blood.Launch(at + dir * 0.4 * s, dir * (10 + math.random() * 20) + b.Drive * 5, 0.1 + math.random() * 0.1)
@@ -629,7 +462,7 @@ local function burstHead(b: Body)
 	table.insert(b.Added, a)
 	bleed(a, function()
 		return torso.CFrame.UpVector
-	end, GC.BleedTime, 1.3)
+	end, GC.BleedTime, 1.3, b.Model)
 	sound("GoreBurst", at)
 	-- close enough and the camera takes the blast
 	local cam = workspace.CurrentCamera
@@ -648,11 +481,10 @@ local STAGE_FN = {
 	function(b: Body)
 		tearArm(b, "Left")
 	end,
-	snapJaw,
 	burstHead,
 }
 
--- the stage this much health has earned (0..4)
+-- the stage this much health has earned (0..3)
 function Gore.StageFor(health: number, max: number): number
 	if max <= 0 then
 		return 0

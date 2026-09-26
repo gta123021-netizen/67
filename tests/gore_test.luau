@@ -2,8 +2,8 @@
 --[[
 	The NPC gore, run headless against the simulated client (sim/env + sim/client): the REAL
 	CombatGore and CombatBlood modules, frame by frame, on R6 rigs of every shape. What it proves:
-	  1  the stages are earned by health share, in order (right arm 75%, left arm 50%, jaw 25%, head
-	     on the killing blow only) at any MaxHealth
+	  1  the stages are earned by health share, in order (right arm 75%, left arm 50%, the head on
+	     the killing blow only) at any MaxHealth; there is no jaw stage
 	  2  only R6 NPCs: never a player's character, never an R15 rig, never a model missing a limb
 	  3  each stage plays exactly once, in order, a beat apart when one blow earns several; a
 	     prediction and the server's word for the same blow never play it twice; a body made whole
@@ -12,11 +12,11 @@
 	     is thrown out on that side, along the blow and up, spinning, on real physics that never
 	     touches a fighter; its torn end and the shoulder stump are the gore kit's own pieces,
 	     at their measured places, welded on
-	  5  JAW: the smashed head in the NPC's own skin tone replaces the head (face hidden), welded
-	     to it, teeth thrown, flesh hanging on ball sockets
-	  6  HEAD: head, face, hat and jaw gone; neck stump and skull base on the torso; the mist, the
-	     droplets (real flights that land and splat), the chunks, the fountain; the camera kick
-	     only when close
+	  5  no jaw: the head stays whole (face and all) until the killing blow; no jaw piece, tooth or
+	     strand ever appears
+	  6  HEAD: head, face and hat gone; neck stump and skull base on the torso; the mist (the
+	     place's own blood effects, burst big), the droplets, the chunks, the fountain; the camera
+	     kick only when close; all the blood is the place's own effects, never a made emitter
 	  7  the kit fits ANY R6 body: scaled rigs, stretched parts, any pose and heading (every piece
 	     sits where the kit puts it relative to its host); no templates at all still works
 	  8  the hole in the torso is never used; the legs are never touched; nothing is left behind:
@@ -111,20 +111,11 @@ local function makeTemplates()
 		local w = Client.new("Weld") -- (the kit's own joints must never come along)
 		w.Parent = p
 	end
-	local jaw = Client.new("MeshPart")
-	jaw.Name = "JawHead"
-	jaw.Color = Color3.fromRGB(234, 184, 146)
-	jaw.Size = V3.new(1.2105, 1.3682, 1.2155)
-	jaw.Parent = g
-	local sa = Client.new("SurfaceAppearance")
-	sa.Parent = jaw
-	local eyes = Client.new("Decal")
-	eyes.Name = "Eyes"
-	eyes.Parent = jaw
 	return g
 end
 local templatesFolder = makeTemplates()
 Env.combatFolder._children.Gore = templatesFolder
+Client.vfxFolder(require("./sim/vfx_templates"))
 
 local Config = Env.load("ReplicatedStorage/Combat/CombatConfig")
 local Blood = Env.load("ReplicatedStorage/Combat/CombatBlood")
@@ -278,8 +269,8 @@ section("1  thresholds: the stage each health share earns")
 do
 	local cases = {
 		{ 100, 100, 0 }, { 76, 100, 0 }, { 75.01, 100, 0 }, { 75, 100, 1 }, { 60, 100, 1 }, { 50.5, 100, 1 }, { 50, 100, 2 },
-		{ 26, 100, 2 }, { 25, 100, 3 }, { 1, 100, 3 }, { 0.001, 100, 3 }, { 0, 100, 4 }, { -5, 100, 4 },
-		{ 187.5, 250, 1 }, { 125, 250, 2 }, { 62.5, 250, 3 }, { 62.6, 250, 2 }, { 0, 250, 4 }, { 10, 0, 0 },
+		{ 26, 100, 2 }, { 25, 100, 2 }, { 1, 100, 2 }, { 0.001, 100, 2 }, { 0, 100, 3 }, { -5, 100, 3 },
+		{ 187.5, 250, 1 }, { 125, 250, 2 }, { 62.5, 250, 2 }, { 0, 250, 3 }, { 10, 0, 0 },
 	}
 	local bad = {}
 	for _, c in ipairs(cases) do
@@ -289,7 +280,7 @@ do
 		end
 	end
 	check("health share -> stage at every boundary, any MaxHealth (" .. #cases .. " cases)", #bad == 0, table.concat(bad, "; "))
-	check("the head only on the killing blow: 0.001 health is still stage 3", Gore.StageFor(0.001, 100) == 3)
+	check("the head only on the killing blow: 0.001 health is still stage 2", Gore.StageFor(0.001, 100) == 2)
 	local mono = true
 	local last = 0
 	for h = 100, 0, -0.25 do
@@ -300,7 +291,7 @@ do
 		last = st
 	end
 	check("monotonic: less health never earns an earlier stage", mono)
-	check("config: 4 stages, descending, the last at 0", #GC.Stages == 4 and GC.Stages[1] > GC.Stages[2] and GC.Stages[2] > GC.Stages[3] and GC.Stages[4] == 0)
+	check("config: 3 stages (no jaw), descending, the last at 0", #GC.Stages == 3 and GC.Stages[1] > GC.Stages[2] and GC.Stages[3] == 0)
 end
 
 ---------------------------------------------------------------------------
@@ -343,7 +334,7 @@ do
 	resetLogs()
 	local m, hum, P = rig("Walker", { Shirt = true })
 	local drive = V3.new(1, 0, 0)
-	local steps = { { 90, 0, "" }, { 80, 0, "" }, { 70, 1, "GoreTear" }, { 60, 1, "GoreTear" }, { 45, 2, "GoreTear,GoreTear" }, { 30, 2, "GoreTear,GoreTear" }, { 20, 3, "GoreTear,GoreTear,GoreSnap" }, { 5, 3, "GoreTear,GoreTear,GoreSnap" }, { 0, 4, "GoreTear,GoreTear,GoreSnap,GoreBurst" } }
+	local steps = { { 90, 0, "" }, { 80, 0, "" }, { 70, 1, "GoreTear" }, { 60, 1, "GoreTear" }, { 45, 2, "GoreTear,GoreTear" }, { 30, 2, "GoreTear,GoreTear" }, { 20, 2, "GoreTear,GoreTear" }, { 5, 2, "GoreTear,GoreTear" }, { 0, 3, "GoreTear,GoreTear,GoreBurst" } }
 	for _, st in ipairs(steps) do
 		Gore.Hit(m, st[1], drive)
 		setHealth(hum, st[1]) -- (the server's word for the same blow)
@@ -357,7 +348,7 @@ do
 	Gore.Hit(m, 0, drive)
 	setHealth(hum, 0)
 	Env.run(0.5)
-	check("a repeated killing blow never replays anything", #fxLog.Sound == n and Gore.StageOf(m) == 4)
+	check("a repeated killing blow never replays anything", #fxLog.Sound == n and Gore.StageOf(m) == 3)
 	remove(m)
 end
 
@@ -372,11 +363,11 @@ do
 	for _, s in ipairs(fxLog.Sound) do
 		table.insert(t, s.T)
 	end
-	check("... then the left arm and the jaw, in order", soundNames() == "GoreTear,GoreTear,GoreSnap", soundNames())
-	check("... each a beat (Config.Gore.Stagger) apart", #t == 3 and math.abs((t[2] - t[1]) - GC.Stagger) < 1 / 30 and math.abs((t[3] - t[2]) - GC.Stagger) < 1 / 30, string.format("%.3f %.3f", (t[2] or 0) - (t[1] or 0), (t[3] or 0) - (t[2] or 0)))
+	check("... then the left arm, and nothing more (no jaw)", soundNames() == "GoreTear,GoreTear", soundNames())
+	check("... a beat (Config.Gore.Stagger) apart", #t == 2 and math.abs((t[2] - t[1]) - GC.Stagger) < 1 / 30, string.format("%.3f", (t[2] or 0) - (t[1] or 0)))
 	setHealth(hum, 10)
 	Env.run(0.3)
-	check("the server's word for the same blow adds nothing", #fxLog.Sound == 3)
+	check("the server's word for the same blow adds nothing", #fxLog.Sound == 2)
 	remove(m)
 
 	resetLogs()
@@ -384,7 +375,7 @@ do
 	Gore.Hit(k, -40, V3.new(0, 0, 1))
 	setHealth(khum, 0)
 	Env.run(1)
-	check("a single killing blow from full plays all four, in order, once each", soundNames() == "GoreTear,GoreTear,GoreSnap,GoreBurst" and Gore.StageOf(k) == 4, soundNames())
+	check("a single killing blow from full plays all three, in order, once each", soundNames() == "GoreTear,GoreTear,GoreBurst" and Gore.StageOf(k) == 3, soundNames())
 	remove(k)
 end
 
@@ -415,7 +406,7 @@ do
 	local m, hum, P = rig("Dummy", { Hat = true, Watch = true })
 	setHealth(hum, 20)
 	Env.run(0.6)
-	check("down to 20%: arms and jaw gone", Gore.StageOf(m) == 3 and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 1 and P.Head.LocalTransparencyModifier == 1)
+	check("down to 20%: both arms gone, the head whole", Gore.StageOf(m) == 2 and P["Right Arm"].LocalTransparencyModifier == 1 and P["Left Arm"].LocalTransparencyModifier == 1 and P.Head.LocalTransparencyModifier == 0)
 	check("the watch on the torn arm went with it", P.Watch.LocalTransparencyModifier == 1)
 	setHealth(hum, 100)
 	Env.run(0.1)
@@ -526,7 +517,13 @@ local function armCase(label, opts, drive, side)
 		check(label .. ": ... sized for this body", near(stump.Size, V3.new(KIT.RightStump.Size.X * k.X, KIT.RightStump.Size.Y * k.Y, KIT.RightStump.Size.Z * k.Z), 1e-3))
 		check(label .. ": ... the kit's own joint never came along", stump:FindFirstChildOfClass("Weld") == w and #childNamed(stump, "Weld") == 1)
 		local att = stump:FindFirstChild("GoreBleed")
-		check(label .. ": ... and it bleeds (spurts and a drip on the stump)", att ~= nil and att:FindFirstChildOfClass("ParticleEmitter") ~= nil)
+		local spurts = 0
+		for _, e in ipairs(Client.emits) do
+			if e.Effect == "Blood" and att and near(e.CFrame.Position, att.WorldPosition, 1e-3) then
+				spurts += 1
+			end
+		end
+		check(label .. ": ... and it bleeds (the place's Blood effect spurting from the stump)", att ~= nil and spurts > 0, spurts)
 	end
 	local give = fxLog.Give[#fxLog.Give]
 	check(label .. ": ... the body jerks with it", give and give.Char == m)
@@ -542,54 +539,20 @@ armCase("tiny x0.5", { Scale = 0.5, CFrame = CF.new(0, 1.5, 0) }, V3.new(1, 0, 0
 armCase("stretched", { Stretch = V3.new(1.3, 0.8, 1.6) }, V3.new(0.3, 0, -1), "Right")
 
 ---------------------------------------------------------------------------
-section("6  JAW: the smashed head in the NPC's own skin")
+section("6  no jaw: the head stays whole until the killing blow")
 ---------------------------------------------------------------------------
-local function jawCase(label, opts)
+do
 	resetLogs()
-	local m, hum, P = rig(label, opts)
-	local head = P.Head
-	setHealth(hum, 20)
-	Env.run(0.6)
-	local jaw = m:FindFirstChild("GoreJaw")
-	check(label .. ": the jaw stage played third", Gore.StageOf(m) == 3 and soundNames() == "GoreTear,GoreTear,GoreSnap", soundNames())
-	check(label .. ": the smashed head replaces the head (the head and its face hidden)", jaw ~= nil and head.LocalTransparencyModifier == 1 and (head:FindFirstChild("face") == nil or head:FindFirstChild("face").LocalTransparencyModifier == 1))
-	if not jaw then
-		remove(m)
-		return
+	local m, hum, P = rig("WholeHead", { Hat = true })
+	for _, h in ipairs({ 60, 30, 10, 1 }) do
+		setHealth(hum, h)
+		Env.run(0.4)
 	end
-	check(label .. ": ... it is the JawHead mesh (its surface map and eyes come with it)", jaw.ClassName == "MeshPart" and jaw:FindFirstChildOfClass("SurfaceAppearance") ~= nil and jaw:FindFirstChild("Eyes") ~= nil)
-	check(label .. ": ... coloured with THIS NPC's skin", jaw.Color == head.Color, tostring(jaw.Color))
-	local s = head.Size.Y / STD.Head.Y
-	local want = head.CFrame * CF.new(KIT.Jaw.Pos * s) * KIT.Jaw.Rot
-	check(label .. ": ... sized for this head and seated where the kit's head sat", near(jaw.Size, KIT.Jaw.Size * s, 1e-3) and sameFrame(jaw.CFrame, want))
-	local w = jaw:FindFirstChildOfClass("Weld")
-	check(label .. ": ... welded to the head (moves with every reaction)", w and w.Part0 == head and sameFrame(head.CFrame * w.C0, jaw.CFrame))
-	check(label .. ": ... never collides or blocks a hit", not jaw.CanCollide and not jaw.CanQuery and jaw.Massless)
-	local strands = childNamed(m, "GoreFlesh")
-	local swinging = #strands == 3
-	for _, st in ipairs(strands) do
-		local ball = st:FindFirstChildOfClass("BallSocketConstraint")
-		if not (ball and ball.LimitsEnabled and ball.Attachment0 and ball.Attachment1 and ball.Attachment1.Parent == st) then
-			swinging = false
-		end
-	end
-	check(label .. ": ... three strands of flesh hang and swing on ball sockets", swinging)
-	local teeth = gibs("Part", "GoreTooth")
-	local flying = #teeth >= 5
-	for _, t in ipairs(teeth) do
-		if t.Anchored or t.CollisionGroup ~= "Debris" or t.AssemblyLinearVelocity.Magnitude < 8 then
-			flying = false
-		end
-	end
-	check(label .. ": ... teeth fly out (unanchored, Debris group, fast)", flying, #teeth)
-	local give = fxLog.Give[#fxLog.Give]
-	check(label .. ": ... the head snaps back", give and give.Peak.NeckPitch and give.Peak.NeckPitch > 20)
+	check("down to 1%: both arms gone, stage 2", Gore.StageOf(m) == 2 and soundNames() == "GoreTear,GoreTear", soundNames())
+	check("... the head, its face and its hat all still there", P.Head.LocalTransparencyModifier == 0 and P.Head:FindFirstChild("face").LocalTransparencyModifier == 0 and P.Hat.LocalTransparencyModifier == 0)
+	check("... no jaw, teeth or flesh on it", m:FindFirstChild("GoreJaw") == nil and #childNamed(m, "GoreFlesh") == 0 and #gibs("Part", "GoreTooth") == 0)
 	remove(m)
 end
-jawCase("pale", { Skin = Color3.fromRGB(245, 205, 178) })
-jawCase("dark", { Skin = Color3.fromRGB(86, 58, 40), CFrame = CF.new(4, 3, 2) * CF.Angles(0, 0.7, 0) })
-jawCase("green goblin x1.4", { Skin = Color3.fromRGB(90, 150, 60), Scale = 1.4, CFrame = CF.new(0, 4.2, 0) })
-jawCase("faceless", { Face = false })
 
 ---------------------------------------------------------------------------
 section("7  HEAD: the final blow bursts it")
@@ -607,10 +570,9 @@ local function burstCase(label, opts, camDist)
 	Gore.Hit(m, -10, V3.new(0, 0, -1))
 	setHealth(hum, 0)
 	Env.step(1 / 60)
-	check(label .. ": the killing blow bursts the head (stage 4)", Gore.StageOf(m) == 4 and fxLog.Sound[#fxLog.Sound].Name == "GoreBurst")
+	check(label .. ": the killing blow bursts the head (stage 3)", Gore.StageOf(m) == 3 and fxLog.Sound[#fxLog.Sound].Name == "GoreBurst")
 	check(label .. ": ... the head and its face gone", head.LocalTransparencyModifier == 1 and (head:FindFirstChild("face") == nil or head:FindFirstChild("face").LocalTransparencyModifier == 1))
 	check(label .. ": ... the hat with it", not P.Hat or P.Hat.LocalTransparencyModifier == 1)
-	check(label .. ": ... the smashed jaw and its flesh gone", #childNamed(m, "GoreJaw") == 0 and #childNamed(m, "GoreFlesh") == 0)
 	local neck = nil
 	local skull = nil
 	for _, c in ipairs(m:GetChildren()) do
@@ -625,23 +587,26 @@ local function burstCase(label, opts, camDist)
 	end
 	check(label .. ": ... what is left: the neck's torn stump, on the torso where the kit puts it", neck ~= nil and sameFrame(neck.CFrame, (expected(KIT.NeckStump, torso, STD.Torso))))
 	check(label .. ": ... and the base of the skull", skull ~= nil and sameFrame(skull.CFrame, (expected(KIT.SkullBase, torso, STD.Torso))))
-	local mist, core = 0, 0
+	local heavy, plain, particles, allAtHead = 0, 0, 0, true
 	for i = emitsBefore + 1, #Client.emits do
 		local e = Client.emits[i]
-		if e.Emitter.Name == "Mist" then
-			mist += e.Count
-		elseif e.Emitter.Name == "Core" then
-			core += e.Count
+		if near(e.CFrame.Position, head.Position, 1e-3) then
+			particles += e.Count
+			if e.Emitter.Name == "Blood-01" then
+				heavy += 1
+			elseif e.Emitter.Name == "Blood1" then
+				plain += 1
+			end
 		end
 	end
-	check(label .. ": ... a huge red mist (" .. mist .. " clouds, " .. core .. " dense core)", mist >= 30 and core >= 12)
-	local mistAt = nil
+	check(label .. ": ... a huge red mist: the place's BloodHeavy burst twice and Blood once, big (" .. particles .. " particles)", heavy >= 2 and plain >= 1 and particles >= 60, heavy .. "/" .. plain .. "/" .. particles)
 	for i = emitsBefore + 1, #Client.emits do
-		if Client.emits[i].Emitter.Name == "Mist" then
-			mistAt = Client.emits[i].CFrame.Position
+		local e = Client.emits[i]
+		if e.Effect == "BloodHeavy" and not near(e.CFrame.Position, head.Position, 1e-3) then
+			allAtHead = false
 		end
 	end
-	check(label .. ": ... bursting from where the head was", mistAt and near(mistAt, head.Position, 1e-3))
+	check(label .. ": ... bursting from where the head was", allAtHead)
 	check(label .. ": ... droplets thrown all round (real flights)", Blood.Stats.Drops - drops0 >= GC.BurstDrops, Blood.Stats.Drops - drops0)
 	local chunks = #gibs("UnionOperation", "GoreChunk") + #gibs("Part", "GoreChunk") - chunks0
 	local bones = #gibs("Part", "GoreBone")
@@ -660,7 +625,13 @@ local function burstCase(label, opts, camDist)
 		check(label .. ": ... far away: the camera is left alone", #fxLog.Camera == 0)
 	end
 	Env.run(3)
-	check(label .. ": ... droplets landed and splatted on the ground", Blood.Stats.Landed > 0 and #Blood.Splats > 0)
+	local splatted = 0
+	for _, sp in ipairs(Blood.Splats) do
+		if sp.Busy then
+			splatted += 1
+		end
+	end
+	check(label .. ": ... droplets landed and are gone: nothing left on the ground", Blood.Stats.Landed > 0 and splatted == 0, splatted)
 	remove(m)
 end
 burstCase("close", { Hat = true }, 8)
@@ -676,7 +647,7 @@ do
 	local m, hum = rig("Bare")
 	setHealth(hum, 0)
 	Env.run(1)
-	check("no gore kit in the place: every stage still plays (plain flesh stand-ins), no errors", Gore.StageOf(m) == 4 and soundNames() == "GoreTear,GoreTear,GoreSnap,GoreBurst" and #warns == 0, table.concat(warns, " | "))
+	check("no gore kit in the place: every stage still plays (plain flesh stand-ins), no errors", Gore.StageOf(m) == 3 and soundNames() == "GoreTear,GoreTear,GoreBurst" and #warns == 0, table.concat(warns, " | "))
 	local stand = false
 	for _, c in ipairs(m:GetChildren()) do
 		if c.Name == "right.shoulder" and c.ClassName == "Part" then
@@ -695,7 +666,7 @@ do
 	check("MaxHealth 350: 75% (262.5) takes the right arm", Gore.StageOf(m) == 1)
 	setHealth(hum, 0)
 	Env.run(1)
-	check("dying without a Hit (a fall, the void, a script) still ends in the burst", Gore.StageOf(m) == 4 and #warns == 0)
+	check("dying without a Hit (a fall, the void, a script) still ends in the burst", Gore.StageOf(m) == 3 and #warns == 0)
 	remove(m)
 end
 do
@@ -732,7 +703,7 @@ do
 	P["Right Arm"].Parent = nil
 	setHealth(hum, 20)
 	Env.run(0.6)
-	check("a body part removed by something else: that stage passes quietly, the rest in order", Gore.StageOf(m) == 3 and soundNames() == "GoreTear,GoreSnap" and #warns == 0, soundNames())
+	check("a body part removed by something else: that stage passes quietly, the rest in order", Gore.StageOf(m) == 2 and soundNames() == "GoreTear" and #warns == 0, soundNames())
 	remove(m)
 end
 
@@ -761,7 +732,21 @@ do
 		end
 	end
 	check("... the flesh chunks are the kit's 'debry' piece", kitChunks > 0)
-	check("the templates themselves are untouched (still 12 kit pieces and the jaw head)", #templatesFolder:FindFirstChild("GoreKit"):GetChildren() == 12 and templatesFolder:FindFirstChild("JawHead") ~= nil)
+	check("the templates themselves are untouched (still 12 kit pieces)", #templatesFolder:FindFirstChild("GoreKit"):GetChildren() == 12)
+	local jawBits = 0
+	for _, inst in ipairs(Client.all) do
+		if inst.Name == "GoreJaw" or inst.Name == "GoreTooth" or inst.Name == "GoreFlesh" then
+			jawBits += 1
+		end
+	end
+	check("no jaw piece, tooth or flesh strand was ever made", jawBits == 0, jawBits)
+	local foreign = 0
+	for _, e in ipairs(Client.emits) do
+		if e.Effect ~= "Blood" and e.Effect ~= "BloodHeavy" then
+			foreign += 1
+		end
+	end
+	check(("all the gore's blood (%d bursts) is the place's own Blood / BloodHeavy effects"):format(#Client.emits), #Client.emits > 0 and foreign == 0, foreign)
 
 	Env.run(GC.GibLife + 2)
 	local left = {}
@@ -799,7 +784,8 @@ end
 section("10  the sounds and camera profiles the stages use exist")
 ---------------------------------------------------------------------------
 do
-	for _, n in ipairs({ "GoreTear", "GoreSnap", "GoreBurst" }) do
+	check("the jaw's sound is gone from the config", Config.Sounds.GoreSnap == nil)
+	for _, n in ipairs({ "GoreTear", "GoreBurst" }) do
 		local def = Config.Sounds[n]
 		local ok = def ~= nil and #def > 0
 		for _, l in ipairs(def or {}) do

@@ -22,6 +22,8 @@
 ]]
 local Env = require("./sim/env")
 local Client = require("./sim/client")(Env)
+local TEMPLATES = require("./sim/vfx_templates")
+Client.vfxFolder(TEMPLATES)
 local V3, CF = Env.Vector3, Env.CFrame
 
 local Config = Env.load("ReplicatedStorage/Combat/CombatConfig")
@@ -171,6 +173,18 @@ do
 	check(("...which is the analytic landing point (off by %.4f studs)"):format((ref - exact).Magnitude), (ref - exact).Magnitude < 0.005)
 end
 
+-- the droplets (the gore's bleeding; a hit's spray is the place's effects, section 8): thrown out of
+-- a wound in a splash crown, carried with the struck part - with Config.Blood.Stains on, so the
+-- splatter subsystem is tested too (sections 2-7). The default (Stains off) is section 8
+B.Stains = true
+local function launchDrops(pos, drive, tierName, victim)
+	local tier = B.Tiers[tierName or "Light"] or B.Tiers.Light
+	local normal, head = Blood.Wound(pos, drive, tier, victim, 1)
+	for _ = 1, 8 do
+		Blood.Launch(pos + normal * 0.05, head + Blood.Crown(normal, tier), 0.09 + math.random() * 0.08)
+	end
+end
+
 ---------------------------------------------------------------------------
 section("2. Every splatter lies flat ON the surface it hit")
 local function sprayAt(groundAt, boxes, pos, drive, tier, n)
@@ -179,7 +193,7 @@ local function sprayAt(groundAt, boxes, pos, drive, tier, n)
 		Env.addBox(b[1], b[2], b[3], b[4] ~= false, b[5])
 	end
 	for _ = 1, n or 6 do
-		Blood.Spray(pos, drive, tier, nil, 1)
+		launchDrops(pos, drive, tier)
 	end
 	Env.run(2.6)
 	return liveSplats()
@@ -250,7 +264,7 @@ do
 	world(nil)
 	table.insert(Env.voids, { Center = V3.new(0, 0, -30), Radius = 27.5 })
 	for _ = 1, 12 do
-		Blood.Spray(V3.new(0, 4, 0), V3.new(0, 0, -1), "Finisher", nil, 1)
+		launchDrops(V3.new(0, 4, 0), V3.new(0, 0, -1), "Finisher")
 	end
 	Env.run(2.6)
 	allFit("a ledge's rim", liveSplats())
@@ -263,7 +277,7 @@ do
 	world(nil)
 	table.insert(Env.waters, { Center = V3.new(0, 0, 0), Radius = 50 })
 	for _ = 1, 6 do
-		Blood.Spray(V3.new(0, 4, 0), V3.new(0, 0, -1), "Heavy", nil, 1)
+		launchDrops(V3.new(0, 4, 0), V3.new(0, 0, -1), "Heavy")
 	end
 	Env.run(2.6)
 	check(("drops into water leave nothing (%d swallowed)"):format(Blood.Stats.Water), #liveSplats() == 0 and Blood.Stats.Water > 0)
@@ -325,6 +339,23 @@ do
 			end
 		end
 		check(("%s: every drop leaves the wound outward relative to the struck part (min cos %.3f >= cos %d deg > 0)"):format(tierName, worstOut, tier.Crown[2]), worstOut >= math.cos(math.rad(tier.Crown[2])) - 1e-4 and worstOut > 0)
+		-- and the hit's burst (the place's effects) is aimed out of the wound, never into the body
+		local worstAim = math.huge
+		for trial = 1, 24 do
+			root.CFrame = CF.new(V3.new(0, 3, 0)) * CF.Angles(0, trial * 0.53, 0)
+			local drive = root.CFrame.LookVector * -1
+			local h = ({ 1.5, 0.6, -2.3 })[(trial % 3) + 1]
+			local center = if h > 1.05 then V3.new(0, 4.5, 0) else V3.new(0, 3 + h, 0)
+			local pos = center - drive * 0.55
+			local normal = Blood.Wound(pos, drive, tier, vic, 1)
+			table.clear(Client.emits)
+			Blood.Spray(pos, drive, tierName, vic, if trial % 2 == 0 then 1 else -1)
+			Env.step(1 / 60)
+			for _, e in ipairs(Client.emits) do
+				worstAim = math.min(worstAim, e.CFrame.UpVector:Dot(normal))
+			end
+		end
+		check(("%s: the hit's blood burst is aimed out of the wound (min cos %.3f > 0)"):format(tierName, worstAim), worstAim > 0 and worstAim < math.huge)
 	end
 	-- the drive: the mean spray follows the head (a straight carries it along the blow, an uppercut
 	-- lifts it, a hook throws it to the side the head went)
@@ -353,8 +384,9 @@ local function particleWorst(e, maxT)
 		axis = if axis.Magnitude > 1e-3 then axis.Unit else V3.new(1, 0, 0)
 		local d = CF.fromAxisAngle(up, rot) * (CF.fromAxisAngle(axis, ang) * up)
 		local p, v = cf.Position, d * e.Speed.Max
-		local t, h = 0, 1 / 240
-		while t < e.Lifetime.Max do
+		local t = 0
+		while t < e.Lifetime.Max - 1e-9 do
+			local h = math.min(1 / 240, e.Lifetime.Max - t) -- (never past the particle's own death)
 			v = v * (0.5 ^ (h * e.Drag)) + e.Accel * h
 			p += v * h
 			t += h
@@ -384,6 +416,7 @@ for _, case in ipairs({
 	end
 	table.clear(Client.emits)
 	Blood.Spray(case[2], V3.new(0, 0, -1), case[4], nil, 1)
+	Env.step(1 / 60) -- (the effects fire on the next resume)
 	local ok, why = #Client.emits > 0, "no burst"
 	for _, e in ipairs(Client.emits) do
 		local fl, wl = particleWorst(e)
@@ -393,7 +426,37 @@ for _, case in ipairs({
 			ok, why = false, e.Emitter.Name .. " entered the wall"
 		end
 	end
-	check(case[1] .. ": every mist / streak / blob fades before any surface", ok, why)
+	check(case[1] .. ": every particle of the place's blood effects fades before any surface", ok, why)
+end
+
+do
+	-- a cramped room: close walls both sides and behind, a low ceiling, hits of every tier from every
+	-- angle at every height - not one particle may reach a surface
+	math.randomseed((tonumber(process.env.SEED or "") or 7) * 7919 + 13)
+	world(nil)
+	Env.addBox("WallL", V3.new(-2.6, 0, -10), V3.new(-2.2, 9, 10), true)
+	Env.addBox("WallR", V3.new(2.2, 0, -10), V3.new(2.6, 9, 10), true)
+	Env.addBox("Back", V3.new(-3, 0, -2.4), V3.new(3, 9, -2.0), true)
+	Env.addBox("Ceiling", V3.new(-3, 6.0, -10), V3.new(3, 6.6, 10), true)
+	local tiers = { "Light", "Hook", "Heavy", "Finisher", "Body" }
+	local bad, worstWhy, particles = 0, nil, 0
+	for i = 1, 60 do
+		local pos = V3.new(math.random() * 3 - 1.5, 0.4 + math.random() * 4.8, math.random() * 3 - 1.2)
+		local yaw = math.random() * math.pi * 2
+		local drive = V3.new(math.cos(yaw), 0, math.sin(yaw))
+		table.clear(Client.emits)
+		Blood.Spray(pos, drive, tiers[(i % #tiers) + 1], nil, if i % 2 == 0 then 1 else -1)
+		Env.step(1 / 60)
+		for _, e in ipairs(Client.emits) do
+			particles += e.Count
+			local fl, wl = particleWorst(e)
+			if fl < 0 or wl < 0 then
+				bad += 1
+				worstWhy = ("%s (%s) at %s"):format(e.Emitter.Name, tiers[(i % #tiers) + 1], tostring(pos))
+			end
+		end
+	end
+	check(("a cramped room, 60 hits of every tier (%d particles): none reaches a floor, wall or ceiling"):format(particles), bad == 0, worstWhy)
 end
 
 ---------------------------------------------------------------------------
@@ -428,7 +491,7 @@ end
 do
 	world(nil)
 	for _ = 1, 4 do
-		Blood.Spray(V3.new(0, 4.6, 0), V3.new(0, 0, -1), "Finisher", nil, 1)
+		launchDrops(V3.new(0, 4.6, 0), V3.new(0, 0, -1), "Finisher")
 	end
 	Env.run(2.5)
 	check(("fast drops throw satellites (%d)"):format(Blood.Stats.Satellites), Blood.Stats.Satellites > 0)
@@ -464,7 +527,7 @@ end
 do
 	world(nil)
 	for _ = 1, 40 do
-		Blood.Spray(V3.new(math.random() * 20 - 10, 4.6, math.random() * 20 - 10), V3.new(0, 0, -1), "Finisher", nil, 1)
+		launchDrops(V3.new(math.random() * 20 - 10, 4.6, math.random() * 20 - 10), V3.new(0, 0, -1), "Finisher")
 		Env.run(0.05)
 	end
 	Env.run(2.5)
@@ -472,11 +535,81 @@ do
 	local parts = #Client.instances("Part")
 	check(("...and the drop pool never grew past its size (%d drops)"):format(#Blood.Drops), #Blood.Drops <= 72)
 	for _ = 1, 20 do
-		Blood.Spray(V3.new(0, 4.6, 0), V3.new(0, 0, -1), "Finisher", nil, 1)
+		launchDrops(V3.new(0, 4.6, 0), V3.new(0, 0, -1), "Finisher")
 		Env.run(0.05)
 	end
 	Env.run(2.5)
 	check("...more sprays reuse the pools (no new parts)", #Client.instances("Part") == parts, #Client.instances("Part") - parts)
+end
+
+---------------------------------------------------------------------------
+section("8. The default: a hit bursts the place's own effects, nothing is left behind")
+B.Stains = false
+do
+	local fs = require("@lune/fs")
+	for _, file in ipairs({ "CombatBlood", "CombatGore" }) do
+		local src = fs.readFile("src/ReplicatedStorage__Combat__" .. file .. ".lua")
+		check(file .. " makes no particle emitter of its own", not string.find(src, 'Instance.new("ParticleEmitter")', 1, true))
+	end
+	local known = {}
+	for name, list in pairs(TEMPLATES) do
+		for _, t in ipairs(list) do
+			known[name .. "/" .. t.Name] = t.Texture
+		end
+	end
+	world(nil)
+	Env.addBox("Wall", V3.new(-6, 0, -2.2), V3.new(6, 9, -1.8), true)
+	local drops0 = Blood.Stats.Drops
+	table.clear(Client.emits)
+	local tiers = { "Light", "Hook", "Heavy", "Finisher", "Body" }
+	for i = 1, 40 do
+		Blood.Spray(V3.new(math.random() * 6 - 3, 0.6 + math.random() * 4, 0), V3.new(0, 0, -1), tiers[(i % #tiers) + 1], nil, if i % 2 == 0 then 1 else -1)
+		Env.run(0.05)
+	end
+	local foreign, total = 0, 0
+	for _, e in ipairs(Client.emits) do
+		total += e.Count
+		if known[tostring(e.Effect) .. "/" .. e.Emitter.Name] ~= e.Emitter.Texture then
+			foreign += 1
+		end
+	end
+	check(("40 hits: %d particles, every one from the place's Blood / BloodHeavy effects"):format(total), total > 0 and foreign == 0, foreign)
+	check("a hit's spray throws no droplet parts", Blood.Stats.Drops == drops0, Blood.Stats.Drops - drops0)
+	local heavy, light = false, false
+	for _, e in ipairs(Client.emits) do
+		heavy = heavy or e.Effect == "BloodHeavy"
+		light = light or e.Effect == "Blood"
+	end
+	check("light blows burst Blood, heavy ones BloodHeavy", heavy and light)
+	Env.run(3)
+	local left = 0
+	for _, a in ipairs(Client.instances("Attachment")) do
+		if a.Parent == Env.workspace.Terrain and (a.Name == "Blood" or a.Name == "BloodHeavy") then
+			left += 1
+		end
+	end
+	check("every burst is cleaned up once its particles are gone", left == 0, left)
+	check("nothing is left on the floor or the wall (no splatter)", #liveSplats() == 0)
+	-- the gore's droplets: they land and are simply gone
+	local landed0, splats0 = Blood.Stats.Landed, Blood.Stats.Splats
+	launchDrops(V3.new(0, 4, 0), V3.new(0, 0, -1), "Finisher")
+	launchDrops(V3.new(0, 4, 0), V3.new(0, 0, -1), "Heavy")
+	Env.run(2.6)
+	local flying = 0
+	for _, d in ipairs(Blood.Drops) do
+		if d.Live or d.Part.CFrame.Position.Y > -4000 then
+			flying += 1
+		end
+	end
+	check(("droplets land (%d) and are gone: no splatter, none left in the world"):format(Blood.Stats.Landed - landed0), Blood.Stats.Landed > landed0 and Blood.Stats.Splats == splats0 and flying == 0 and #liveSplats() == 0, flying)
+	local body = Client.new("Model")
+	local torso = Client.new("Part")
+	torso.Name = "Torso"
+	torso.CFrame = CF.new(0, 1, 0)
+	torso.Parent = body
+	Blood.Pool(body)
+	Env.run(2)
+	check("a knocked-out body leaves no pool", #liveSplats() == 0)
 end
 
 print(("\n%d passed, %d failed"):format(passed, failed))
