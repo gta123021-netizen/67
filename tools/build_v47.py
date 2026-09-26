@@ -5,16 +5,16 @@
 
 1. structure
    - HitDetect moves to ReplicatedStorage.Combat (the attacking client runs the same hit test)
-   - new ModuleScripts: ReplicatedStorage.Combat.CombatChoreo, CombatBlood, CombatGore
+   - new ModuleScripts: ReplicatedStorage.Combat.CombatChoreo, CombatBlood, CombatGore, and
+     StarterPlayerScripts.OverkillHUD.LimbStatus
    - the gore kit (the Workspace Model with the stumps, torn arm ends and 'debry') goes to
-     ReplicatedStorage.Combat.Gore as GoreKit (the smashed-jaw model is not used: it stays with the
-     rest of the import in ServerStorage.VFXLibrary)
+     ReplicatedStorage.Combat.Gore as GoreKit
    - the combat's effect templates are taken from the imported packs into
      ReplicatedStorage.Combat.VFX (see TEMPLATES)
-   - everything else the import dropped into Workspace (133 packs, models and loose parts: live
-     particle emitters and a dozen spinning demo scripts, in the middle of the map) moves into
-     ServerStorage.VFXLibrary: kept in the place for later use, never rendered, never run,
-     never sent to a client
+   - everything else the import dropped into Workspace (133 packs, models and loose parts - the
+     unused smashed-jaw model among them - with live particle emitters and a dozen spinning demo
+     scripts, in the middle of the map) is deleted from the place (tools/rbxl.py delete_subtrees,
+     proven by tools/rbxl_delete_check.py)
 2. sources: every script whose file in src/ differs gets the file's source (tools/build_rbxl.py)
 """
 import os
@@ -40,6 +40,8 @@ TEMPLATES = [
     ("Workspace/Anime/Wind-01", "Main", "ShockRing", None),
     ("Workspace/Anime/Wind-02", "Main", "DustBurst", None),
     ("Workspace/Big/Big-Crack-01", "Main", "BigCrack", None),
+    # a player's lost limb growing back (the pack's heal burst: rising cubes, light, stars, a ring)
+    ("Workspace/Yona VFX Pack/Player-VFX/Health Dummy/Torso", "Main-01", "Regrow", None),
 ]
 
 # effects that emit from a part's volume (not an attachment): the part itself becomes the template
@@ -47,7 +49,12 @@ PART_TEMPLATES = [
     ("Workspace/Speed", "SpeedLines"),  # speed lines round a falling body (the Ground Smash's drop)
 ]
 
-NEW_MODULES = [("ReplicatedStorage/Combat", "CombatChoreo"), ("ReplicatedStorage/Combat", "CombatBlood"), ("ReplicatedStorage/Combat", "CombatGore")]
+NEW_MODULES = [
+    ("ReplicatedStorage/Combat", "CombatChoreo"),
+    ("ReplicatedStorage/Combat", "CombatBlood"),
+    ("ReplicatedStorage/Combat", "CombatGore"),
+    ("StarterPlayer/StarterPlayerScripts/OverkillHUD", "LimbStatus"),
+]
 
 def gore(p):
     combat = p.find("ReplicatedStorage/Combat")
@@ -124,14 +131,9 @@ def structure(p, old_workspace_children):
         p.set_name(found, name)
         print("template", name, "<-", path)
     gore(p)
-    # the rest of the import: out of the live world
+    # the rest of the import: deleted (and a library an earlier build kept in ServerStorage)
     ws = p.find("Workspace")
-    ss = p.find("ServerStorage")
-    lib = p.find("ServerStorage/VFXLibrary")
-    if not lib:
-        folder_template = next(r for r in p.ref_class if p.class_name(r) == "Folder")
-        lib = p.clone_instance(folder_template, ss, "VFXLibrary")
-    moved = 0
+    doomed = []
     budget = dict(old_workspace_children)
     for r in list(p.children.get(ws, [])):
         key = (p.names.get(r), p.class_name(r))
@@ -140,9 +142,13 @@ def structure(p, old_workspace_children):
             continue
         if key in MAP:
             continue
-        p.set_parent(r, lib)
-        moved += 1
-    print("moved %d imported Workspace items -> ServerStorage.VFXLibrary" % moved)
+        doomed.append(r)
+    lib = p.find("ServerStorage/VFXLibrary")
+    if lib:
+        doomed.append(lib)
+    n = len(doomed)
+    removed = p.delete_subtrees(doomed) if doomed else 0
+    print("deleted %d imported items (%d instances)" % (n, removed))
 
 
 def sources(p, src_dir):

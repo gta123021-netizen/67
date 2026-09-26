@@ -411,7 +411,7 @@ do
 end
 
 ---------------------------------------------------------------------------
-section("4  a lost limb stays lost; the server's stage rules the combat's fighters")
+section("4  the server's stage rules the combat's fighters (a player's arms grow back)")
 ---------------------------------------------------------------------------
 do
 	resetLogs()
@@ -443,7 +443,53 @@ do
 	m:SetAttribute("GoreStage", 2)
 	Env.run(0.3)
 	check("... and the attribute arriving after it replays nothing", #fxLog.Sound == 2)
-	-- the server makes the body whole again (its stage goes back)
+	-- a player's arms growing back (the server's stage steps back): newest first, each with the
+	-- place's heal burst on the new arm and its sound
+	local function stumps()
+		local r, l = 0, 0
+		for _, c in ipairs(m:GetChildren()) do
+			if not c._p.Destroyed then
+				if c.Name == "right.shoulder" then
+					r += 1
+				elseif c.Name == "left.shoulder" then
+					l += 1
+				end
+			end
+		end
+		return r, l
+	end
+	local function regrowOn(arm, from)
+		local n, on = 0, true
+		for i = from + 1, #Client.emits do
+			local e = Client.emits[i]
+			if e.Effect == "Regrow" then
+				n += 1
+				on = on and e.Emitter._p.Parent ~= nil and e.Emitter._p.Parent._p.Parent == arm
+			end
+		end
+		return n > 0 and on, n
+	end
+	Env.run(GC.BleedTime + 0.5) -- (the stumps done bleeding: anything after this is the regrowth's)
+	local e1 = #Client.emits
+	table.clear(fxLog.Sound)
+	local g0 = #gibs("Model", "GoreArm")
+	m:SetAttribute("GoreStage", 1)
+	Env.run(0.3)
+	local r1, l1 = stumps()
+	check("stage 2 -> 1: the LEFT arm grows back (the right stays gone), its stump gone", Gore.StageOf(m) == 1 and P["Left Arm"].LocalTransparencyModifier == 0 and P["Right Arm"].LocalTransparencyModifier == 1 and l1 == 0 and r1 == 1, ("%d %d"):format(r1, l1))
+	local ok1, n1 = regrowOn(P["Left Arm"], e1)
+	check(("... with the place's heal burst on the new arm (%d emitters of Regrow) and the flesh knitting"):format(n1), ok1 and soundNames() == "GoreRegrow")
+	local blood = 0
+	for i = e1 + 1, #Client.emits do
+		local e = Client.emits[i]
+		if e.Effect == "Blood" or e.Effect == "BloodHeavy" then
+			blood += 1
+		end
+	end
+	check("... and no arm thrown, no blood", #gibs("Model", "GoreArm") == g0 and blood == 0, blood)
+	Env.run(0.6) -- (the left arm's burst has its delayed part too)
+	local e0 = #Client.emits
+	table.clear(fxLog.Sound)
 	m:SetAttribute("GoreStage", 0)
 	Env.run(0.3)
 	local leftovers = 0
@@ -452,13 +498,21 @@ do
 			leftovers += 1
 		end
 	end
-	check("the server's stage back to 0: whole again, every stump gone", Gore.StageOf(m) == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and leftovers == 0, leftovers)
+	local ok0 = regrowOn(P["Right Arm"], e0)
+	check("stage 1 -> 0: the right arm too - whole again, every stump gone", Gore.StageOf(m) == 0 and P["Right Arm"].LocalTransparencyModifier == 0 and P["Left Arm"].LocalTransparencyModifier == 0 and leftovers == 0, leftovers)
+	check("... its own heal burst and sound", ok0 and soundNames() == "GoreRegrow", tostring(ok0) .. " " .. soundNames())
+	m:SetAttribute("GoreStage", 1)
+	Env.run(0.4)
+	check("hurt again after regrowing: it comes apart again", Gore.StageOf(m) == 1 and P["Right Arm"].LocalTransparencyModifier == 1 and soundNames() == "GoreRegrow,GoreTear")
 	remove(m)
 end
 do
 	-- first seen already missing limbs (a late join, streamed in): its wounds at once, nothing replayed
 	resetLogs()
-	local gibs0 = #gibs("Model", "GoreArm")
+	local gibs0 = {}
+	for _, g in ipairs(gibs("Model", "GoreArm")) do
+		gibs0[g] = true
+	end
 	-- (a body this client has never seen, arriving with the stage already set)
 	local late, _, LP = rig("LateJoin", { Attrs = { CombatEntity = true, GoreStage = 2 } })
 	Env.run(0.3)
@@ -469,7 +523,13 @@ do
 		end
 	end
 	check("a body first seen at stage 2: both arms hidden, both stumps on", Gore.StageOf(late) == 2 and LP["Right Arm"].LocalTransparencyModifier == 1 and LP["Left Arm"].LocalTransparencyModifier == 1 and stumps == 2, stumps)
-	check("... nothing replayed: no arm thrown, no sound, no blood", #gibs("Model", "GoreArm") == gibs0 and #fxLog.Sound == 0)
+	local thrown = 0
+	for _, g in ipairs(gibs("Model", "GoreArm")) do
+		if not gibs0[g] then
+			thrown += 1
+		end
+	end
+	check("... nothing replayed: no arm thrown, no sound, no blood", thrown == 0 and #fxLog.Sound == 0, thrown .. " " .. soundNames())
 	remove(late)
 end
 
@@ -479,7 +539,10 @@ section("5  ARM: torn off, thrown, the stump on the shoulder")
 local function armCase(label, opts, drive, side)
 	resetLogs()
 	local m, hum, P = rig(label, opts)
-	local before = #gibs("Model", "GoreArm")
+	local before = {}
+	for _, g in ipairs(gibs("Model", "GoreArm")) do
+		before[g] = true
+	end
 	local torso = P.Torso
 	local arm = if side == "Right" then P["Right Arm"] else P["Left Arm"]
 	local armCf = arm.CFrame
@@ -488,9 +551,14 @@ local function armCase(label, opts, drive, side)
 	if side == "Left" then
 		Env.run(0.3)
 	end
-	local list = gibs("Model", "GoreArm")
+	local list = {}
+	for _, g in ipairs(gibs("Model", "GoreArm")) do
+		if not before[g] then
+			table.insert(list, g) -- (only this body's: an earlier one may fade out meanwhile)
+		end
+	end
 	local gib = list[#list]
-	check(label .. ": a severed arm is thrown (one per stage)", #list == before + (if side == "Left" then 2 else 1))
+	check(label .. ": a severed arm is thrown (one per stage)", #list == (if side == "Left" then 2 else 1))
 	if not gib then
 		remove(m)
 		return
@@ -695,14 +763,14 @@ local function burstCase(label, opts, camDist)
 	else
 		check(label .. ": ... far away: the camera is left alone", #fxLog.Camera == 0)
 	end
-	Env.run(3)
-	local splatted = 0
-	for _, sp in ipairs(Blood.Splats) do
-		if sp.Busy then
-			splatted += 1
+	Env.run(GC.BleedTime + 3) -- (the fountain's last drops too)
+	local flying = 0
+	for _, d in ipairs(Blood.Drops) do
+		if d.Live then
+			flying += 1
 		end
 	end
-	check(label .. ": ... droplets landed and are gone: nothing left on the ground", Blood.Stats.Landed > 0 and splatted == 0, splatted)
+	check(label .. ": ... droplets landed and are gone: nothing left on the ground", Blood.Stats.Landed > 0 and flying == 0, flying)
 	remove(m)
 end
 burstCase("close", { Hat = true }, 8)
@@ -811,13 +879,16 @@ do
 		end
 	end
 	check("no jaw piece, tooth or flesh strand was ever made", jawBits == 0, jawBits)
-	local foreign = 0
+	local foreign, bursts = 0, 0
 	for _, e in ipairs(Client.emits) do
-		if e.Effect ~= "Blood" and e.Effect ~= "BloodHeavy" then
-			foreign += 1
+		if e.Effect ~= "Regrow" then -- (a player's arm growing back: the place's heal effect, not blood)
+			bursts += 1
+			if e.Effect ~= "Blood" and e.Effect ~= "BloodHeavy" then
+				foreign += 1
+			end
 		end
 	end
-	check(("all the gore's blood (%d bursts) is the place's own Blood / BloodHeavy effects"):format(#Client.emits), #Client.emits > 0 and foreign == 0, foreign)
+	check(("all the gore's blood (%d bursts) is the place's own Blood / BloodHeavy effects"):format(bursts), bursts > 0 and foreign == 0, foreign)
 
 	Env.run(GC.GibLife + 2)
 	local left = {}
@@ -856,7 +927,7 @@ section("10  the sounds and camera profiles the stages use exist")
 ---------------------------------------------------------------------------
 do
 	check("the jaw's sound is gone from the config", Config.Sounds.GoreSnap == nil)
-	for _, n in ipairs({ "GoreTear", "GoreBurst" }) do
+	for _, n in ipairs({ "GoreTear", "GoreBurst", "GoreRegrow" }) do
 		local def = Config.Sounds[n]
 		local ok = def ~= nil and #def > 0
 		for _, l in ipairs(def or {}) do

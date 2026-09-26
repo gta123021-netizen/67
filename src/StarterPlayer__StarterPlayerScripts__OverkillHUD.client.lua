@@ -1230,6 +1230,7 @@ load("AuraPreview") -- the 3D try-on the shop opens
 load("HeroSelect") -- the character select screen (+ the HERO pill)
 load("ProfileWindow")
 load("Backpack")
+load("LimbStatus") -- what your body has lost (over the hotbar)
 load("SettingsWindow")
 -- queue + party: the hub first (the others read ctx.Queue), off the main thread so a slow
 -- remote never holds up the rest of the HUD

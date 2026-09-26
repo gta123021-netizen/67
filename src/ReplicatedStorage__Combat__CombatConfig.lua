@@ -534,7 +534,6 @@ Config.StudioDummies = true -- practice dummies (a still one and a guarding one)
 Config.Blood = {
 	Enabled = true,
 	Color = Color3.fromRGB(96, 4, 6), -- fresh
-	Dry = Color3.fromRGB(58, 6, 6), -- as it dries on the floor
 	Gravity = nil, -- nil: the world's own (workspace.Gravity)
 	Drag = 2.0, -- air drag on the droplets (1/s): terminal speed = gravity / drag
 	Tiers = {
@@ -544,20 +543,24 @@ Config.Blood = {
 		Finisher = { Effects = { { Name = "BloodHeavy", Scale = 1.15, Count = 1.25 }, { Name = "Blood", Scale = 1, Count = 1 } }, Eject = { 9, 17 }, Crown = { 40, 80 }, Carry = 12, Side = 3, Lift = 5 },
 		Body = { Effects = { { Name = "Blood", Scale = 0.85, Count = 0.8 } }, Eject = { 6, 13 }, Crown = { 45, 82 }, Carry = 12, Side = 2, Lift = 2 },
 	},
-	-- false (the default): a droplet is gone where it lands and nothing is left behind. true: it
-	-- leaves a splatter on the floor / wall (Splat), and a knocked-out body a pool
-	Stains = false,
-	Splat = { Min = 0.45, Max = 1.9, Hold = 9, Fade = 2.2, Cap = 70 }, -- floor splatters (Stains): size (studs), seconds, most at once
 	View = 160, -- nothing is built farther than this from the camera
 }
 
 ---------------------------------------------------------------------------
 -- gore (CombatGore + CombatService): the damage a fighter has taken, on its body - NPCs and players
--- alike. A limb once lost stays lost until the fighter respawns (the server keeps the stage on the
--- character as its GoreStage attribute), and losing arms matters:
+-- alike. An NPC's lost limb stays lost until it respawns; a player's arms grow back with its health
+-- (Regrow). The server keeps the stage on the character as its GoreStage attribute. Losing arms
+-- matters:
 --   one arm    every blow hurts more (OneArm.DamageTaken), and a block stops much less of it
---              (OneArm.GuardChip times the chip damage)
---   no arms    no guard at all (a block can't go up; one already up drops), and blows hurt more still
+--              (OneArm.GuardChip times the chip damage). It fights with the hand it has left and
+--              never combos: every press is one strike on its own (M1 OneArm.Light, M2
+--              OneArm.Heavy - both thrown with the left hand), then OneArm.Recover before the next;
+--              no dash strike (that is the right hand's). The Ground Smash (the legs) stays
+--   no arms    no guard at all (a block can't go up; one already up drops), blows hurt more still,
+--              and no attack of any kind: it can only move
+--   Regrow      a PLAYER's arms grow back as its health comes back (never an NPC's, never the head):
+--               the left once its health is Margin above the left arm's stage share, then the right
+--               the same way (so a fighter hovering at a threshold never flickers)
 --   Players     false: only NPCs come apart
 --   Stages      health shares at which each stage plays, in order: the right arm torn off, the
 --               left arm, the head burst (the last one on the killing blow only)
@@ -571,8 +574,9 @@ Config.Gore = {
 	Enabled = true,
 	Players = true,
 	Stages = { 0.75, 0.5, 0 },
-	OneArm = { DamageTaken = 1.15, GuardChip = 2 },
+	OneArm = { DamageTaken = 1.15, GuardChip = 2, Light = "Swing2", Heavy = "Uppercut", Recover = 0.25 },
 	NoArms = { DamageTaken = 1.25 },
+	Regrow = { Players = true, Margin = 0.05 },
 	GibLife = 10,
 	BleedTime = 4,
 	Stagger = 0.14,
@@ -731,15 +735,15 @@ Config.Sounds = {
 		{ Id = HIT_STRONG, Volume = 0.9, Speed = 0.8, Var = 0.06, Len = 0.35, Fade = 0.15, Eq = { 4, 0, -4 }, Reach = 110 },
 		{ Id = CLOTH, Volume = 0.45, Speed = 1.4, Var = 0.08, Len = 0.2, Fade = 0.08, Eq = { -8, 0, -2 }, Delay = 0.02 },
 	},
+	GoreRegrow = { -- a lost arm growing back: flesh knitting, then the joint setting into place
+		{ Id = CLOTH, Volume = 0.55, Speed = 0.75, Var = 0.06, Len = 0.4, Fade = 0.18, Eq = { -6, 0, -2 }, Reach = 90 },
+		{ Id = CRACK, Volume = 0.5, Speed = 0.85, Var = 0.05, Len = 0.25, Fade = 0.1, Eq = { 2, 0, -6 }, Delay = 0.3, Reach = 90 },
+	},
 	GoreBurst = { -- the head bursting: a heavy wet blast, bone breaking, the bits raining down
 		{ Id = HIT_STRONG2, Volume = 1.3, Speed = 0.7, Var = 0.05, Len = 0.5, Fade = 0.25, Eq = { 8, 0, -4 }, Drive = 0.25, Reach = 160 },
 		{ Id = BREAK, Volume = 0.8, Speed = 1.1, Var = 0.06, Len = 0.45, Fade = 0.2, Reach = 140 },
 		{ Id = THUD, Volume = 1.2, Speed = 0.6, Var = 0.05, Len = 0.3, Fade = 0.15, Eq = { 8, 0, -12 }, Reach = 140 },
 		{ Id = DEBRIS_SMALL, Volume = 0.4, Speed = 1.3, Var = 0.08, Len = 0.8, Fade = 0.4, Eq = { -6, 0, -4 }, Delay = 0.35, Reach = 90 },
-	},
-	-- blood: a wet spatter on the floor (quiet: under the impact, it sells the drops landing)
-	Splat = {
-		{ Id = STEP, Volume = 0.14, Speed = 2.2, Var = 0.12, Len = 0.05, Fade = 0.04, Eq = { -20, 0, -8 }, Reach = 40 },
 	},
 }
 
@@ -809,6 +813,22 @@ function Config.GoreStageFor(health: number, max: number): number
 	return n
 end
 
+-- a player's stage as its health comes back (Config.Gore.Regrow): `stage` (1: no right arm, 2: no
+-- arms) steps back one arm at a time once the health is Margin above that arm's share. Never below
+-- what the health itself earns, never the head (3)
+function Config.RegrowStage(health: number, max: number, stage: number): number
+	local G = Config.Gore
+	if not (G.Regrow and G.Regrow.Players) or max <= 0 or health <= 0 then
+		return stage
+	end
+	local f = health / max
+	local s = stage
+	while s >= 1 and s <= 2 and f > G.Stages[s] + G.Regrow.Margin do
+		s -= 1
+	end
+	return math.max(s, Config.GoreStageFor(health, max))
+end
+
 -- arms a fighter still has at a gore stage (the right goes first, then the left)
 function Config.ArmsAt(stage: number?): number
 	return math.max(0, 2 - math.min(stage or 0, 2))
@@ -827,6 +847,22 @@ function Config.CanStrike(stage: number?, limbs: { string }?): boolean
 		end
 	end
 	return false
+end
+
+-- may a fighter at gore stage `stage` use this move (an attack name from Config.Attacks)? With one arm
+-- only that hand's single strikes and the Ground Smash; with none, nothing
+function Config.CanUse(stage: number?, move: string): boolean
+	local G = Config.Gore
+	if not G.Enabled then
+		return true
+	end
+	local arms = Config.ArmsAt(stage)
+	if arms >= 2 then
+		return true
+	elseif arms == 0 then
+		return false
+	end
+	return move == G.OneArm.Light or move == G.OneArm.Heavy or move == "Downslam"
 end
 
 -- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the

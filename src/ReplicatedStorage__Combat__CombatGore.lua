@@ -5,10 +5,12 @@
 	  1  the right arm is torn off at the shoulder (health <= 75%)
 	  2  the left arm (<= 50%)
 	  3  the killing blow bursts the head in a huge bloody mist (0)
-	A blow that takes several stages at once plays each of them in turn (a beat apart), in order. A
-	lost limb stays lost until the fighter respawns - and it matters: the server keeps the stage
-	(the character's GoreStage attribute), hides the lost limb for everyone and makes a one-armed
-	fighter easier to hurt and an armless one unable to block (Config.GoreDamage, CombatService).
+	A blow that takes several stages at once plays each of them in turn (a beat apart), in order. An
+	NPC's lost limb stays lost until it respawns; a PLAYER's arms grow back as its health comes back
+	(Config.RegrowStage): the left, then the right, each with the place's own heal burst (the
+	Regrow effect) and the flesh knitting back. It matters: the server keeps the stage (the
+	character's GoreStage attribute), hides the lost limb for everyone and makes a one-armed fighter
+	easier to hurt and single-handed, an armless one unable to block or strike (CombatService).
 
 	Here, on every client: the stage plays on the blow's own frame (the attacker from its own impact
 	frame, everyone else from the server's Hit, which carries the stage), with the torn limb thrown,
@@ -20,7 +22,7 @@
 	What each stage does
 	  ARM   the real arm is hidden (locally) and a copy of it - its colour, its sleeve (the NPC's
 	        Shirt) - is torn away with the blow: thrown along the way the blow drove, tumbling, a torn
-	        wound on its top end (the gore kit's arm end) trailing blood and shedding drops; it hits
+	        wound on its top end (the gore kit's arm end) bleeding and shedding drops; it hits
 	        the ground, rolls and comes to rest (real physics on this client, colliding with the world,
 	        never with a fighter). On the torso the shoulder is a raw stump (the kit's shoulder cap)
 	        that pumps blood in pulses, slowing, and drips
@@ -45,6 +47,7 @@ local TweenService = game:GetService("TweenService")
 local CombatFolder = ReplicatedStorage:WaitForChild("Combat")
 local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local Blood = require(CombatFolder:WaitForChild("CombatBlood"))
+local VFX = require(CombatFolder:WaitForChild("CombatVFX"))
 local FX = require(CombatFolder:WaitForChild("CombatFX"))
 
 local Gore = {}
@@ -75,7 +78,6 @@ local STD = { Torso = Vector3.new(2, 2, 1), Arm = Vector3.new(1, 2, 1), Head = V
 
 local FLESH = Color3.fromRGB(120, 12, 14)
 local BONE = Color3.fromRGB(232, 226, 210)
-local BLOOD = Config.Blood.Color
 
 ---------------------------------------------------------------------------
 -- templates (ReplicatedStorage.Combat.Gore: the gore kit)
@@ -172,14 +174,6 @@ local function give(char: Model, peak: any, omega: number)
 	FX.Give(char, peak, omega, 0.04)
 end
 
-local function nseq(points: { { number } }): NumberSequence
-	local kps = {}
-	for _, p in ipairs(points) do
-		table.insert(kps, NumberSequenceKeypoint.new(p[1], p[2], p[3] or 0))
-	end
-	return NumberSequence.new(kps)
-end
-
 -- a gib / chunk: fades out and is gone after its life
 local function expire(inst: Instance, life: number)
 	task.delay(life, function()
@@ -233,6 +227,7 @@ end
 type Body = {
 	Model: Model, Hum: Humanoid, Torso: BasePart, Head: BasePart, Right: BasePart?, Left: BasePart?,
 	Stage: number, Target: number, Gen: number, Busy: boolean, Hidden: { Instance }, Added: { Instance },
+	Marks: { [number]: { H: number, A: number } }, -- where each stage's hidden / added things start
 	Drive: Vector3, Conns: { RBXScriptConnection },
 }
 local bodies: { [Model]: Body } = {}
@@ -384,25 +379,10 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 	local v = along * 13 + out * (7 + into * 4) + Vector3.new(0, 15 - into * 5, 0)
 	copy.AssemblyLinearVelocity = v
 	copy.AssemblyAngularVelocity = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5).Unit * 14
-	-- the torn end trails blood and sheds drops as it flies
+	-- the torn end bleeds and sheds drops as it flies
 	local tail = Instance.new("Attachment")
 	tail.Position = Vector3.new(0, copy.Size.Y * 0.5, 0)
 	tail.Parent = copy
-	local tail2 = Instance.new("Attachment")
-	tail2.Position = Vector3.new(0, copy.Size.Y * 0.32, 0)
-	tail2.Parent = copy
-	local trail = Instance.new("Trail")
-	trail.Attachment0 = tail
-	trail.Attachment1 = tail2
-	trail.Color = ColorSequence.new(BLOOD, Config.Blood.Dry)
-	trail.Transparency = nseq({ { 0, 0.1 }, { 1, 1 } })
-	trail.Lifetime = 0.3
-	trail.FaceCamera = true
-	trail.WidthScale = nseq({ { 0, 1 }, { 1, 0.3 } })
-	trail.Parent = copy
-	task.delay(0.9, function()
-		trail.Enabled = false
-	end)
 	bleed(tail, function()
 		return copy.CFrame.UpVector
 	end, 1.2, 0.55, gib)
@@ -482,23 +462,6 @@ local function burstHead(b: Body, quiet: boolean?)
 		c.Parent = holder()
 		c.AssemblyLinearVelocity = dir * (14 + math.random() * 18) + b.Drive * 6
 		c.AssemblyAngularVelocity = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 30
-		if not bone and i <= 4 then
-			local a0 = Instance.new("Attachment")
-			a0.Parent = c
-			local a1 = Instance.new("Attachment")
-			a1.Position = Vector3.new(0, size * 0.4, 0)
-			a1.Parent = c
-			local tr = Instance.new("Trail")
-			tr.Attachment0 = a0
-			tr.Attachment1 = a1
-			tr.Color = ColorSequence.new(BLOOD)
-			tr.Lifetime = 0.25
-			tr.FaceCamera = true
-			tr.Parent = c
-			task.delay(0.6, function()
-				tr.Enabled = false
-			end)
-		end
 		expire(c, GC.GibLife)
 	end
 	-- the fountain from the neck, dying down
@@ -571,6 +534,7 @@ local function advance(b: Body, target: number, quiet: boolean?)
 	if quiet then
 		while b.Stage < b.Target do
 			b.Stage += 1
+			b.Marks[b.Stage] = { H = #b.Hidden, A = #b.Added }
 			local fn = STAGE_FN[b.Stage]
 			local ok, err = pcall(function()
 				fn(b, true)
@@ -589,6 +553,7 @@ local function advance(b: Body, target: number, quiet: boolean?)
 	task.spawn(function()
 		while b.Gen == gen and b.Stage < b.Target and b.Model.Parent and not isPlayers(b) do
 			b.Stage += 1
+			b.Marks[b.Stage] = { H = #b.Hidden, A = #b.Added }
 			local fn = STAGE_FN[b.Stage]
 			local ok, err = pcall(function()
 				fn(b)
@@ -618,10 +583,50 @@ function restore(b: Body)
 		inst:Destroy()
 	end
 	table.clear(b.Added)
+	table.clear(b.Marks)
 	b.Stage = 0
 	b.Target = 0
 	b.Gen += 1
 	b.Busy = false
+end
+
+-- a player's arm grown back (the server's stage stepped back): that stage undone - the arm and what
+-- it wears shown again, its stump gone - with the place's heal burst on the new arm and the flesh
+-- knitting. Newest stage first, one at a time. quiet: no effect (a correction, not a regrowth)
+local function regrow(b: Body, target: number, quiet: boolean?)
+	b.Gen += 1 -- (a stage still playing out stops)
+	b.Busy = false
+	while b.Stage > math.max(target, 0) do
+		local m = b.Marks[b.Stage] or { H = 0, A = 0 }
+		for i = #b.Hidden, m.H + 1, -1 do
+			local inst = b.Hidden[i]
+			if inst.Parent then
+				(inst :: any).LocalTransparencyModifier = 0
+			end
+			b.Hidden[i] = nil
+		end
+		for i = #b.Added, m.A + 1, -1 do
+			b.Added[i]:Destroy()
+			b.Added[i] = nil
+		end
+		b.Marks[b.Stage] = nil
+		local arm = if b.Stage == 1 then b.Right elseif b.Stage == 2 then b.Left else nil
+		b.Stage -= 1
+		if arm and arm.Parent and not quiet then
+			local fx = VFX.Play("Regrow", CFrame.new(0, 0.2, 0), { Parent = arm, Scale = 0.6 })
+			if fx then
+				fx:SetAttribute("OverkillGore", true) -- (never in the HUD's portraits)
+			end
+			sound("GoreRegrow", arm.Position)
+		end
+	end
+	b.Target = b.Stage
+end
+Gore.Regrow = function(model: Model, target: number, quiet: boolean?)
+	local b = bodies[model]
+	if b and target < b.Stage then
+		regrow(b, target, quiet)
+	end
 end
 
 local function track(model: Model)
@@ -632,12 +637,11 @@ local function track(model: Model)
 	local b: Body = {
 		Model = model, Hum = hum, Torso = model:FindFirstChild("Torso") :: BasePart, Head = model:FindFirstChild("Head") :: BasePart,
 		Right = model:FindFirstChild("Right Arm") :: BasePart, Left = model:FindFirstChild("Left Arm") :: BasePart,
-		Stage = 0, Target = 0, Gen = 0, Busy = false, Hidden = {}, Added = {}, Drive = Vector3.new(0, 0, -1), Conns = {},
+		Stage = 0, Target = 0, Gen = 0, Busy = false, Hidden = {}, Added = {}, Marks = {}, Drive = Vector3.new(0, 0, -1), Conns = {},
 	}
 	bodies[model] = b
 	Blood.Ignore(model)
-	-- a fighter in the combat: the server's stage (it never goes back - a limb doesn't grow back
-	-- - unless the server makes the body whole again)
+	-- a fighter in the combat: the server's stage (it goes back only when a player's arm grows back)
 	local function serverStage(): number?
 		local st = model:GetAttribute("GoreStage")
 		return if type(st) == "number" then st else nil
@@ -654,9 +658,10 @@ local function track(model: Model)
 				return
 			end
 			if st < b.Stage then
-				restore(b)
+				regrow(b, st)
+			else
+				advance(b, st)
 			end
-			advance(b, st)
 		end)
 	end))
 	-- anything else comes apart by its own health (and stays that way)

@@ -592,3 +592,231 @@ Place.set_name = _set_name
 Place.set_color3uint8 = _set_color3uint8
 Place.find = _find
 Place.clone_instance = _clone_instance
+
+
+# ---------------------------------------------------------------------------------------------
+# deleting instances: every property column split into per-value items, filtered, joined back.
+# split/join are exact inverses (tests: tools/rbxl_delete_check.py round-trips every PROP chunk)
+# ---------------------------------------------------------------------------------------------
+# interleaved column types: (arrays, bytes per value)
+_COLS = {
+    0x03: (1, 4), 0x04: (1, 4), 0x06: (2, 4), 0x07: (4, 4), 0x0B: (1, 4), 0x0C: (3, 4), 0x0D: (2, 4),
+    0x0E: (3, 4), 0x12: (1, 4), 0x18: (4, 4), 0x1A: (3, 1), 0x1B: (1, 8), 0x1C: (1, 4), 0x1F: (1, 16),
+    0x21: (1, 8),
+}
+# fixed-size values stored one after another
+_FIXED = {0x02: 1, 0x05: 8, 0x17: 8}
+
+
+def _cols_split(buf, pos, n, arrays, width):
+    parts = []
+    for _ in range(arrays):
+        cols = [buf[pos + j * n : pos + (j + 1) * n] for j in range(width)]
+        parts.append([bytes(v) for v in zip(*cols)] if n else [])
+        pos += width * n
+    return [b"".join(vs) for vs in zip(*parts)] if n else [], pos
+
+
+def _cols_join(items, arrays, width):
+    out = bytearray()
+    for a in range(arrays):
+        vals = [it[a * width : (a + 1) * width] for it in items]
+        for j in range(width):
+            out += bytes(v[j] for v in vals)
+    return bytes(out)
+
+
+def _cf_split(buf, pos, n):
+    rots = []
+    for _ in range(n):
+        rid = buf[pos]
+        size = 37 if rid == 0 else 1
+        rots.append(bytes(buf[pos : pos + size]))
+        pos += size
+    xyz, pos = _cols_split(buf, pos, n, 3, 4)
+    return list(zip(rots, xyz)), pos
+
+
+def _cf_join(items):
+    return b"".join(r for r, _ in items) + _cols_join([p for _, p in items], 3, 4)
+
+
+def split_values(t, buf, pos, n):
+    """the n values of one property column starting at buf[pos] (after the type byte): a list of
+    per-value items, and the position after the column"""
+    if t == 0x01:
+        out = []
+        for _ in range(n):
+            ln = struct.unpack_from("<I", buf, pos)[0]
+            out.append(bytes(buf[pos : pos + 4 + ln]))
+            pos += 4 + ln
+        return out, pos
+    if t in _FIXED:
+        w = _FIXED[t]
+        return [bytes(buf[pos + i * w : pos + (i + 1) * w]) for i in range(n)], pos + w * n
+    if t in _COLS:
+        return _cols_split(buf, pos, n, *_COLS[t])
+    if t == 0x13:
+        refs, pos = read_referents(buf, pos, n)
+        return refs, pos
+    if t == 0x10:
+        return _cf_split(buf, pos, n)
+    if t == 0x1E:  # OptionalCoordinateFrame: a CFrame column, then a Bool column (has a value)
+        assert buf[pos] == 0x10
+        cfs, pos = _cf_split(buf, pos + 1, n)
+        assert buf[pos] == 0x02
+        flags = [bytes(buf[pos + 1 + i : pos + 2 + i]) for i in range(n)]
+        return list(zip(cfs, flags)), pos + 1 + n
+    if t in (0x15, 0x16):  # NumberSequence / ColorSequence: a count, then keypoints
+        kp = 12 if t == 0x15 else 20
+        out = []
+        for _ in range(n):
+            c = struct.unpack_from("<I", buf, pos)[0]
+            out.append(bytes(buf[pos : pos + 4 + c * kp]))
+            pos += 4 + c * kp
+        return out, pos
+    if t == 0x19:  # PhysicalProperties: a flag, then its floats when custom
+        out = []
+        for _ in range(n):
+            flag = buf[pos]
+            size = 1 + ((24 if flag & 2 else 20) if flag & 1 else 0)
+            out.append(bytes(buf[pos : pos + size]))
+            pos += size
+        return out, pos
+    if t == 0x20:  # Font: family, weight, style, cached face
+        out = []
+        for _ in range(n):
+            start = pos
+            ln = struct.unpack_from("<I", buf, pos)[0]
+            pos += 4 + ln + 3
+            ln = struct.unpack_from("<I", buf, pos)[0]
+            pos += 4 + ln
+            out.append(bytes(buf[start:pos]))
+        return out, pos
+    if t == 0x22:  # Content: source types, then uri / object / external lists (only "None" here)
+        types, pos = _cols_split(buf, pos, n, 1, 4)
+        tail = bytes(buf[pos : pos + 12])
+        if any(v != b"\0\0\0\0" for v in types) or tail != b"\0" * 12:
+            raise ValueError("Content values other than None are not supported")
+        return types, pos + 12
+    raise ValueError("property type 0x%02x not supported" % t)
+
+
+def join_values(t, items):
+    if t == 0x01 or t in _FIXED or t in (0x15, 0x16, 0x19, 0x20):
+        return b"".join(items)
+    if t in _COLS:
+        return _cols_join(items, *_COLS[t])
+    if t == 0x13:
+        return write_referents(items)
+    if t == 0x10:
+        return _cf_join(items)
+    if t == 0x1E:
+        return b"\x10" + _cf_join([c for c, _ in items]) + b"\x02" + b"".join(f for _, f in items)
+    if t == 0x22:
+        return _cols_join(items, 1, 4) + b"\0" * 12
+    raise ValueError("property type 0x%02x not supported" % t)
+
+
+def _sstr_parse(data):
+    version, count = struct.unpack_from("<II", data, 0)
+    pos = 8
+    entries = []
+    for _ in range(count):
+        ln = struct.unpack_from("<I", data, pos + 16)[0]
+        entries.append(bytes(data[pos : pos + 20 + ln]))
+        pos += 20 + ln
+    assert pos == len(data), "SSTR size mismatch"
+    return version, entries
+
+
+def _delete_subtrees(self, roots):
+    """remove these instances and all their descendants from the place. Referents and class ids are
+    renumbered to stay contiguous; a kept Referent property that pointed at a removed instance
+    becomes nil; shared strings nothing uses any more are dropped. Returns the number removed."""
+    dead = set()
+    stack = list(roots)
+    while stack:
+        r = stack.pop()
+        if r in dead:
+            continue
+        dead.add(r)
+        stack.extend(self.children.get(r, []))
+    kept = sorted(r for r in self.ref_class if r not in dead)
+    rmap = {old: i for i, old in enumerate(kept)}
+
+    def mref(r):
+        return -1 if r == -1 else rmap.get(r, -1)
+
+    # which classes survive, and their new ids (in the old order)
+    keep_idx = {}
+    for cid, info in self.classes.items():
+        keep_idx[cid] = [i for i, r in enumerate(info["refs"]) if r not in dead]
+    live = sorted(cid for cid in self.classes if keep_idx[cid])
+    cmap = {old: i for i, old in enumerate(live)}
+
+    sstr = next((c for c in self.chunks if c.name == b"SSTR"), None)
+    new_chunks = []
+    ss_props = []  # (chunk, head, items) of SharedString columns, re-indexed below
+    used_ss = set()
+    for ch in self.chunks:
+        d = ch.data
+        if ch.name == b"INST":
+            cid, nlen = struct.unpack_from("<II", d, 0)
+            if cid not in cmap:
+                continue
+            info = self.classes[cid]
+            p = 8 + nlen
+            fmt = d[p]
+            n = len(info["refs"])
+            idx = keep_idx[cid]
+            refs = [rmap[info["refs"][i]] for i in idx]
+            extra = b""
+            if fmt:
+                marks = d[p + 5 + 4 * n : p + 5 + 5 * n]
+                extra = bytes(marks[i] for i in idx)
+            ch.data = struct.pack("<I", cmap[cid]) + bytes(d[4 : p + 1]) + struct.pack("<I", len(refs)) + write_referents(refs) + extra
+            ch.dirty = True
+        elif ch.name == b"PROP":
+            cid, nlen = struct.unpack_from("<II", d, 0)
+            if cid not in cmap:
+                continue
+            head = 8 + nlen + 1
+            t = d[head - 1]
+            n = len(self.classes[cid]["refs"])
+            items, end = split_values(t, d, head, n)
+            assert end == len(d), "column size mismatch in %s" % d[8 : 8 + nlen]
+            items = [items[i] for i in keep_idx[cid]]
+            if t == 0x13:
+                items = [mref(r) for r in items]
+            if t == 0x1C:
+                used_ss.update(int.from_bytes(v, "big") for v in items)
+                ss_props.append((ch, head, items))
+            ch.data = struct.pack("<I", cmap[cid]) + bytes(d[4:head]) + join_values(t, items)
+            ch.dirty = True
+        elif ch.name == b"PRNT":
+            count = struct.unpack_from("<I", d, 1)[0]
+            kids, p = read_referents(d, 5, count)
+            pars, _ = read_referents(d, p, count)
+            pairs = [(rmap[k], mref(pa)) for k, pa in zip(kids, pars) if k not in dead]
+            ch.data = bytes(d[:1]) + struct.pack("<I", len(pairs)) + write_referents([k for k, _ in pairs]) + write_referents([pa for _, pa in pairs])
+            ch.dirty = True
+        new_chunks.append(ch)
+    if sstr is not None:
+        version, entries = _sstr_parse(sstr.data)
+        order = sorted(used_ss)
+        smap = {old: i for i, old in enumerate(order)}
+        sstr.data = struct.pack("<II", version, len(order)) + b"".join(entries[i] for i in order)
+        sstr.dirty = True
+        for ch, head, items in ss_props:
+            items = [smap[int.from_bytes(v, "big")].to_bytes(4, "big") for v in items]
+            ch.data = bytes(ch.data[:head]) + join_values(0x1C, items)
+    self.chunks = new_chunks
+    self.class_count = len(live)
+    self.inst_count = len(kept)
+    self.header = self.header[:14] + struct.pack("<HII", self.version, self.class_count, self.inst_count) + self.header[24:]
+    self._parse()
+    return len(dead)
+
+
+Place.delete_subtrees = _delete_subtrees

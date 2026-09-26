@@ -10,7 +10,7 @@
 
 	THE SEQUENCE (seconds after touchdown). Every particle is one of the place's own effects
 	(ReplicatedStorage.Combat.VFX, from the imported packs) - aimed, sized and timed here, never made
-	  0.00  IMPACT      a flash of light, the heavy hit flash (HitFlashHeavy) with its ring and lines
+	  0.00  IMPACT      the heavy hit flash (HitFlashHeavy) with its ring and lines
 	                    (Impact), the ground cracking in a black flash under the foot (FloorCrack, the
 	                    Big pack's crack) and black shards of it thrown out along the ground to the rim;
 	                    the cracks that stay for the hold spread over the whole broken ground
@@ -408,27 +408,9 @@ end
 
 ---------------------------------------------------------------------------
 -- effects: the place's own (ReplicatedStorage.Combat.VFX, from the imported packs), aimed, sized
--- and timed here - no particle is made in code. The flash of light under the foot is a light
+-- and timed here - no effect of any kind is made in code
 ---------------------------------------------------------------------------
 local VFX = require(CombatFolder:WaitForChild("CombatVFX"))
-local light: PointLight? = nil
-local function flashLight(): PointLight
-	local l = light
-	if l and l.Parent then
-		return l
-	end
-	local a = Instance.new("Attachment")
-	a.Name = "ShatterLight"
-	a.Parent = workspace.Terrain
-	local nl = Instance.new("PointLight")
-	nl.Brightness = 0
-	nl.Range = 16
-	nl.Color = Color3.fromRGB(255, 238, 208)
-	nl.Shadows = false
-	nl.Parent = a
-	light = nl
-	return nl
-end
 
 local function frameAlong(pos: Vector3, dir: Vector3): CFrame
 	local up = if dir.Magnitude > 1e-3 then dir.Unit else Vector3.yAxis
@@ -649,20 +631,8 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 	local groundFrame = frameAlong(center + nrm * 0.12, nrm)
 	local fx = R / 7.2 -- (the effects' sizes below are for the default radius)
 
-	-- IMPACT: a flash of light, the heavy hit flash and its ring and lines, the ground cracking in a
-	-- black flash under the foot and shards of it thrown out along the ground
-	local l = flashLight()
-	local lightAt = l.Parent :: Attachment
-	lightAt.CFrame = frameAlong(center + nrm * 1.4, nrm)
-	l.Brightness = 3.2
-	task.spawn(function()
-		local t0 = os.clock()
-		while os.clock() - t0 < 0.2 do
-			l.Brightness = 3.2 * (1 - (os.clock() - t0) / 0.2)
-			RunService.Heartbeat:Wait()
-		end
-		l.Brightness = 0
-	end)
+	-- IMPACT: the heavy hit flash and its ring and lines, the ground cracking in a black flash under
+	-- the foot and shards of it thrown out along the ground
 	VFX.Play("HitFlashHeavy", frameAlong(center + nrm * 1.2, nrm), { Scale = 1.4 })
 	VFX.Play("Impact", frameAlong(center + nrm * 0.6, nrm), { Scale = 2.4 })
 	if water then

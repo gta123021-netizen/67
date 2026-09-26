@@ -169,13 +169,53 @@ end
 ---------------------------------------------------------------------------
 -- entities + state
 ---------------------------------------------------------------------------
+-- THE GUARD AND THE ESCAPE WINDOW, AS THE ATTACKER SAW THEM. A blow is judged against the guard
+-- (and the escape window) the attacker's own screen showed when its blow landed there - the
+-- server's state a round trip ago - so the number that screen stamps on its impact frame is the
+-- number dealt: a guard raised after that came too late, one dropped after that still stopped it.
+-- A short history of each is kept here (the attacker's screen predicts with the same rules).
+local HISTORY = 1.5 -- seconds of it kept (the longest rewind is far shorter)
+local function guardLog(e: Entity, t: number, up: boolean)
+	local spans = e.GuardSpans
+	if up then
+		table.insert(spans, { Up = t, Down = nil })
+	else
+		local last = spans[#spans]
+		if last and not last.Down then
+			last.Down = t
+		end
+	end
+	while #spans > 1 and spans[1].Down and t - spans[1].Down > HISTORY do
+		table.remove(spans, 1)
+	end
+end
+-- was the guard up (and up long enough: Config.Guard.StartDelay) at time `tau`?
+local function guardedAt(e: Entity, tau: number): boolean
+	local spans = e.GuardSpans
+	for i = #spans, 1, -1 do
+		local sp = spans[i]
+		if sp.Up + Config.Guard.StartDelay <= tau and (sp.Down == nil or tau < sp.Down) then
+			return true
+		end
+	end
+	return false
+end
+
 local function setState(e: Entity, s: string, duration: number?, force: boolean?): boolean
 	s = States.Resolve(s)
+	local fromGuard, toGuard = e.State == "Blocking", s == "Blocking"
 	if e.State == "Dead" and s ~= "Dead" then
 		return false
 	end
 	if not force and e.State ~= s and not States.CanEnter(e.State, s) then
 		return false
+	end
+	if e.GuardSpans then
+		if toGuard and not fromGuard then
+			guardLog(e, now(), true)
+		elseif fromGuard and not toGuard then
+			guardLog(e, now(), false)
+		end
 	end
 	e.State = s
 	e.StateSerial += 1
@@ -246,6 +286,9 @@ function Service.Register(char: Model, player: Player?): Entity?
 		LastHitAt = 0,
 		AirPending = false,
 		GoreStage = 0,
+		GuardSpans = {}, -- the guard's recent history: { Up, Down? } (see guardedAt)
+		Escape = false, -- in the escape window (no stun can land) - the Escape attribute too
+		EscapeLog = {}, -- its recent flips: { At, On }
 		Locks = {},
 		Conns = {},
 	}
@@ -256,6 +299,7 @@ function Service.Register(char: Model, player: Player?): Entity?
 	char:SetAttribute("CombatState", "Idle")
 	char:SetAttribute("CombatEntity", true)
 	char:SetAttribute("GoreStage", 0)
+	char:SetAttribute("Escape", false)
 	if e.Npc then
 		for _, p in ipairs(char:GetDescendants()) do
 			if p:IsA("BasePart") and not p.Anchored then
@@ -515,6 +559,15 @@ local function rewindFor(att: Entity): number
 	return math.clamp(latency(att) * 2 + Config.Hitbox.Rewind, 0, Config.Hitbox.RewindMax)
 end
 
+-- how old the fighters' states on this attacker's screen are: a round trip (attributes aren't
+-- interpolated like bodies)
+local function stateAgeFor(att: Entity): number
+	if not att.Player then
+		return 0
+	end
+	return math.clamp(latency(att) * 2, 0, Config.Hitbox.RewindMax)
+end
+
 local function hittable(e: Entity): boolean
 	return alive(e)
 		and States.Allows(e.State, "Hittable")
@@ -712,6 +765,32 @@ local function canStun(vic: Entity, t: number): boolean
 	return t >= vic.StunImmuneUntil and vic.Budget >= SB.Min
 end
 
+-- the escape window's recent flips (logged every frame; see THE GUARD AND THE ESCAPE WINDOW)
+local function escapeLog(e: Entity, t: number)
+	local esc = not canStun(e, t)
+	if esc == e.Escape then
+		return
+	end
+	e.Escape = esc
+	local log = e.EscapeLog
+	table.insert(log, { At = t, On = esc })
+	while #log > 2 and t - log[2].At > HISTORY do
+		table.remove(log, 1)
+	end
+	e.Char:SetAttribute("Escape", esc)
+end
+-- was it in its escape window at time `tau`?
+local function escapeAt(e: Entity, tau: number): boolean
+	local log = e.EscapeLog
+	for i = #log, 1, -1 do
+		if log[i].At <= tau then
+			return log[i].On
+		end
+	end
+	return if #log > 0 then not log[1].On else e.Escape
+end
+Service._guardedAt, Service._escapeAt = guardedAt, escapeAt -- (tests)
+
 -- spend stun budget; running dry opens the escape window after `endsAt`
 local function spend(vic: Entity, seconds: number, endsAt: number)
 	vic.Budget = math.max(0, vic.Budget - seconds)
@@ -782,12 +861,21 @@ end
 local function resetLocked(att: Entity, vic: Entity, t: number): boolean
 	return vic.LastStunBy == att and vic.LastStunChain ~= att.ChainId and controlFor(vic, t) < Config.Combo.ResetGrace
 end
+-- the same, as it stood at `tau` (the attacker's screen: control that came back after it hadn't yet)
+local function resetLockedAt(att: Entity, vic: Entity, tau: number): boolean
+	if not (vic.LastStunBy == att and vic.LastStunChain ~= att.ChainId) then
+		return false
+	end
+	local since = vic.ControlSince
+	return since == nil or since > tau or tau - since < Config.Combo.ResetGrace
+end
 
 ---------------------------------------------------------------------------
 -- limbs (Config.Gore): how far a fighter's body has come apart - the right arm, the left arm, the
--- head - worked out from its health and kept until it respawns (a limb never grows back). A lost
--- limb is hidden for everyone here; every client adds the torn wounds, the blood and the thrown
--- limb itself (CombatGore). Fewer arms: more damage taken, a weaker guard, then no guard at all
+-- head - worked out from its health. An NPC keeps it until it respawns; a player's arms grow back as
+-- its health comes back (Config.RegrowStage). A lost limb is hidden for everyone here; every client
+-- adds the torn wounds, the blood and the thrown limb itself, and the regrowth effect (CombatGore).
+-- Fewer arms: more damage taken, a weaker guard, single strikes, then no guard and no strikes
 ---------------------------------------------------------------------------
 local dropGuard: (Entity) -> ()
 local LIMBS = { "Right Arm", "Left Arm", "Head" }
@@ -836,6 +924,34 @@ local function hideLimb(char: Model, part: BasePart)
 	end
 end
 
+-- a player's arm grown back: everything vanish() hid on it shows again as it was
+local function unvanish(obj: any)
+	local was = obj:GetAttribute("GoreHidden")
+	if type(was) == "number" then
+		obj.Transparency = was
+		obj:SetAttribute("GoreHidden", nil)
+	end
+end
+local function showLimb(char: Model, part: BasePart)
+	unvanish(part)
+	for _, d in ipairs(part:GetChildren()) do
+		if d:IsA("Decal") then
+			unvanish(d)
+		end
+	end
+	for _, acc in ipairs(char:GetChildren()) do
+		local h = acc:IsA("Accessory") and acc:FindFirstChild("Handle")
+		if h and h:IsA("BasePart") then
+			for _, j in ipairs(h:GetDescendants()) do
+				if heldBy(j, part) then
+					unvanish(h)
+					break
+				end
+			end
+		end
+	end
+end
+
 -- a tool is held in the right hand: with that arm gone it goes back in the backpack (never held
 -- by a hand that isn't there)
 function stowTools(e: Entity)
@@ -851,13 +967,17 @@ function stowTools(e: Entity)
 end
 Service.StowTools = stowTools
 
--- the body catches up with the health it has left (never back: only a respawn makes it whole)
+-- the body catches up with the health it has left. An NPC never gets a limb back (only a respawn
+-- makes it whole); a player's arms grow back as its health does (Config.RegrowStage)
 function updateGore(e: Entity)
 	if not goreFor(e) or not e.Char.Parent then
 		return
 	end
 	local was = e.GoreStage or 0
 	local st = math.max(was, Config.GoreStageFor(e.Hum.Health, e.Hum.MaxHealth))
+	if st == was and e.Player and not e.Npc and e.Hum.Health > 0 then
+		st = Config.RegrowStage(e.Hum.Health, e.Hum.MaxHealth, was)
+	end
 	if st == was then
 		return
 	end
@@ -867,6 +987,12 @@ function updateGore(e: Entity)
 		local part = e.Char:FindFirstChild(LIMBS[i])
 		if part and part:IsA("BasePart") then
 			hideLimb(e.Char, part)
+		end
+	end
+	for i = was, st + 1, -1 do
+		local part = e.Char:FindFirstChild(LIMBS[i])
+		if part and part:IsA("BasePart") then
+			showLimb(e.Char, part)
 		end
 	end
 	-- no right arm, nothing held; no arms, no guard
@@ -894,15 +1020,20 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	}
 	-- no stun for this fighter now: its escape window, its budget spent, or a restarted chain
 	local immune = not canStun(vic, t) or resetLocked(att, vic, t)
-	-- guard: facing the attacker with the guard up (and up long enough)
+	-- guard: facing the attacker with the guard up (and up long enough) - as the attacker's screen
+	-- had it when the blow landed there (a guard dropped since still stops it, one raised since came
+	-- too late), and still able to take it now
+	local tau = t - stateAgeFor(att)
 	local toAtt = att.Root.Position - vic.Root.Position
 	local facing = flat(vic.Root.CFrame.LookVector):Dot(flat(toAtt)) > Config.Guard.Arc
-	local guarded = vic.State == "Blocking" and facing and t >= vic.BlockStartAt + Config.Guard.StartDelay
+	local guarded = facing and guardedAt(vic, tau) and (vic.State == "Blocking" or States.Allows(vic.State, "Block"))
+	-- a guard breaker is held off by a fighter that was in its escape window (the same moment)
+	local breakHeld = escapeAt(vic, tau) or resetLockedAt(att, vic, tau)
 	if STUDIO and vic.State == "Blocking" and not guarded and workspace:GetAttribute("CombatDebugHits") then
 		print(string.format("[HitDbg] guard missed: facing dot %.2f, up for %.2f", flat(vic.Root.CFrame.LookVector):Dot(flat(toAtt)), t - vic.BlockStartAt))
 	end
 	local dmg = 0
-	if guarded and def.GuardBreak and not immune then
+	if guarded and def.GuardBreak and not breakHeld then
 		-- guard break: shattered, not knocked down (they tried to block): the directional reaction,
 		-- slowed, a controlled slide, then a moment before the guard can go up again
 		dmg = def.GuardBreakDamage or def.Damage * 0.5
@@ -1510,7 +1641,8 @@ end
 --[[ an attack request. info = { Kind = "Light" | "Heavy", Air = bool, Want = slot the client plays,
 	Seq = the client's request number (its position reports name the strike by it),
 	H = (Air) the client's height above the ground }
-	Returns ok, attack, slot, chain snapshot { Slot, Heavy, Lights, Enter (where the clip entered) } ]]
+	Returns ok, attack, slot, chain snapshot { Slot, Heavy, Lights, Enter (where the clip entered),
+	Stage (the gore stage it was decided at) } ]]
 function Service.RequestAttack(char: Model, info: any?): (boolean, string?, number?, any?)
 	local e = entities[char]
 	if not alive(e) then
@@ -1526,11 +1658,16 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 	local start = t - latency(ent)
 	-- players get a little slack for the network; NPCs are on the server's own clock
 	local slack = if ent.Npc then 0 else Config.Combo.Slack
+	-- lost arms: one left throws single strikes with that hand, none throws nothing (Config.Gore)
+	local stage = if goreFor(ent) then ent.GoreStage or 0 else 0
+	if Config.ArmsAt(stage) == 0 then
+		return false
+	end
 	-- forward dash + M1
 	if ent.State == "Dashing" then
 		local dash = Config.Dash[ent.DashDir or ""]
 		local into = t - ent.DashStart
-		if kind == "Light" and info.Air ~= true and ent.DashDir == "Forward" and dash and into >= dash.AttackFrom - 0.05 and into <= dash.AttackTo + slack and t >= ent.DashAttackUntil then
+		if kind == "Light" and info.Air ~= true and ent.DashDir == "Forward" and dash and into >= dash.AttackFrom - 0.05 and into <= dash.AttackTo + slack and t >= ent.DashAttackUntil and Config.CanUse(stage, "DashAttack") then
 			ent.DashAttackUntil = t + Config.Attacks.DashAttack.LengthReal + Config.Attacks.DashAttack.Cooldown
 			endChain(ent)
 			startAttack(ent, "DashAttack", 0, start, info.Seq, nil)
@@ -1594,7 +1731,7 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 		at = c.OpenAt
 		start = c.OpenAt
 	end
-	local verdict, name, slot, heavy, lights = Rules.Decide(c, kind, at, slack, want)
+	local verdict, name, slot, heavy, lights = Rules.Decide(c, kind, at, slack, want, stage)
 	if verdict ~= "go" or not name then
 		return false
 	end
@@ -1608,9 +1745,9 @@ function Service.RequestAttack(char: Model, info: any?): (boolean, string?, numb
 	-- chain point falls) - the attacking client works it out the same way
 	local prev = if (slot :: number) > 1 then c.Last else nil
 	local _, enter = Config.Transition(prev, name :: string)
-	Rules.Commit(ent.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, start - enter / Config.Attacks[name :: string].Speed)
+	Rules.Commit(ent.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, start - enter / Config.Attacks[name :: string].Speed, stage)
 	startAttack(ent, name :: string, slot :: number, start, info.Seq, prev)
-	return true, name, slot, { Slot = ent.Chain.Slot, Heavy = ent.Chain.Heavy, Lights = ent.Chain.Lights, Enter = enter }
+	return true, name, slot, { Slot = ent.Chain.Slot, Heavy = ent.Chain.Heavy, Lights = ent.Chain.Lights, Enter = enter, Stage = stage }
 end
 
 -- a player's report of where its own screen has its body during a strike (see Config.Hitbox)
@@ -1918,6 +2055,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 		if e.Budget < SB.Max and e.ControlSince and t - e.ControlSince >= SB.Grace then
 			e.Budget = math.min(SB.Max, e.Budget + dt * SB.Max / SB.Refill)
 		end
+		escapeLog(e, t)
 		if publish then
 			publishDebug(e, t)
 		end

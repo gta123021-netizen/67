@@ -570,6 +570,40 @@ end
 
 -- the bodies a strike of mine could land on, as this screen shows them
 type Body = { Model: Model, Root: BasePart }
+-- WHAT THIS SCREEN SAW of each fighter it could strike - when its guard went up, when it got control
+-- back, which of my chains last stunned it - so my impact frame judges the guard, the escape window
+-- and the one-chain-per-stun rule exactly as the server does (it judges them as of that same frame:
+-- see CombatService, THE GUARD AND THE ESCAPE WINDOW). The damage number stamped then is the one dealt
+type Seen = { BlockSince: number, ControlSince: number?, StunChain: number?, Conn: RBXScriptConnection? }
+local seen: { [Model]: Seen } = setmetatable({}, { __mode = "k" }) :: any
+local function watchFighter(m: Model): Seen
+	local w = seen[m]
+	if w then
+		return w
+	end
+	local st = m:GetAttribute("CombatState")
+	-- (first seen already guarding / in control: long enough ago)
+	w = { BlockSince = -math.huge, ControlSince = if type(st) == "string" and States.HasControl(st) then -math.huge else nil }
+	local last = st
+	w.Conn = m:GetAttributeChangedSignal("CombatState"):Connect(function()
+		local s = m:GetAttribute("CombatState")
+		if s == last then
+			return
+		end
+		if s == "Blocking" then
+			w.BlockSince = now()
+		end
+		if type(s) == "string" and States.HasControl(s) then
+			w.ControlSince = w.ControlSince or now()
+		else
+			w.ControlSince = nil
+		end
+		last = s
+	end)
+	seen[m] = w
+	return w
+end
+
 local function strikeCandidates(): { Body }
 	local list: { Body } = {}
 	for _, m in ipairs(charList()) do
@@ -579,6 +613,7 @@ local function strikeCandidates(): { Body }
 				local r = standing(c)
 				local st = c:GetAttribute("CombatState")
 				if r and st ~= "Recovering" and st ~= "Dead" and c:GetAttribute("Invulnerable") ~= true then
+					watchFighter(c)
 					table.insert(list, { Model = c, Root = r })
 				end
 			end
@@ -648,15 +683,26 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	local acf = CFrame.lookAt(root.Position, root.Position + flat(root.CFrame.LookVector))
 	local vcf = CFrame.lookAt(vr.Position, vr.Position + flat(vr.CFrame.LookVector))
 	local toMe = flat(root.Position - vr.Position)
-	local guarded = victim:GetAttribute("CombatState") == "Blocking" and flat(vr.CFrame.LookVector):Dot(toMe) > Config.Guard.Arc
-	local brk = guarded and def.GuardBreak == true
+	-- the guard as the server will judge it: up (on this screen) long enough, facing me
+	local w = watchFighter(victim)
+	local guardUp = victim:GetAttribute("CombatState") == "Blocking" and now() - w.BlockSince >= Config.Guard.StartDelay
+	local guarded = guardUp and flat(vr.CFrame.LookVector):Dot(toMe) > Config.Guard.Arc
+	-- no stun lands in its escape window, nor from a new chain of mine on a body my last one stunned
+	-- that has hardly had control back (a guard breaker is held off then: a plain block)
+	local restarted = w.StunChain ~= nil and w.StunChain ~= a.ChainKey and (w.ControlSince == nil or now() - w.ControlSince < Config.Combo.ResetGrace)
+	local held = victim:GetAttribute("Escape") == true or restarted
+	local brk = guarded and def.GuardBreak == true and not held
 	local blocked = guarded and not brk
-	-- (a launcher inside a chain takes them down; the server may still hold it back - an escape
-	-- window - and then its own word shows the rest)
-	local launched = not guarded and def.Launch ~= nil and a.Slot > 0
+	-- (a launcher inside a chain takes them down, unless held)
+	local launched = not guarded and not held and def.Launch ~= nil and a.Slot > 0
+	local prevStun = w.StunChain
+	local stuns = not guarded and not held and not launched
+	if stuns then
+		w.StunChain = a.ChainKey -- (this blow stuns it: the chain that did)
+	end
 	local hs = if brk then Config.Guard.BreakHitstop elseif blocked then class.BlockHitstop else class.Hitstop
 	local drive = flat(acf.LookVector)
-	a.Impact = { Victim = victim, At = at, Blocked = blocked, Break = brk, T = now() }
+	a.Impact = { Victim = victim, At = at, Blocked = blocked, Break = brk, T = now(), ChainKey = a.ChainKey, Stuns = stuns, PrevStun = prevStun }
 	ctx.Predicted[a.Seq] = a.Impact
 	dbg("impact", def.Id, victim.Name, if blocked then "blocked" elseif brk then "break" else "clean")
 	FX.Connect({
@@ -678,6 +724,21 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 	local hum = victim:FindFirstChildOfClass("Humanoid")
 	if hum then
 		Gore.Hit(victim, hum.Health - dmg, drive)
+	end
+end
+
+-- a body this screen took further apart than the server did (a blow it saw land that the server
+-- judged otherwise): put back, quietly, to the server's word - once no other blow of mine on it is
+-- still waiting for the server's
+local function goreSync(victim: Model, except: number?)
+	for seq, p in pairs(ctx.Predicted) do
+		if seq ~= except and p.Victim == victim and not p.Confirmed then
+			return
+		end
+	end
+	local st = victim:GetAttribute("GoreStage")
+	if type(st) == "number" and Gore.StageOf(victim) > st then
+		Gore.Regrow(victim, st, true)
 	end
 end
 
@@ -762,7 +823,10 @@ local function playAttack(name: string, slot: number, replaySeq: number?, prev: 
 	ctx.AttackSerial += 1
 	local serial = ctx.AttackSerial
 	local t0 = t - enter / def.Speed -- the clip's own zero (it enters at `enter`)
-	local a = { Name = name, Slot = slot, T0 = t0, Serial = serial, Seq = seq, Def = def, Stopped = false, SentAt = workspace:GetServerTimeNow(), Enter = enter }
+	if slot <= 1 and not replaySeq then
+		ctx.ChainKey += 1 -- (a new chain, or a strike of its own: the server counts them the same way)
+	end
+	local a = { Name = name, Slot = slot, T0 = t0, Serial = serial, Seq = seq, Def = def, Stopped = false, SentAt = workspace:GetServerTimeNow(), Enter = enter, ChainKey = ctx.ChainKey }
 	ctx.Attack = a
 	ctx.Buffer = if ctx.Buffer and ctx.Buffer.Kind == "Dash" then ctx.Buffer else nil
 	setLocal("Attacking", math.max(0.05, t0 + busyTime(def) - t))
@@ -783,15 +847,6 @@ local function playAttack(name: string, slot: number, replaySeq: number?, prev: 
 			FX.Sound(SWING_SOUND[name] or "Swing", ctx.Root.Position, 1)
 		end
 	end)
-	-- the sweep's leg and the uppercut's fist leave a short trail through their arc
-	if name == "Sweep" or name == "Uppercut" then
-		local lead = if name == "Sweep" then 0.2 else 0.12
-		task.delay(math.max(0, t0 + (def.Hit - lead) / def.Speed - t), function()
-			if ctx and ctx.AttackSerial == serial then
-				FX.LimbTrail(ctx.Char, if name == "Sweep" then "Right Leg" else "Left Arm", lead / def.Speed + 0.08, if name == "Sweep" then "Low" else nil)
-			end
-		end)
-	end
 	-- face the aim, step straight along it (never toward anybody)
 	if name ~= "Downslam" then
 		local dir = aimDirection()
@@ -841,6 +896,12 @@ local function heightAboveGround(root: BasePart): number
 	groundParams.FilterDescendantsInstances = charList()
 	local hit = workspace:Raycast(root.Position, Vector3.new(0, -60, 0), groundParams)
 	return if hit then math.max(0, root.Position.Y - hit.Position.Y - 3) else 20
+end
+
+-- how far this body has come apart (Config.Gore: lost arms change what it can throw)
+local function myStage(): number
+	local st = ctx and ctx.Char:GetAttribute("GoreStage")
+	return if type(st) == "number" then st else 0
 end
 
 local function startDownslam()
@@ -951,6 +1012,30 @@ local function startDashAttack()
 	end, { StopAtWalls = true, Ignore = charList(), Fighters = fighterRoots(), Gap = def.Ideal - 0.6, Width = Config.Dash.StopWidth })
 end
 
+-- one-handed (Config.Gore.OneArm): every strike stands alone, with its recovery after it. A press
+-- made in the last moments of it is kept and fires the instant the recovery ends - never lost to
+-- mashing a beat early, never early itself
+local function queueSingle(kind: string, stage: number, t: number)
+	if Config.ArmsAt(stage) ~= 1 then
+		return
+	end
+	local ready = ctx.Chain.CooldownUntil
+	if ready <= t or ready - t > COMBO.Buffer then
+		return
+	end
+	bufferPress(kind)
+	local c = ctx
+	task.delay(ready - t + 0.01, function()
+		if ctx ~= c then
+			return
+		end
+		local k = takeBuffer(ATTACKS, false)
+		if k then
+			tryAttack(k)
+		end
+	end)
+end
+
 -- a strike on the way in: M1 / M2 pressed (or fired from the buffer)
 function tryAttack(kind: string)
 	if inputBlocked() then
@@ -962,11 +1047,16 @@ function tryAttack(kind: string)
 	end
 	local t = now()
 	local s = ctx.State
+	-- no arms, no attacks of any kind (it can only move); one arm: that hand's single strikes
+	local stage = myStage()
+	if Config.ArmsAt(stage) == 0 then
+		return
+	end
 	if s == "Dashing" then
 		if kind == "Light" then
 			local d = Config.Dash.Forward
 			local into = t - ctx.DashStart
-			if ctx.DashDir == "Forward" and into >= d.AttackFrom and into <= d.AttackTo and t >= ctx.DashAttackUntil then
+			if ctx.DashDir == "Forward" and into >= d.AttackFrom and into <= d.AttackTo and t >= ctx.DashAttackUntil and Config.CanUse(stage, "DashAttack") then
 				startDashAttack()
 				return
 			end
@@ -998,9 +1088,10 @@ function tryAttack(kind: string)
 		return
 	end
 	if s == "Attacking" and not live then
-		return -- a finisher / dash strike / stomp owns the character to its end
+		queueSingle(kind, stage, t)
+		return -- a finisher / dash strike / stomp / one-handed strike owns the character to its end
 	end
-	local verdict, name, slot, heavy, lights = Rules.Decide(ctx.Chain, kind, t)
+	local verdict, name, slot, heavy, lights = Rules.Decide(ctx.Chain, kind, t, nil, nil, stage)
 	dbg("try", kind, s, verdict, name, slot, t - ctx.Chain.OpenAt)
 	if verdict == "early" then
 		-- pressed before the chain point: kept if close enough, fired exactly on it (once)
@@ -1011,6 +1102,9 @@ function tryAttack(kind: string)
 		return
 	end
 	if verdict ~= "go" or not name then
+		if verdict == "no" then
+			queueSingle(kind, stage, t)
+		end
 		return
 	end
 	if (slot :: number) <= 1 then
@@ -1020,7 +1114,7 @@ function tryAttack(kind: string)
 	-- the pair decides where the clip enters, so where its chain point falls (the server agrees)
 	local prev = if (slot :: number) > 1 then ctx.Chain.Last else nil
 	local _, enter = Config.Transition(prev, name :: string)
-	Rules.Commit(ctx.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, t - enter / Config.Attacks[name :: string].Speed)
+	Rules.Commit(ctx.Chain, name :: string, slot :: number, heavy :: boolean, lights :: number, t - enter / Config.Attacks[name :: string].Speed, stage)
 	playAttack(name :: string, slot :: number, nil, prev)
 end
 
@@ -1340,14 +1434,6 @@ local function otherSwing(model: Model, key: string)
 			FX.Sound(SWING_SOUND[key] or "Swing", r.Position, 1)
 		end
 	end)
-	if key == "Sweep" or key == "Uppercut" then
-		local lead = if key == "Sweep" then 0.2 else 0.12
-		task.delay(math.max(0, (def.Hit - lead) / def.Speed), function()
-			if model.Parent then
-				FX.LimbTrail(model, if key == "Sweep" then "Right Leg" else "Left Arm", lead / def.Speed + 0.08, if key == "Sweep" then "Low" else nil)
-			end
-		end)
-	end
 end
 
 local debugHit: (data: any) -> () = function() end
@@ -1383,6 +1469,19 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 		if type(data.H) == "number" and victim then
 			Gore.Hit(victim, data.H, if typeof(data.DV) == "Vector3" then data.DV else nil, data.GS)
 		end
+		-- who stunned it last (the one-chain-per-stun rule, kept the way the server keeps it)
+		local w = victim and seen[victim]
+		if w then
+			local stunned = (data.S or 0) > 0 and not data.B and not data.G and not data.RD and not data.IM
+			local p = if mine then ctx and ctx.Predicted[data.Seq] else nil
+			if mine and stunned then
+				w.StunChain = if p then p.ChainKey elseif ctx and ctx.Attack and ctx.Attack.Seq == data.Seq then ctx.Attack.ChainKey else w.StunChain
+			elseif mine and p and p.Stuns then
+				w.StunChain = p.PrevStun -- (the server held it: no stun, the last one's chain stands)
+			elseif not mine and stunned then
+				w.StunChain = nil -- (someone else's now)
+			end
+		end
 		-- my last arm just went: no guard (the server has already dropped it)
 		if ctx and victim == ctx.Char and type(data.GS) == "number" and Config.ArmsAt(data.GS) == 0 then
 			dropGuardLocal()
@@ -1409,6 +1508,7 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 				if math.abs(delta) > 1e-3 then
 					FX.DamageCorrect(victim, delta)
 				end
+				goreSync(victim, data.Seq)
 			elseif victim and (data.D or 0) > 0 then
 				local dk = if data.G then "Break"
 					elseif data.B then "Block"
@@ -1488,8 +1588,12 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 					local def = Config.Attacks[name]
 					local enter = if type(data.Chain) == "table" and type(data.Chain.Enter) == "number" then data.Chain.Enter else 0
 					cancelActions(true)
+					if slot <= 1 and (a.Slot or 0) > 1 then
+						ctx.ChainKey += 1 -- (the server started a new chain where this screen carried on)
+					end
 					if def and slot > 0 then
-						Rules.Commit(ctx.Chain, name, slot, ctx.Chain.Heavy, ctx.Chain.Lights, startedAt - enter / def.Speed)
+						local stage = if type(data.Chain) == "table" and type(data.Chain.Stage) == "number" then data.Chain.Stage else myStage()
+						Rules.Commit(ctx.Chain, name, slot, ctx.Chain.Heavy, ctx.Chain.Lights, startedAt - enter / def.Speed, stage)
 						if type(data.Chain) == "table" then
 							ctx.Chain.Slot = data.Chain.Slot
 							ctx.Chain.Heavy = data.Chain.Heavy
@@ -1592,6 +1696,9 @@ local function updateLocomotion(dt: number)
 				ctx.Predicted[seq] = nil
 				if not p.Confirmed and p.D and p.Victim then
 					FX.DamageCorrect(p.Victim, -p.D)
+					if p.Victim.Parent then
+						goreSync(p.Victim)
+					end
 				end
 			end
 		end
@@ -1762,6 +1869,7 @@ local function setup(char: Model)
 		Chain = Rules.New(),
 		ChainTick = 0,
 		ChainNo = 0,
+		ChainKey = 0, -- the server's chain count for the one-chain-per-stun rule (see watchFighter)
 		Align = nil,
 		YawVel = 0,
 		Attack = nil,
@@ -1803,6 +1911,9 @@ local function setup(char: Model)
 		SavedAutoRotate = true,
 	}
 	ctx = c
+	for _, w in pairs(seen) do
+		w.StunChain = nil -- (a new body: no chain of it has stunned anyone)
+	end
 	hum.WalkSpeed = Config.WalkSpeed
 	hum.UseJumpPower = false
 	hum.JumpHeight = Config.JumpHeight

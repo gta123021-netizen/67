@@ -22,7 +22,6 @@
 	  Camera(hum, profile, dir)  a short directional impulse (Config.Camera): the view knocked along the
 	                             blow, a touch of roll, a quick push-in, an optional low rumble - never
 	                             a continuous shake. SetCameraBase keeps the shift-lock shoulder offset
-	  LimbTrail(char, limb, t)   a short trail following a limb (the sweep's leg, the uppercut's fist)
 	  Stomp(pos, attacker)       the Ground Smash (CombatShatter)
 	  Dash(char, dir) / GroundDust(pos, scale) / GuardBreak(char, pos) / Damage(...)
 ]]
@@ -349,10 +348,6 @@ function FX.Sound(name: string, pos: Vector3?, pitch: number?)
 		end
 	end
 end
-Blood.SoundHook = function(name: string, pos: Vector3)
-	FX.Sound(name, pos, 1)
-end
-
 -- a footfall on whatever the feet are on (terrain or part material)
 function FX.Footstep(pos: Vector3, material: Enum.Material?, volume: number?)
 	local mat = material
@@ -496,48 +491,6 @@ function FX.BlockGive(char: Model, class: any, dir: number, heavy: boolean?, hol
 		NeckYaw = -dir * (tilt.Yaw or 0) * 0.5,
 		NeckPitch = (tilt.Pitch or 0) * 0.5,
 	}, if heavy then 12 else 15, hold)
-end
-
----------------------------------------------------------------------------
--- limb trails (the sweep's leg arc, the uppercut's rising fist)
----------------------------------------------------------------------------
-function FX.LimbTrail(char: Model, limbName: string, duration: number, style: string?)
-	local limb = char:FindFirstChild(limbName)
-	if not (limb and limb:IsA("BasePart")) then
-		return
-	end
-	-- (a limb that has been torn off leaves no trail)
-	if limb.Transparency >= 0.99 or limb.LocalTransparencyModifier >= 0.99 then
-		return
-	end
-	local a0 = Instance.new("Attachment")
-	a0.Name = "CombatTrail0"
-	a0.Position = Vector3.new(0, -0.35, 0)
-	local a1 = Instance.new("Attachment")
-	a1.Name = "CombatTrail1"
-	a1.Position = Vector3.new(0, -1.05, 0)
-	a0.Parent = limb
-	a1.Parent = limb
-	local t = Instance.new("Trail")
-	t.Attachment0 = a0
-	t.Attachment1 = a1
-	t.FaceCamera = true
-	t.Lifetime = if style == "Low" then 0.22 else 0.16
-	t.MinLength = 0.05
-	t.WidthScale = NumberSequence.new(1, 0.2)
-	t.LightEmission = 0.35
-	t.LightInfluence = 0.6
-	t.Color = if style == "Low" then ColorSequence.new(Color3.fromRGB(214, 206, 188)) else ColorSequence.new(Color3.fromRGB(235, 235, 240))
-	t.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.55), NumberSequenceKeypoint.new(1, 1) })
-	t.Parent = limb
-	task.delay(duration, function()
-		t.Enabled = false
-		task.delay(t.Lifetime + 0.05, function()
-			t:Destroy()
-			a0:Destroy()
-			a1:Destroy()
-		end)
-	end)
 end
 
 ---------------------------------------------------------------------------
@@ -767,7 +720,6 @@ function FX.Connect(info: any)
 			end)
 			if info.Victim then
 				FX.GroundDust(at, 0.75)
-				Blood.Pool(info.Victim)
 			end
 		end
 	end

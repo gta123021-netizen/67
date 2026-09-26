@@ -18,6 +18,9 @@
 	    M2 in the same chain is refused (the chain carries on with M1).
 	  - Starting later than CloseAt starts a fresh chain; pressing before OpenAt is "early" (the
 	    client keeps it in its buffer when it is within Config.Combo.Buffer of OpenAt).
+	  - A fighter that has lost an arm (its gore stage, Config.Gore) never chains: M1 / M2 throw one
+	    strike with the hand it has left (Config.Gore.OneArm), which ends the chain like a finisher,
+	    with OneArm.Recover after it. With no arms a press does nothing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -66,11 +69,22 @@ end
 	  "early"  the chain point hasn't come yet (buffer it)
 	  "no"     nothing (finisher cooldown, or a second heavy)
 	slack widens every edge (server). want = the slot the client says it is playing: right at the
-	reset edge it decides between "carry on" and "start over", never anything else. ]]
-function Rules.Decide(c: Chain, kind: string, t: number, slack: number?, want: number?): (string, string?, number?, boolean?, number?)
+	reset edge it decides between "carry on" and "start over", never anything else. stage = the
+	fighter's gore stage (lost arms: see the rules above). ]]
+function Rules.Decide(c: Chain, kind: string, t: number, slack: number?, want: number?, stage: number?): (string, string?, number?, boolean?, number?)
 	local s = slack or 0
 	if t < c.CooldownUntil - s then
 		return "no"
+	end
+	local arms = if Config.Gore.Enabled then Config.ArmsAt(stage) else 2
+	if arms == 0 then
+		return "no"
+	elseif arms == 1 then
+		if c.Slot > 0 and t <= c.CloseAt + s and t < c.OpenAt - s then
+			return "early" -- (the arm went mid-chain: the strike that owns the body runs to its chain point)
+		end
+		local one = Config.Gore.OneArm
+		return "go", if kind == "Heavy" then one.Heavy else one.Light, 1, false, 0
 	end
 	local live = c.Slot > 0 and t <= c.CloseAt + s
 	if live and want == 1 and t >= c.CloseAt - s then
@@ -102,12 +116,14 @@ function Rules.Decide(c: Chain, kind: string, t: number, slack: number?, want: n
 	return "go", C.Lights[math.clamp(lights + 1, 1, #C.Lights)], slot, heavy, lights + 1
 end
 
--- record a strike that started at `start` (chain point / window from its own timing)
-function Rules.Commit(c: Chain, attack: string, slot: number, heavy: boolean, lights: number, start: number)
+-- record a strike that started at `start` (chain point / window from its own timing). stage = the
+-- fighter's gore stage: a one-armed fighter's strike stands alone (the chain ends with it)
+function Rules.Commit(c: Chain, attack: string, slot: number, heavy: boolean, lights: number, start: number, stage: number?)
 	local def = Config.Attacks[attack]
-	if attack == C.Finisher then
+	local single = Config.Gore.Enabled and Config.ArmsAt(stage) < 2
+	if attack == C.Finisher or single then
 		Rules.Reset(c)
-		c.CooldownUntil = start + def.LengthReal + C.FinisherCooldown
+		c.CooldownUntil = start + def.LengthReal + (if single then Config.Gore.OneArm.Recover else C.FinisherCooldown)
 		c.Last = attack
 		c.LastKind = "Finisher"
 		return

@@ -18,7 +18,9 @@
 
   - `build_v47.py <v46 with the VFX library and gore models.rbxl> src <out.rbxl>` - the v47 build: the new
     modules, the effect templates and gore models moved into `ReplicatedStorage.Combat`, the rest of the
-    imported library out of the live world into `ServerStorage.VFXLibrary`, then `src/`
+    imported library (133 items, the smashed-jaw model among them) deleted from the place, then `src/`
+  - `rbxl_delete_check.py <place.rbxl> <path>` - proves the instance deletion on a real place: every
+    property column splits and joins back byte for byte, and everything kept is unchanged
   - `sourcemap.py` - a Rojo-style sourcemap so `luau-lsp analyze` can type-check `src/`
   - `build_place.py` - the older writer for the `.rbxlx` builds
 - `tests/` - headless tests, run with [Lune](https://github.com/lune-org/lune) from the repository root:
@@ -30,13 +32,18 @@
   - `lune run tests/chain_net.luau` - 400 networked chains (every sequence, 0-150 ms, players and dummies,
     flat / uphill / downhill / bumps / a step): every strike connects, the attacker's screen agrees with the
     server, every impact within its reach
-  - `lune run tests/blood_test.luau` - the blood's physics: exact flight, splatters on every surface and never
-    over an edge, water / glass / thin walls, outward spray, stain shapes, drying, pooling, the cap
-  - `lune run tests/gore_test.luau` - the NPC gore: thresholds, order, NPC-only, heal restore, every piece's
-    seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
+  - `lune run tests/blood_test.luau` - the blood's physics: exact flight, drops ending on every surface (never
+    inside one, never over an edge) and gone, water / glass / thin walls, outward spray, no particle
+    reaching a surface, the drop pool, no splatter code left
+  - `lune run tests/gore_test.luau` - the gore: thresholds, order, players' arms growing back with the heal
+    effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
   - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout
-  - `lune run tests/limbs_test.luau` - the server's limb rules: stages kept until respawn, lost limbs hidden,
-    one-arm damage and guard chip, no guard without arms, players too, tools stowed
+  - `lune run tests/limbs_test.luau` - the server's limb rules: stages, lost limbs hidden, players' arms
+    growing back (never an NPC's), one-arm damage and guard chip, one-handed single strikes, no guard and
+    no attacks without arms, players too, tools stowed
+  - `lune run tests/guard_sync_test.luau` - the guard and the escape window judged as the attacker's screen
+    saw them (a last-instant raise or drop), so its damage number is the one dealt
+  - `lune run tests/limb_status_test.luau` - the limb-state pill over the hotbar
   - `lune run tests/shatter_test.luau` - the Ground Smash visuals on flat ground, slopes, bumps, platforms,
     steps, walls, ledges, water; the place's effects only, smoke rolling outward; pools, overlap, the descent
   - `python3 tests/gore_kit_check.py <place.rbxl>` - CombatGore's measured kit offsets against the place
@@ -63,9 +70,11 @@
 - The attacking practice dummy is gone; the still and guarding dummies remain.
 
 ### Effects
-- The imported VFX library supplies the hit flashes, block sparks, dust and cracks (templates in
-  `ReplicatedStorage.Combat.VFX`); everything else from the import is kept in `ServerStorage.VFXLibrary`,
-  out of the live world.
+- The imported VFX library supplies the hit flashes, block sparks, dust, cracks and the regrowth burst
+  (templates in `ReplicatedStorage.Combat.VFX`); everything else from the import is deleted from the
+  place (6.5 MB -> 1.5 MB).
+- Every effect is the library's own: no particle, trail or light is made in code (the old limb trails,
+  gib trails and the stomp's flash light are gone).
 - Layered, recorded combat sounds; a subtle directional camera kick per blow.
 
 ### Blood (`CombatBlood`)
@@ -75,27 +84,38 @@
 - Each moving particle's path (its emitter's speed, spread, gravity and drag) is traced through the world
   first and its life cut short, so it fades before it could reach a floor, wall or ceiling: nothing lands
   and nothing is left on the floor.
-- The gore's bleeding uses the same effects; its droplets are gone where they land. (Floor splatters and
-  pools still exist behind `Config.Blood.Stains`, off by default.)
+- The gore's bleeding uses the same effects; its droplets are gone where they land. There are no floor
+  splatters or pools (that code is gone).
 
 ### Limbs and gore (`CombatGore`, `CombatService`) - NPCs and players
 - As a fighter's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
   (50%), and the killing blow bursts the head in a thick red mist. Players too (`Config.Gore.Players`).
-- A lost limb stays lost until the fighter respawns. The server keeps the stage (the character's
-  `GoreStage` attribute, and on every Hit) and hides the lost limb for everyone; every client plays it on
-  the blow's own frame (the attacker from its own impact frame) with the torn limb thrown, the wounds and
-  the blood. A body already missing limbs when a client first sees it (a late join) just has its wounds.
+- An NPC's lost limb stays lost until it respawns. A PLAYER's arms grow back as its health comes back
+  (`Config.Gore.Regrow`): the left once its health is 5% over 50%, then the right once it is 5% over 75%
+  (the margin keeps it from flickering at a line), each with the library's heal burst on the new arm and
+  the flesh knitting back. The head never.
+- The server keeps the stage (the character's `GoreStage` attribute, and on every Hit) and hides the lost
+  limb for everyone; every client plays it on the blow's own frame (the attacker from its own impact
+  frame) with the torn limb thrown, the wounds and the blood. A body already missing limbs when a client
+  first sees it (a late join) just has its wounds.
 - Losing arms matters (`Config.Gore.OneArm` / `NoArms`, one shared rule `Config.GoreDamage`):
-  - one arm: every blow does x1.15, and a block lets through twice the chip
-  - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25
+  - one arm: every blow does x1.15, and a block lets through twice the chip. It fights with the hand it
+    has left and never combos: M1 is a single left straight, M2 a single left uppercut, each a strike of
+    its own with a short recovery after it; no dash strike (the right hand's). The Ground Smash stays.
+  - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25, and
+    no attack of any kind - it can only move
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
-  - a strike thrown with a torn-off fist whiffs (the strike still plays; `Config.CanStrike`): the right
-    straight needs the right arm, the uppercut the left, the hook either, kicks and the smash never care
-- Damage numbers are stamped on the attacker's own impact frame by the same rule the server deals
-  damage by; the server's number only corrects it if it differs (a blow it never confirms is taken back).
+  - (a strike never swings a missing arm; `Config.CanUse`, `Config.CanStrike`)
+- A pill over the hotbar shows your own state: ONE ARM (vulnerable, single strikes), NO ARMS (no guard,
+  no attacks), and a green ARM RESTORED as one grows back.
+- Damage numbers are stamped on the attacker's own impact frame, and the server deals that same number:
+  it judges the guard and the escape window as the attacker's screen saw them (a round trip ago), and
+  that screen predicts with the same rules (the guard up long enough, the `Escape` attribute, one chain
+  per stun). A blow the server never confirms is taken back; a limb this screen tore off that the
+  server didn't is quietly put back.
 - Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the
   shoulders keep the kit's stumps, pumping blood. The burst leaves the neck stump and skull base, with
-  droplets, chunks and a fountain. The kit's torso hole and the smashed-jaw model are not used.
+  droplets, chunks and a fountain. The kit's torso hole is not used.
 - The HUD's portraits (profile, avatar previews) always show the fighter whole.
 - Works on any R6 body: every piece is fitted to that body's own part sizes and pose.
 

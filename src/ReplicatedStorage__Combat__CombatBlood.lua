@@ -14,7 +14,6 @@
 	      nothing lands, nothing is left behind
 	  Blood.Burst(pos, dir, name, scale?, count?)   one of those effects, the same way (the gore)
 	  Blood.Launch(pos, vel, size)   one droplet (the gore's bleeding): see below
-	  Blood.Pool(char)   a knocked-out body bleeds a pool that spreads under it (Stains only)
 	  Blood.Clear()      everything gone at once
 
 	THE PHYSICS. A droplet obeys  dv/dt = -k v + g  (air drag k, the world's gravity g), integrated
@@ -23,25 +22,15 @@
 	in substeps of at most 1/120 s, each tested for contact by a ray along its chord (the arc bends
 	less than a thousandth of a stud inside one), so the flight and the landing spot are the same at
 	any frame rate and a fast drop can't skip through a thin wall. Where a drop meets something solid -
-	floor, slope, step, wall, ceiling, terrain - it is gone: nothing stays behind
-	(Config.Blood.Stains = false, the default). See-through things (glass, triggers, force fields)
-	and non-colliding decorations don't catch blood; fighters don't either (it falls past them).
-
-	With Config.Blood.Stains = true a landing drop leaves a splatter flat on that surface instead,
-	stretched the way it was travelling (a grazing drop smears, a straight-down one is round) and
-	sized by the drop's size and speed, and a fast one throws a couple of tiny satellite drops along
-	it; water swallows it. Splatters fit the ground they land on: their corners are probed first; one
-	that would hang over a ledge or float over (or sink into) a bump shrinks until it fits, or isn't
-	laid. They darken as they
-	dry, then fade and are reused (Config.Blood.Splat: Hold, Fade, Cap - at the cap the oldest one is
-	taken). Nothing here collides, catches a ray or touches anything: anchored, CanCollide / CanQuery /
-	CanTouch off, all pooled.
+	floor, slope, step, wall, ceiling, terrain, water - it is gone: nothing stays behind.
+	See-through things (glass, triggers, force fields) and non-colliding decorations don't catch
+	blood; fighters don't either (it falls past them). Nothing here collides, catches a ray or
+	touches anything: anchored, CanCollide / CanQuery / CanTouch off, all pooled.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Combat"):WaitForChild("CombatConfig"))
 local VFX = require(ReplicatedStorage:WaitForChild("Combat"):WaitForChild("CombatVFX"))
@@ -49,7 +38,6 @@ local VFX = require(ReplicatedStorage:WaitForChild("Combat"):WaitForChild("Comba
 local Blood = {}
 
 local B = Config.Blood
-local SPLAT_TEXTURE = "rbxassetid://10189639437" -- (blood kit: pooling blood, a flat spread of blood)
 local MAX_DROPS = 72
 local DROP_LIFE = 2.5 -- a drop that has met nothing by then (off a cliff) is gone
 local SUBSTEP = 1 / 120
@@ -60,7 +48,7 @@ local K = B.Drag
 local TERMINAL = G / K -- the velocity drag and gravity balance at
 Blood.Gravity = GRAVITY
 
-Blood.Stats = { Drops = 0, Landed = 0, Splats = 0, Lost = 0, Water = 0, Satellites = 0, Bursts = 0 }
+Blood.Stats = { Drops = 0, Landed = 0, Lost = 0, Water = 0, Bursts = 0 }
 
 ---------------------------------------------------------------------------
 -- the exact flight: position and velocity after `h` seconds from (x, v)
@@ -238,190 +226,13 @@ function Blood.ParticleClearance(pos: Vector3, dir: Vector3, spread: number, spe
 	return math.max(0.01, soonest * 0.85)
 end
 
----------------------------------------------------------------------------
--- splatters (pooled flat parts with the blood decal on top)
----------------------------------------------------------------------------
-type Splat = { Part: Part, Decal: Decal, Serial: number, Born: number, Busy: boolean }
-local splats: { Splat } = {}
-Blood.Splats = splats
-local splatLayer = 0
-
 local PARK = CFrame.new(0, -5000, 0)
-local THICK = 0.02 -- a splat part's thickness: its decal (top face) sits THICK / 2 over its centre
 
-local function newSplat(): Splat
-	local p = Instance.new("Part")
-	p.Name = "BloodSplat"
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanQuery = false
-	p.CanTouch = false
-	p.CastShadow = false
-	p.Transparency = 1
-	p.Size = Vector3.new(1, THICK, 1)
-	p.CFrame = PARK
-	p.Parent = holder()
-	local d = Instance.new("Decal")
-	d.Face = Enum.NormalId.Top
-	d.Texture = SPLAT_TEXTURE
-	d.Color3 = B.Color
-	d.Transparency = 1
-	d.Parent = p
-	local s = { Part = p, Decal = d, Serial = 0, Born = 0, Busy = false }
-	table.insert(splats, s)
-	return s
-end
-
-local function takeSplat(): Splat
-	local oldest: Splat? = nil
-	for _, s in ipairs(splats) do
-		if not s.Busy then
-			return s
-		end
-		if not oldest or s.Born < oldest.Born then
-			oldest = s
-		end
-	end
-	if #splats < B.Splat.Cap then
-		return newSplat()
-	end
-	return oldest :: Splat -- at the cap the oldest is reused (a new drop never waits)
-end
-
--- how far the surface under a spot is from the plane through `center` with normal `n` (nil: no
--- surface there - a ledge, a hole, the edge of a wall)
-local function surfaceOffset(center: Vector3, n: Vector3, spot: Vector3): number?
-	local hit = castSolid(spot + n * 0.5, -n * 1.0)
-	if not hit then
-		return nil
-	end
-	return (hit.Position - center):Dot(n)
-end
-
-local FIT_SPREAD = 0.06 -- the surface under one splat may rise and fall this much at most
-local GRID = 4 -- probes: a (GRID + 1) x (GRID + 1) grid over the splat
---[[ the largest size (<= want) at which a splat lies flat on this surface, and how high above the
-	contact its plane must sit to clear the highest point under it. The surface is probed on a grid
-	over the whole splat (corners, edges, inside); a splat that would hang over an edge (no surface
-	under a probe) or whose surface varies more than FIT_SPREAD (it would float over the low side)
-	shrinks until it fits, or isn't laid ]]
-local function fitSize(center: Vector3, n: Vector3, right: Vector3, fwd: Vector3, want: number, stretch: number): (number?, number)
-	local size = want
-	for _ = 1, 5 do
-		local ok = true
-		local hi, lo = 0, 0
-		local hx, hz = size * 0.5, size * stretch * 0.5
-		for i = 0, GRID do
-			for j = 0, GRID do
-				local off = surfaceOffset(center, n, center + right * ((i / GRID * 2 - 1) * hx) + fwd * ((j / GRID * 2 - 1) * hz))
-				if not off then
-					ok = false
-					break
-				end
-				hi = math.max(hi, off)
-				lo = math.min(lo, off)
-				if hi - lo > FIT_SPREAD then
-					ok = false
-					break
-				end
-			end
-			if not ok then
-				break
-			end
-		end
-		if ok then
-			return size, hi
-		end
-		size *= 0.62
-		if size < B.Splat.Min * 0.5 then
-			return nil, 0
-		end
-	end
-	return nil, 0
-end
-Blood.FitSize = fitSize
-
--- lay a splatter where a drop landed. travel = the drop's velocity at contact
-local function laySplat(hit: RaycastResult, travel: Vector3, size: number, quiet: boolean?): Splat?
-	if hit.Material == Enum.Material.Water then
-		Blood.Stats.Water += 1
-		return nil
-	end
-	local n = hit.Normal
-	-- stretched along the travel projected on the surface (a drop landing at a shallow angle smears)
-	local tang = travel - n * travel:Dot(n)
-	local speed = travel.Magnitude
-	local fwd: Vector3
-	if tang.Magnitude > 0.5 then
-		fwd = tang.Unit
-	else
-		local ref = if math.abs(n.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
-		fwd = n:Cross(ref).Unit
-	end
-	local right = fwd:Cross(n).Unit
-	fwd = n:Cross(right).Unit
-	-- the stain's shape (bloodstain analysis): width / length = sin(impact angle), so a drop coming
-	-- straight down lands round and a grazing one smears long along its travel
-	local sinA = if speed > 0.1 then math.abs(travel.Unit:Dot(n)) else 1
-	local stretch = math.clamp(1 / math.max(sinA, 1e-3), 1, 3.5)
-	if stretch < 1.25 then
-		-- a round stain turns any way (its texture never repeats the same angle)
-		local a = math.random() * math.pi * 2
-		local r2 = right * math.cos(a) + fwd * math.sin(a)
-		fwd = n:Cross(r2).Unit
-		right = r2
-	end
-	local want = math.clamp(size, B.Splat.Min, B.Splat.Max)
-	local fit, rise = fitSize(hit.Position, n, right, fwd, want, stretch)
-	if not fit then
-		return nil
-	end
-	local s = takeSplat()
-	s.Serial += 1
-	local serial = s.Serial
-	s.Busy = true
-	s.Born = os.clock()
-	splatLayer = (splatLayer + 1) % 8
-	-- the decal (the part's top face) clears the highest point under it by a hair; overlapping
-	-- splats sit at slightly different heights so they never z-fight
-	local lift = rise + 0.006 + splatLayer * 0.0012
-	local cf = CFrame.fromMatrix(hit.Position + n * lift, right, n, -fwd)
-	local p, d = s.Part, s.Decal
-	local full = Vector3.new(fit, THICK, fit * stretch)
-	p.Size = full * 0.45
-	p.CFrame = cf
-	d.Color3 = B.Color
-	d.Transparency = 0.08
-	Blood.Stats.Splats += 1
-	-- the drop spreads as it lands, then dries darker, then fades
-	TweenService:Create(p, TweenInfo.new(0.16 + fit * 0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = full }):Play()
-	TweenService:Create(d, TweenInfo.new(B.Splat.Hold, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { Color3 = B.Dry }):Play()
-	if not quiet and math.random() < 0.3 then
-		local sounds = Blood.SoundHook
-		if sounds then
-			sounds("Splat", hit.Position)
-		end
-	end
-	task.delay(B.Splat.Hold, function()
-		if s.Serial ~= serial then
-			return
-		end
-		TweenService:Create(d, TweenInfo.new(B.Splat.Fade, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Transparency = 1 }):Play()
-		task.delay(B.Splat.Fade + 0.05, function()
-			if s.Serial == serial then
-				s.Busy = false
-				p.CFrame = PARK
-			end
-		end)
-	end)
-	return s
-end
-Blood.LaySplat = laySplat
 
 ---------------------------------------------------------------------------
 -- droplets: pooled wet ellipsoids on exact ballistic paths, all moved in one heartbeat
 ---------------------------------------------------------------------------
-type Drop = { Part: Part, Pos: Vector3, Vel: Vector3, Size: number, Age: number, Live: boolean, Satellite: boolean }
+type Drop = { Part: Part, Pos: Vector3, Vel: Vector3, Size: number, Age: number, Live: boolean }
 local drops: { Drop } = {}
 Blood.Drops = drops
 local stepConn: RBXScriptConnection? = nil
@@ -443,7 +254,7 @@ local function newDrop(): Drop
 	m.MeshType = Enum.MeshType.Sphere
 	m.Parent = p
 	p.Parent = holder()
-	local d = { Part = p, Pos = Vector3.zero, Vel = Vector3.zero, Size = 0.14, Age = 0, Live = false, Satellite = false }
+	local d = { Part = p, Pos = Vector3.zero, Vel = Vector3.zero, Size = 0.14, Age = 0, Live = false }
 	table.insert(drops, d)
 	return d
 end
@@ -460,32 +271,11 @@ local function takeDrop(): Drop?
 	return nil
 end
 
-local launch: (Vector3, Vector3, number, boolean?) -> ()
-
--- a drop met a surface: its splash (or its splat), and (fast ones) a couple of satellites thrown off
--- along it
-local function land(d: Drop, hit: RaycastResult, v: Vector3)
+-- a drop met a surface: it is simply gone where it lands (nothing is left behind)
+local function land(hit: RaycastResult)
 	Blood.Stats.Landed += 1
-	local speed = v.Magnitude
-	if B.Stains then
-		laySplat(hit, v, d.Size * (4.2 + math.min(speed, 30) * 0.035), d.Satellite)
-	elseif hit.Material == Enum.Material.Water then
+	if hit.Material == Enum.Material.Water then
 		Blood.Stats.Water += 1
-	end
-	if not B.Stains then
-		return -- (it is simply gone where it lands: nothing is left behind)
-	end
-	if not d.Satellite and speed > 16 and hit.Material ~= Enum.Material.Water then
-		local n = hit.Normal
-		local tang = v - n * v:Dot(n)
-		if tang.Magnitude > 1 then
-			for _ = 1, 2 do
-				local side = n:Cross(tang.Unit) * (math.random() - 0.5) * 0.8
-				local out = (tang.Unit + side).Unit * tang.Magnitude * 0.25 + n * (2 + math.random() * 2)
-				Blood.Stats.Satellites += 1
-				launch(hit.Position + n * 0.06, out, d.Size * 0.45, true)
-			end
-		end
 	end
 end
 
@@ -502,12 +292,9 @@ local function fly(d: Drop, dt: number): boolean
 		local delta = x1 - d.Pos
 		local hit = if delta.Magnitude > 1e-5 then castSolid(d.Pos, delta) else nil
 		if hit then
-			-- the velocity at the moment of contact (the fraction of the chord it got through)
-			local f = math.clamp((hit.Position - d.Pos).Magnitude / delta.Magnitude, 0, 1)
-			local _, vHit = advance(d.Pos, d.Vel, h * f)
 			d.Pos = hit.Position
 			d.Live = false
-			land(d, hit, vHit)
+			land(hit)
 			return false
 		end
 		d.Pos, d.Vel = x1, v1
@@ -553,7 +340,7 @@ local function step(dt: number)
 end
 Blood.Step = step
 
-launch = function(pos: Vector3, vel: Vector3, size: number, satellite: boolean?)
+function Blood.Launch(pos: Vector3, vel: Vector3, size: number)
 	local d = takeDrop()
 	if not d then
 		return
@@ -564,14 +351,10 @@ launch = function(pos: Vector3, vel: Vector3, size: number, satellite: boolean?)
 	d.Pos = pos
 	d.Vel = vel
 	d.Size = size
-	d.Satellite = satellite == true
 	d.Part.Color = B.Color
 	if not stepConn then
 		stepConn = RunService.Heartbeat:Connect(step)
 	end
-end
-Blood.Launch = function(pos: Vector3, vel: Vector3, size: number)
-	launch(pos, vel, size)
 end
 
 -- one drop's ejection off the wound: a random direction round the outward normal, between the
@@ -639,8 +422,6 @@ end
 ---------------------------------------------------------------------------
 -- API
 ---------------------------------------------------------------------------
-Blood.SoundHook = nil :: ((string, Vector3) -> ())? -- CombatFX plugs its sound player in
-
 function Blood.Spray(pos: Vector3, drive: Vector3, tierName: string?, victim: Model?, dirSign: number?)
 	if not B.Enabled or not inView(pos) then
 		return
@@ -687,31 +468,7 @@ function Blood.Burst(pos: Vector3, dir: Vector3, name: string, scale: number?, c
 	Blood.Stats.Bursts += 1
 end
 
--- a knocked-out body: a pool spreads slowly out from under the torso
-function Blood.Pool(char: Model)
-	if not B.Enabled or not B.Stains then
-		return
-	end
-	task.delay(1.1, function()
-		local torso = char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-		if not (torso and torso:IsA("BasePart") and torso.Parent) or not inView(torso.Position) then
-			return
-		end
-		refreshFilter(true)
-		local hit = castSolid(torso.Position + Vector3.new(0, 1, 0), Vector3.new(0, -5, 0))
-		if hit and hit.Normal.Y > 0.7 then
-			laySplat(hit, Vector3.zero, 2.6, true)
-		end
-	end)
-end
-
 function Blood.Clear()
-	for _, s in ipairs(splats) do
-		s.Serial += 1
-		s.Busy = false
-		s.Decal.Transparency = 1
-		s.Part.CFrame = PARK
-	end
 	for _, d in ipairs(drops) do
 		d.Live = false
 		d.Part.CFrame = PARK
