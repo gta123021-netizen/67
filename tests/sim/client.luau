@@ -47,6 +47,10 @@ return function(Env)
 		if k == "Position" then
 			local cf = self._p.CFrame
 			return if cf then cf.Position else nil
+		elseif k == "AncestryChanged" or k == "Destroying" then
+			local sig = Env.Signal.new()
+			self._p[k] = sig
+			return sig
 		elseif k == "WorldCFrame" or k == "WorldPosition" then
 			local cf = self._p.CFrame or CF.identity
 			local parent = self._p.Parent
@@ -82,7 +86,21 @@ return function(Env)
 			self._p.CFrame = CF.new(v)
 			return
 		end
+		local was = self._p[k]
 		self._p[k] = v
+		local sig = self._p.PropSignals and self._p.PropSignals[k]
+		if sig and was ~= v then
+			sig:Fire()
+		end
+	end
+	function proto:GetPropertyChangedSignal(k)
+		self._p.PropSignals = self._p.PropSignals or {}
+		local sig = self._p.PropSignals[k]
+		if not sig then
+			sig = Env.Signal.new()
+			self._p.PropSignals[k] = sig
+		end
+		return sig
 	end
 	function proto:IsA(c)
 		local cls = self.ClassName
@@ -134,6 +152,16 @@ return function(Env)
 		end
 		walk(self)
 		return out
+	end
+	function proto:IsDescendantOf(anc)
+		local p = self._p.Parent
+		while p do
+			if p == anc then
+				return true
+			end
+			p = if type(p) == "table" and rawget(p, "_p") then p._p.Parent else rawget(p, "Parent")
+		end
+		return false
 	end
 	function proto:Destroy()
 		self.Parent = nil

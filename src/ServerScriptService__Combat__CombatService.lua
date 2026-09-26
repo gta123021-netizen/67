@@ -922,6 +922,34 @@ local function heldBy(j: Instance, part: BasePart): boolean
 	return false
 end
 
+-- worn on `part`: held by a weld / constraint to it, or attached where it attaches (its handle has
+-- an attachment named like one of the part's own - HairAttachment, HatAttachment... on the head -
+-- which still holds once a dying body's joints have broken: the hair goes the instant the head does).
+-- Never what sits on an arm's shoulder: the nub - the arm's upper half - keeps it
+local function wornOn(h: BasePart, part: BasePart): boolean
+	if string.find(part.Name, "Arm") then
+		for _, a in ipairs(h:GetChildren()) do
+			if a:IsA("Attachment") and string.find(a.Name, "ShoulderAttachment") and part:FindFirstChild(a.Name) then
+				return false
+			end
+		end
+	end
+	for _, a in ipairs(h:GetChildren()) do
+		if a:IsA("Attachment") then
+			local mine = part:FindFirstChild(a.Name)
+			if mine and mine:IsA("Attachment") then
+				return true
+			end
+		end
+	end
+	for _, j in ipairs(h:GetDescendants()) do
+		if heldBy(j, part) then
+			return true
+		end
+	end
+	return false
+end
+
 -- a lost limb is gone for everyone: the part, the face on it, whatever is worn on it. What each
 -- looked like before is kept on it (GoreHidden): a still copy of the fighter - the HUD's portraits -
 -- shows it whole
@@ -940,13 +968,8 @@ local function hideLimb(char: Model, part: BasePart)
 	end
 	for _, acc in ipairs(char:GetChildren()) do
 		local h = acc:IsA("Accessory") and acc:FindFirstChild("Handle")
-		if h and h:IsA("BasePart") then
-			for _, j in ipairs(h:GetDescendants()) do
-				if heldBy(j, part) then
-					vanish(h)
-					break
-				end
-			end
+		if h and h:IsA("BasePart") and wornOn(h, part) then
+			vanish(h)
 		end
 	end
 end
@@ -968,13 +991,8 @@ local function showLimb(char: Model, part: BasePart)
 	end
 	for _, acc in ipairs(char:GetChildren()) do
 		local h = acc:IsA("Accessory") and acc:FindFirstChild("Handle")
-		if h and h:IsA("BasePart") then
-			for _, j in ipairs(h:GetDescendants()) do
-				if heldBy(j, part) then
-					unvanish(h)
-					break
-				end
-			end
+		if h and h:IsA("BasePart") and wornOn(h, part) then
+			unvanish(h)
 		end
 	end
 end
@@ -1152,6 +1170,11 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		questStat(vic.Player, "Blocks", 1)
 	else
 		dmg = def.Damage
+	end
+	-- where the effects go: a clean blow's on the body's surface where it lands (the contact); a
+	-- blocked one's or a guard break's where the guard met the striking limb
+	if (data.B or data.G) and job.HitFist then
+		data.P = job.HitFist
 	end
 	-- a body missing arms takes more, and a one-armed guard stops less (Config.GoreDamage: the
 	-- attacker's screen predicts the same number on its own impact frame)
@@ -1467,7 +1490,7 @@ local function stepJob(job: any, t: number): boolean
 				end
 				local vcf = rewoundFrame(v, seenAt)
 				-- (a lost arm: that side of the body is narrower, and a limb gone never lands)
-				local hit, at = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius, stageAt(v, seenAt), if goreFor(e) then e.GoreStage else 0)
+				local hit, at, fist = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius, stageAt(v, seenAt), if goreFor(e) then e.GoreStage else 0)
 				if debugHits then
 					-- Studio tuning: remember how close each strike came to each body
 					job.Dbg = job.Dbg or {}
@@ -1491,6 +1514,7 @@ local function stepJob(job: any, t: number): boolean
 						job.Count += 1
 						job.HitTau = b
 						job.HitAcf, job.HitVcf = acf, vcf -- (the two bodies as the attacker's screen had them)
+						job.HitFist = fist -- (where a guard meets the blow)
 						applyHit(e, v, def, contact, job)
 					end
 				end
@@ -1952,8 +1976,9 @@ function Service.RequestDash(char: Model, dir: string): boolean
 	ent.DashDir = dir
 	ent.DashStart = start
 	setState(ent, "Dashing", math.max(0.05, start + def.Lock - t), true)
-	ent.DashCooldownUntil = start + def.Lock + Config.Dash.Cooldown
-	setCooldown(ent, "Dash", def.Lock + Config.Dash.Cooldown)
+	local cooldown = Config.DashCooldownFor(if goreFor(ent) then ent.GoreStage else 0)
+	ent.DashCooldownUntil = start + def.Lock + cooldown
+	setCooldown(ent, "Dash", def.Lock + cooldown)
 	if ent.Npc and ent.AC then
 		ent.AC:Play(def.Anim, { Fade = 0.06, Speed = def.Speed, Restart = true })
 	end

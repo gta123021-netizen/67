@@ -48,8 +48,8 @@ local Kit = {
 	stroke = function()
 		return obj("UIStroke")
 	end,
-	gradient = function(_, a, b)
-		return obj("UIGradient", { Color = { a, b } })
+	gradient = function(parent, a, b)
+		return obj("UIGradient", { Color = { a, b }, Parent = parent })
 	end,
 	rings = function()
 		return {}, { obj("UIGradient"), obj("UIGradient"), obj("UIGradient") }
@@ -204,6 +204,20 @@ owners()
 
 check("your pill is the HUD's own status pill (its builder), over the hotbar, hidden while whole", home ~= nil and mine ~= nil and mine.Holder.Parent == home and home.Parent == ctx.Root and home.Visible == false)
 
+local function childOf(parent, name, class)
+	for _, o in ipairs(made) do
+		if o.Parent == parent and (not name or o.Name == name) and (not class or o.ClassName == class) then
+			return o
+		end
+	end
+	return nil
+end
+local function isRed(frame)
+	local g = childOf(frame, nil, "UIGradient")
+	local c = g and g.Color
+	return typeof(c) == "ColorSequence" and c.Keypoints[1].Value == C.Red
+end
+
 local function stage(n, regrowIn)
 	me:SetAttribute("RegrowAt", if regrowIn then Env.workspace:GetServerTimeNow() + regrowIn else nil)
 	me:SetAttribute("GoreStage", n)
@@ -214,9 +228,10 @@ local right = armOf(mine, "Right")
 local left = armOf(mine, "Left")
 check(("one arm: '%s' / '%s', gold like the coins pill's glow"):format(mine.Value.Text, mine.Caption.Text), home.Visible and mine.Value.Text == "ONE ARM" and string.find(mine.Caption.Text, "SINGLE STRIKES") ~= nil and mine.Glow.BackgroundColor3 == C.Gold)
 check(("the socket counts to the next arm: '%s'"):format(mine.Socket.Label.Text), mine.Socket.Button.Visible and (mine.Socket.Label.Text == "10s" or mine.Socket.Label.Text == "9s"))
-check("the badge's figure: its right arm (on your left) gone, its left there", right ~= nil and left ~= nil and left.Visible == true and (right.Visible == false or right.Size.Y.Offset < left.Size.Y.Offset * 0.5))
+check("the badge's body: its right arm (on your left) filled red - lost - its left white", right ~= nil and left ~= nil and isRed(right) and not isRed(left))
 Env.run(5)
-check(("5 s in: the right arm is half grown in the figure (%d of %d px), the socket says %s"):format(right.Size.Y.Offset, left.Size.Y.Offset, mine.Socket.Label.Text), right.Visible and math.abs(right.Size.Y.Offset / left.Size.Y.Offset - 0.5) < 0.12 and (mine.Socket.Label.Text == "5s" or mine.Socket.Label.Text == "4s"))
+local grow = childOf(right, "Grow")
+check(("5 s in: the lost arm half grown back, green from the shoulder (%.2f), the socket says %s"):format(grow and grow.Size.Y.Scale or -1, mine.Socket.Label.Text), grow ~= nil and grow.Visible and math.abs(grow.Size.Y.Scale - 0.5) < 0.12 and (mine.Socket.Label.Text == "5s" or mine.Socket.Label.Text == "4s"))
 local shakes0, sounds0 = shakes, #sounds
 player:SetAttribute("LimbDenied", os.clock())
 check("a refused press shakes it, with the HUD's error sound", shakes == shakes0 + 1 and sounds[#sounds] == "Error" and #sounds == sounds0 + 1)

@@ -58,12 +58,15 @@ HD.RawPaths = Paths
 local BODY = Config.Hitbox.Body
 
 -- the body box's half widths to its left (-X) and right (+X) at a gore stage: a lost arm's side
--- ends at the torso (the right arm goes first, then the left)
-export type Shape = { L: number, R: number }
+-- ends at the torso (the right arm goes first, then the left) - but for its nub, the arm's upper
+-- half still on the shoulder, where that side keeps its full width (NubL / NubR)
+export type Shape = { L: number, R: number, NubL: boolean?, NubR: boolean? }
 local WHOLE: Shape = { L = BODY.HalfWidth, R = BODY.HalfWidth }
+local THIN = Config.Hitbox.ArmlessHalfWidth or 1.1
+local NUB = Config.Hitbox.Nub or { Bottom = 0.0, Top = 1.0 }
 local SHAPES: { Shape } = {
-	{ L = BODY.HalfWidth, R = Config.Hitbox.ArmlessHalfWidth or 1.1 },
-	{ L = Config.Hitbox.ArmlessHalfWidth or 1.1, R = Config.Hitbox.ArmlessHalfWidth or 1.1 },
+	{ L = BODY.HalfWidth, R = THIN, NubR = true },
+	{ L = THIN, R = THIN, NubL = true, NubR = true },
 }
 function HD.BodyFor(stage: number?): Shape
 	if not Config.Gore.Enabled or not stage or stage < 1 then
@@ -81,14 +84,87 @@ function HD.LostLimbs(stage: number?): { [string]: boolean }
 	return LOST[math.min(stage, 2) + 1]
 end
 
--- distance from a point (in the body's own space) to the body box
-local function pointBox(p: Vector3, shape: Shape?): number
-	local sh = shape or WHOLE
-	local dx = if p.X >= 0 then math.max(p.X - sh.R, 0) else math.max(-p.X - sh.L, 0)
-	local dy = math.max(BODY.Bottom - p.Y, p.Y - BODY.Top, 0)
-	local dz = math.max(math.abs(p.Z) - BODY.HalfDepth, 0)
-	return math.sqrt(dx * dx + dy * dy + dz * dz)
+-- the boxes a body is made of (body space: x from, x to, y from, y to; all HalfDepth deep): the
+-- body, and a lost arm's nub standing out of the narrowed side at the shoulder
+type Box = { number }
+local BOXES: { [Shape]: { Box } } = {}
+local function boxesOf(sh: Shape): { Box }
+	local out = BOXES[sh]
+	if out then
+		return out
+	end
+	out = { { -sh.L, sh.R, BODY.Bottom, BODY.Top } }
+	if sh.NubR then
+		table.insert(out, { 0, BODY.HalfWidth, NUB.Bottom, NUB.Top })
+	end
+	if sh.NubL then
+		table.insert(out, { -BODY.HalfWidth, 0, NUB.Bottom, NUB.Top })
+	end
+	BOXES[sh] = out
+	return out
 end
+local function clampTo(p: Vector3, b: Box): Vector3
+	return Vector3.new(math.clamp(p.X, b[1], b[2]), math.clamp(p.Y, b[3], b[4]), math.clamp(p.Z, -BODY.HalfDepth, BODY.HalfDepth))
+end
+-- strictly inside some box of the body (a face point there is inside the body, not on it)
+local function within(p: Vector3, boxes: { Box }): boolean
+	for _, b in ipairs(boxes) do
+		if p.X > b[1] + 1e-4 and p.X < b[2] - 1e-4 and p.Y > b[3] + 1e-4 and p.Y < b[4] - 1e-4 and math.abs(p.Z) < BODY.HalfDepth - 1e-4 then
+			return true
+		end
+	end
+	return false
+end
+
+-- distance from a point (in the body's own space) to the body
+local function pointBox(p: Vector3, shape: Shape?): number
+	local best = math.huge
+	for _, b in ipairs(boxesOf(shape or WHOLE)) do
+		best = math.min(best, (clampTo(p, b) - p).Magnitude)
+	end
+	return best
+end
+
+-- where on the body's surface a point meets it: the nearest point of the body (a point already
+-- inside is pushed out through the nearest face that is on the outside). This is where a blow lands
+-- on the body - its blood and impact come from here, not from the fist a hair in front of it
+local function surfacePoint(p: Vector3, shape: Shape?): Vector3
+	local boxes = boxesOf(shape or WHOLE)
+	local best, bestD = nil, math.huge
+	for _, b in ipairs(boxes) do
+		local c = clampTo(p, b)
+		local d = (c - p).Magnitude
+		if d < bestD then
+			best, bestD = c, d
+		end
+	end
+	if bestD > 0 then
+		return best :: Vector3
+	end
+	-- inside: out through the nearest face on the body's outside (never the side of the torso its
+	-- nub covers; the feet stand on the ground)
+	local out, outD = p, math.huge
+	for _, b in ipairs(boxes) do
+		local faces = {
+			Vector3.new(b[2], p.Y, p.Z),
+			Vector3.new(b[1], p.Y, p.Z),
+			Vector3.new(p.X, p.Y, BODY.HalfDepth),
+			Vector3.new(p.X, p.Y, -BODY.HalfDepth),
+			Vector3.new(p.X, b[4], p.Z),
+		}
+		if b[3] > BODY.Bottom then
+			table.insert(faces, Vector3.new(p.X, b[3], p.Z))
+		end
+		for _, f in ipairs(faces) do
+			local d = (f - p).Magnitude
+			if d < outD and not within(f, boxes) then
+				out, outD = f, d
+			end
+		end
+	end
+	return out
+end
+HD.SurfacePoint = surfacePoint
 
 -- closest approach of a segment (body space) to the body box, and where along it
 local function segmentBox(a: Vector3, b: Vector3, shape: Shape?): (number, Vector3)
@@ -179,11 +255,21 @@ local function lifted(caps: { { Vector3 } }, lift: number): { { Vector3 } }
 	return out
 end
 
+-- where a blow that reached `at` (body space, `d` from the body) lands: on the body's surface, and
+-- the fist's own point - in front of it, or (a limb already sunk into the body on the frame it is
+-- seen: a close hook) right on the surface there, never inside the body where its sparks would hide
+local function contact(at: Vector3, d: number, shape: Shape, bodyCf: CFrame): (Vector3, Vector3)
+	local s = surfacePoint(at, shape)
+	return bodyCf * s, bodyCf * (if d > 0 then at else s)
+end
+
 --[[ does the strike touch this body between clip times t0 and t1?
 	attackCf: the attacker's frame (flat facing); bodyCf: the victim's root frame (flat facing)
 	radius: the limb's radius (+ pad). victimStage / attackerStage: their gore stages (a lost arm's
-	side of the body is narrower; a lost limb never lands). Returns hit?, contact point (world) ]]
-function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1: number, radius: number, victimStage: number?, attackerStage: number?): (boolean, Vector3?)
+	side of the body is narrower; a lost limb never lands). Returns hit?, the contact on the body's
+	surface (world: where the blow lands - blood and a clean hit's impact), and the striking limb's
+	own point there (world: where a guard meets it - a block's and a guard break's sparks) ]]
+function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1: number, radius: number, victimStage: number?, attackerStage: number?): (boolean, Vector3?, Vector3?)
 	local shape = HD.BodyFor(victimStage)
 	local lost = HD.LostLimbs(attackerStage)
 	local limbs = shortened[key] and shortened[key].Limbs or {}
@@ -201,14 +287,14 @@ function HD.Sweep(key: string, attackCf: CFrame, bodyCf: CFrame, t0: number, t1:
 					local b = toBody * cap[2]
 					local d, at = segmentBox(a, b, shape)
 					if d <= radius then
-						return true, bodyCf * at
+						return true, contact(at, d, shape, bodyCf)
 					end
 					-- the tip's path since the previous frame (a fast snap sweeps through the body)
 					if prev and prev[li] then
 						local pa = toBody * prev[li][2]
 						local d2, at2 = segmentBox(pa, b, shape)
 						if d2 <= radius then
-							return true, bodyCf * at2
+							return true, contact(at2, d2, shape, bodyCf)
 						end
 					end
 				end

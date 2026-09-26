@@ -30,18 +30,24 @@
   - `lune run tests/logic_test.luau` - the facing turn, the input buffer, client/server agreement under
     latency, and the HUD column's spacing math
   - `lune run tests/chain_net.luau` - 400 networked chains (every sequence, 0-150 ms, players and dummies,
-    flat / uphill / downhill / bumps / a step): every strike connects, the attacker's screen agrees with the
-    server, every impact within its reach
+    flat / uphill / downhill / bumps / a step), plus 160 of a one-armed fighter's single strikes (at a whole
+    victim and an armless one): every strike connects, the attacker's screen agrees with the server, every
+    impact within its reach
   - `lune run tests/blood_test.luau` - the blood's physics: exact flight, drops ending on every surface (never
     inside one, never over an edge) and gone, water / glass / thin walls, outward spray, no particle
     reaching a surface, the drop pool, no splatter code left
   - `lune run tests/gore_test.luau` - the gore: thresholds, order, players' arms growing back with the heal
-    effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup
+    effect, every piece's seat on scaled / stretched / turned rigs, gibs, head burst, cleanup; the nubs in
+    random poses per rig and both nubs at once through 700 shoulder poses (heights -450..4000, 3000 studs
+    out, any heading): never outside the arm's own space, the torn end always over the cut; first person,
+    shoulder accessories, an arm taken away
   - `lune run tests/dummy_test.luau` - the practice dummies: never heal, respawn whole only after a knockout;
-    the Sparring Dummy's spot, its brain (walks up, a beat to notice, fights, smashes with no arms, its leash)
+    the Sparring Dummy's spot, its brain (walks up, a beat to notice, fights, keeps away with no arms, its leash)
   - `lune run tests/limbs_test.luau` - the server's limb rules: stages, lost limbs hidden, players' arms
     growing back (never an NPC's), one-arm damage and guard chip, one-handed single strikes, no guard and
-    no attacks without arms, players too, tools stowed
+    no attacks without arms, players too, tools stowed, shoulder accessories kept; the hitboxes with nubs,
+    and 32,697 blows (every stage, steps of +-1.6, any heading, 4000 studs up) whose contact is always on
+    what is left of the body and whose fist is always within reach, never inside it
   - `lune run tests/guard_sync_test.luau` - the guard and the escape window judged as the attacker's screen
     saw them (a last-instant raise or drop), so its damage number is the one dealt
   - `lune run tests/limb_status_test.luau` - the limb pills: yours over the hotbar and the tags over others
@@ -110,24 +116,35 @@
     last one's victim has had 0.2 s of control back, so no two are ever a true combo (a jab every 0.75 s,
     an uppercut every 1.24 s); no dash strike (the right hand's). The Ground Smash stays.
   - no arms: no guard at all (a block can't go up, one already up drops at once), every blow x1.25, no
-    attack of any kind (not even the Ground Smash) - it moves and dashes; any attack press shakes the
-    limb pill
-  - hitboxes follow the body: a side whose arm is gone is only as wide as the torso, a strike never
-    lands with a limb its thrower has lost, and a lost arm's ragdoll collider stays off
+    attack of any kind (not even the Ground Smash) - it moves and dashes, 15% faster and its dash back
+    30% sooner (`NoArms.MoveSpeed` / `DashCooldown`) to get away while its arms grow back; any attack
+    press shakes the limb pill. The Sparring Dummy with no arms keeps its distance.
+  - hitboxes follow the body: below its nub a side whose arm is gone is only as wide as the torso (the
+    nub, the arm's upper half, is still there to hit: `Config.Hitbox.Nub`), a strike never lands with a
+    limb its thrower has lost, and a lost arm's ragdoll collider stays off
   - no right arm: nothing is held - an equipped tool goes back in the backpack and can't be re-equipped
   - (a strike never swings a missing arm; `Config.CanUse`, `Config.CanStrike`)
 - Your limb pill over the hotbar is the HUD's own status pill (the hero / coin / level pills' builder):
-  the hero pill's ringed badge holding a fighter figure whose lost arm is gone and grows back in green,
-  ONE ARM / NO ARMS / ARM RESTORED, what it means, and a socket counting the seconds to the next arm.
-  Every other fighter missing an arm wears the same pill, smaller, over its head.
+  the hero pill's ringed badge holding an R6 figure (head, torso, arms, legs) with each lost arm in red,
+  filling back green as it grows; ONE ARM / NO ARMS / ARM RESTORED, what it means, and a socket counting
+  the seconds to the next arm. Every other fighter missing an arm wears the same pill, smaller, over its
+  head (its label centred, high enough to clear the name).
 - Damage numbers are stamped on the attacker's own impact frame, and the server deals that same number:
   it judges the guard and the escape window as the attacker's screen saw them (a round trip ago), and
   that screen predicts with the same rules (the guard up long enough, the `Escape` attribute, one chain
   per stun). A blow the server never confirms is taken back; a limb this screen tore off that the
   server didn't is quietly put back.
-- Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the
-  shoulders keep the kit's stumps, pumping blood. The burst leaves the neck stump and skull base, with
-  droplets, chunks and a fountain. The kit's torso hole is not used.
+- An arm tears at the elbow: the forearm, dressed in its sleeve, is thrown with the blow on real physics
+  with the kit's torn end; the upper half stays on the shoulder as a nub (its sleeve, and the kit's torn
+  end - flesh and bone - over the cut), welded to the hidden arm so it swings with it. In every pose it
+  fills only the space the arm filled (no clipping), it never collides or blocks a hit, first person
+  hides it with your body, and whatever is worn on the shoulder stays on it. It pumps blood for 7 s and
+  keeps dripping for 25 s more (`BleedTime` / `DripTime`).
+- The burst leaves the neck stump and skull base, with droplets, chunks and a fountain; the hair, hats
+  and face accessories go the same frame (matched by where they attach, not only by their weld). The
+  kit's torso hole is not used.
+- Every blow's blood comes from exactly where it meets the body's surface; a blocked blow's and a guard
+  break's sparks from where the fist meets the guard (never inside the body).
 - The HUD's portraits (profile, avatar previews) always show the fighter whole.
 - Works on any R6 body: every piece is fitted to that body's own part sizes and pose.
 

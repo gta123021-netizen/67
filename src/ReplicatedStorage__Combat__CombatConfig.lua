@@ -414,8 +414,11 @@ Config.Hitbox = {
 	-- R6: torso 2 wide and 1 deep (the idle stance turns it 13 deg, a shoulder forward), arms out to
 	-- 1.5 each side, head up to 2.1 above the root, feet at -3
 	Body = { HalfWidth = 1.5, Bottom = -3.0, Top = 2.1, HalfDepth = 0.58 },
-	-- a side whose arm is gone ends at the torso (2 wide, turned 13 deg in the idle stance)
+	-- a side whose arm is gone ends at the torso (2 wide, turned 13 deg in the idle stance)...
 	ArmlessHalfWidth = 1.1,
+	-- ...except where its nub is: the lost arm's upper half stays on the shoulder, so from the nub's
+	-- bottom (the arm's middle) up to the shoulder that side keeps its full width
+	Nub = { Bottom = 0.0, Top = 1.0 },
 	-- added to every limb radius
 	Pad = 0.1,
 	-- the capsule is pulled in at the tip by this share of its radius, so its rounded end sits on
@@ -562,8 +565,11 @@ Config.Blood = {
 --              victim has had OneArm.Breathe of control back (so no two ever make a true combo); no
 --              dash strike (that is the right hand's). The Ground Smash (the legs) stays
 --   no arms    no guard at all (a block can't go up; one already up drops), blows hurt more still,
---              and no attack of any kind (not even the Ground Smash): it moves and dashes, nothing else
---   (a body missing an arm is that much narrower to hit on that side: Config.Hitbox.ArmlessHalfWidth)
+--              and no attack of any kind (not even the Ground Smash): it moves and dashes, nothing
+--              else - faster (NoArms.MoveSpeed) and its dash back sooner (NoArms.DashCooldown), to
+--              get away while its arms grow back
+--   (a body missing an arm is that much narrower to hit on that side below its nub:
+--   Config.Hitbox.ArmlessHalfWidth / Nub)
 --   Regrow      a PLAYER's lost arms grow back, one at a time, Regrow.Time seconds each (the last one
 --               lost first), counted from when its last arm went or came back - never an NPC's,
 --               never the head. A regrown arm takes the same share of damage again to lose
@@ -571,7 +577,8 @@ Config.Blood = {
 --   Stages      health shares at which each stage plays, in order: the right arm torn off, the
 --               left arm, the head burst (the last one on the killing blow only)
 --   GibLife     seconds a severed arm / chunk lies on the ground before it fades away
---   BleedTime   seconds a stump keeps pumping blood (slowing with every beat)
+--   BleedTime   seconds a torn limb keeps pumping blood (slowing with every beat); DripTime the
+--               oozing after it
 --   Stagger     seconds between stages when one blow earns several
 --   BurstDrops  droplets the burst head throws (they land and splat)
 --   BurstChunks chunks of flesh and skull the burst head throws
@@ -581,10 +588,12 @@ Config.Gore = {
 	Players = true,
 	Stages = { 0.75, 0.5, 0 },
 	OneArm = { DamageTaken = 1.15, GuardChip = 2, Light = "Swing2", Heavy = "Uppercut", Breathe = 0.2 },
-	NoArms = { DamageTaken = 1.25 },
+	-- (with nothing to fight with, it can at least get away while its arms grow back)
+	NoArms = { DamageTaken = 1.25, MoveSpeed = 1.15, DashCooldown = 0.7 },
 	Regrow = { Players = true, Time = 10 },
 	GibLife = 10,
-	BleedTime = 4,
+	BleedTime = 7,
+	DripTime = 25, -- ...then the wound keeps oozing a drop a beat this long (or until it heals)
 	Stagger = 0.14,
 	BurstDrops = 40,
 	BurstChunks = 12,
@@ -872,6 +881,15 @@ function Config.CanUse(stage: number?, move: string): boolean
 		return false
 	end
 	return move == "Downslam" or move == G.OneArm.Light or move == G.OneArm.Heavy
+end
+
+-- how fast a fighter at gore stage `stage` moves, and how soon its dash is back (shares of normal)
+function Config.MoveScale(stage: number?): number
+	return if Config.Gore.Enabled and Config.ArmsAt(stage) == 0 then Config.Gore.NoArms.MoveSpeed or 1 else 1
+end
+function Config.DashCooldownFor(stage: number?): number
+	local k = if Config.Gore.Enabled and Config.ArmsAt(stage) == 0 then Config.Gore.NoArms.DashCooldown or 1 else 1
+	return Config.Dash.Cooldown * k
 end
 
 -- the damage a blow of `base` does to a fighter at gore stage `stage` (blocked: `base` is already the

@@ -102,6 +102,17 @@ local function runChain(opts)
 	local vPlayer = if opts.Npc then nil else Env.player("NV", lv * 2, vChar)
 	Service.Register(vChar, vPlayer)
 	local eV = Service.Get(vChar)
+	-- limbs lost before the fight (the attacker's / the victim's): the wounds that tear them off
+	local WOUND = { 0, 30, 55 }
+	local eA = Service.Get(aChar)
+	if (opts.AStage or 0) > 0 then
+		eA.Hum:TakeDamage(WOUND[opts.AStage + 1])
+	end
+	if (opts.VStage or 0) > 0 then
+		eV.Hum:TakeDamage(WOUND[opts.VStage + 1])
+	end
+	local aStage, vStage = eA.GoreStage or 0, eV.GoreStage or 0
+	assert(aStage == (opts.AStage or 0) and vStage == (opts.VStage or 0), "stages not reached")
 	eV.Hum.MaxHealth, eV.Hum.Health = 9999, 9999
 	local vRoot = vChar.HumanoidRootPart
 	local aRoot = aChar.HumanoidRootPart
@@ -146,14 +157,14 @@ local function runChain(opts)
 
 	local function press(kind)
 		local t = Env.now()
-		local verdict, name, slot, heavy, lights = Rules.Decide(chain, kind, t)
+		local verdict, name, slot, heavy, lights = Rules.Decide(chain, kind, t, nil, nil, aStage)
 		if verdict ~= "go" then
 			return false
 		end
 		local prev = if slot > 1 then chain.Last else nil
 		local _, enter = Config.Transition(prev, name)
 		local def = Config.Attacks[name]
-		Rules.Commit(chain, name, slot, heavy, lights, t - enter / def.Speed)
+		Rules.Commit(chain, name, slot, heavy, lights, t - enter / def.Speed, aStage)
 		seq += 1
 		local a = { Name = name, Slot = slot, T0 = t - enter / def.Speed, Seq = seq, Def = def, Stopped = false, Enter = enter }
 		cur = a
@@ -258,7 +269,7 @@ local function runChain(opts)
 					local acf = CF.lookAt(aPos, aPos + dir)
 					local vl = flat(vRoot.CFrame.LookVector)
 					local vcf = CF.lookAt(seen, seen + vl)
-					local hit = HitDetect.Sweep(def.Id, acf, vcf, from, to, HitDetect.Radius(def.Id))
+					local hit = HitDetect.Sweep(def.Id, acf, vcf, from, to, HitDetect.Radius(def.Id), vStage, aStage)
 					if hit then
 						cur.Impact = true
 						predicted[cur.Seq] = true
@@ -385,6 +396,42 @@ for _, terrain in ipairs({ "Flat", "Uphill", "Downhill", "Bumps", "Step" }) do
 						w.Lo = math.min(w.Lo, im.Gap)
 						w.Hi = math.max(w.Hi, im.Gap)
 						worst[im.Name] = w
+						check(label .. (": %s landed within its limb's reach (%.2f)"):format(im.Name, im.Gap), im.Gap <= def.ReachMax + 0.15 and im.Gap >= def.Ideal - 1.0)
+					end
+				end
+			end
+		end
+	end
+end
+-- one arm left: single strikes (M1 the left straight, M2 the left uppercut), at a whole victim and
+-- at an armless one (its narrower body), on every ground, every latency, a player and a dummy
+local SINGLES = { { "Light", "Light", "Light" }, { "Heavy", "Light", "Heavy" } }
+for _, terrain in ipairs({ "Flat", "Uphill", "Downhill", "Bumps", "Step" }) do
+	Env.groundAt = TERRAINS[terrain]
+	for _, npc in ipairs({ false, true }) do
+		for _, la in ipairs(LATENCY) do
+			for _, vStage in ipairs({ 0, 2 }) do
+				for _, seqKinds in ipairs(SINGLES) do
+					total += 1
+					local names, got, strikes, shown, predicted = runChain({ Seq = seqKinds, La = la, Lv = la, Npc = npc, Dist = 3.7, Terrain = terrain, AStage = 1, VStage = vStage })
+					local label = ("ONE ARM %s %s%s %dms: %s"):format(terrain, if npc then "dummy" else "player", if vStage > 0 then " (armless)" else "", la * 1000, table.concat(names, " "))
+					local all = #names == #seqKinds
+					for i, ok in ipairs(got) do
+						all = all and ok and (names[i] == Config.Gore.OneArm.Light or names[i] == Config.Gore.OneArm.Heavy)
+					end
+					check(label .. ": every single strike (the left hand's) connects", all, table.concat(names, ","))
+					local ghost, unseen = 0, 0
+					for i, s in ipairs(strikes) do
+						if predicted[s.Seq] and not got[i] then
+							ghost += 1
+						end
+						if got[i] and not predicted[s.Seq] then
+							unseen += 1
+						end
+					end
+					check(label .. ": the screen showed every impact on its frame, and none the server refused", ghost == 0 and unseen == 0, ("ghost %d unseen %d"):format(ghost, unseen))
+					for _, im in ipairs(shown) do
+						local def = Config.Attacks[im.Name]
 						check(label .. (": %s landed within its limb's reach (%.2f)"):format(im.Name, im.Gap), im.Gap <= def.ReachMax + 0.15 and im.Gap >= def.Ideal - 1.0)
 					end
 				end

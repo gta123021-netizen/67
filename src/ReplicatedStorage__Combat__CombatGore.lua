@@ -20,12 +20,13 @@
 	body: everything is found by the R6 part names and fitted to its own part sizes and clothing.
 
 	What each stage does
-	  ARM   the real arm is hidden (locally) and a copy of it - its colour, its sleeve (the NPC's
-	        Shirt) - is torn away with the blow: thrown along the way the blow drove, tumbling, a torn
-	        wound on its top end (the gore kit's arm end) bleeding and shedding drops; it hits
-	        the ground, rolls and comes to rest (real physics on this client, colliding with the world,
-	        never with a fighter). On the torso the shoulder is a raw stump (the kit's shoulder cap)
-	        that pumps blood in pulses, slowing, and drips
+	  ARM   the arm tears at its middle. The real arm is hidden and in its place hangs its upper half
+	        (a NUB: the arm's colour and sleeve, swinging with the shoulder) ending in the gore kit's
+	        torn arm end - flesh and bone - which pumps blood in pulses with a slowing heartbeat
+	        (Config.Gore.BleedTime), then keeps oozing a drop a beat (DripTime). The forearm - a copy
+	        of the lower half, its sleeve, a torn end on top - is thrown along the way the blow drove,
+	        tumbling, bleeding; it hits the ground, rolls and comes to rest (real physics on this
+	        client, colliding with the world, never with a fighter)
 	  HEAD  the head bursts: a thick red mist, a spray of droplets all round, chunks of flesh and
 	        bits of skull thrown out on real arcs; what is left is the neck's torn stump with the base
 	        of the skull, and a fountain of blood that dies down in pulses
@@ -196,8 +197,10 @@ local function expire(inst: Instance, life: number)
 end
 
 -- pulsing arterial bleeding from a stump: a spurt of the place's own blood effect (VFX Blood) in
--- time with a slowing heartbeat, droplets thrown with it, a drip between beats; dies down over `dur`
-local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength: number, body: Instance?)
+-- time with a slowing heartbeat, droplets thrown with it, a drip between beats; the spurts die down
+-- over `dur`, then the wound keeps oozing - a drop every beat or so - for `drip` seconds more (or
+-- until the wound is gone: the arm grew back, the body left)
+local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength: number, body: Instance?, drip: number?)
 	local t0 = os.clock()
 	task.spawn(function()
 		while att.Parent and os.clock() - t0 < dur do
@@ -217,6 +220,15 @@ local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength:
 				end
 			end)
 			task.wait(gap)
+		end
+		local t1 = os.clock()
+		while att.Parent and os.clock() - t1 < (drip or 0) do
+			local k = 1 - (os.clock() - t1) / (drip or 1)
+			Blood.Launch(att.WorldPosition, Vector3.new((math.random() - 0.5) * 0.4, -0.5, (math.random() - 0.5) * 0.4), 0.07 + math.random() * 0.04)
+			if math.random() < 0.25 * k then
+				Blood.Burst(att.WorldPosition, dir(), "Blood", 0.22 * strength, 0.2, body)
+			end
+			task.wait(0.45 + math.random() * 0.4 + (1 - k) * 0.5)
 		end
 	end)
 end
@@ -281,17 +293,49 @@ local function heldBy(j: Instance, part: BasePart): boolean
 	end
 	return false
 end
+-- (worn by where it attaches: an accessory's handle carries an attachment named like the body
+-- part's own - HairAttachment, HatAttachment, FaceFrontAttachment... on the head - so it counts even
+-- once its weld is gone, as a dying body's joints break)
+local function wornOn(handle: BasePart, part: BasePart): boolean
+	for _, a in ipairs(handle:GetChildren()) do
+		if a:IsA("Attachment") then
+			local mine = part:FindFirstChild(a.Name)
+			if mine and mine:IsA("Attachment") then
+				return true
+			end
+		end
+	end
+	return false
+end
+-- (never what sits on an arm's shoulder: the nub - the arm's upper half - keeps it, as the server does)
+local function onShoulder(handle: BasePart, part: BasePart): boolean
+	if not string.find(part.Name, "Arm") then
+		return false
+	end
+	for _, a in ipairs(handle:GetChildren()) do
+		if a:IsA("Attachment") and string.find(a.Name, "ShoulderAttachment") and part:FindFirstChild(a.Name) then
+			return true
+		end
+	end
+	return false
+end
 local function accessoriesOn(model: Model, part: BasePart): { BasePart }
 	local out = {}
 	for _, acc in ipairs(model:GetChildren()) do
 		if acc:IsA("Accessory") then
 			local handle = acc:FindFirstChild("Handle")
-			if handle and handle:IsA("BasePart") then
-				for _, j in ipairs(handle:GetDescendants()) do
-					if heldBy(j, part) then
-						table.insert(out, handle)
-						break
+			if handle and handle:IsA("BasePart") and not onShoulder(handle, part) then
+				local held = wornOn(handle, part)
+				if not held then
+					for _, j in ipairs(handle:GetDescendants()) do
+						if heldBy(j, part) then
+							held = true
+							break
+						end
 					end
+				end
+				if held then
+					table.insert(out, handle)
 				end
 			end
 		end
@@ -311,6 +355,91 @@ end
 ---------------------------------------------------------------------------
 -- the stages
 ---------------------------------------------------------------------------
+-- a copy of a limb that wears the body's own clothes: a model with a Humanoid and the body's Shirt
+-- round the copy (named like the limb, so the sleeve dresses it), with no joint of its own
+local function dressedCopy(b: Body, limb: BasePart, name: string): (Model, BasePart)
+	local m = Instance.new("Model")
+	m.Name = name
+	m:SetAttribute("OverkillGore", true)
+	local gh = Instance.new("Humanoid")
+	gh.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	gh.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	gh.RequiresNeck = false
+	gh.BreakJointsOnDeath = false
+	gh.EvaluateStateMachine = false
+	gh.Parent = m
+	local shirt = b.Model:FindFirstChildOfClass("Shirt")
+	if shirt then
+		copyOf(shirt).Parent = m
+	end
+	local copy = copyOf(limb)
+	-- (no joint or constraint comes along: a ragdoll's socket would tie the copy to the live torso)
+	for _, d in ipairs(copy:GetDescendants()) do
+		if d:IsA("JointInstance") or d:IsA("WeldConstraint") or d:IsA("Constraint") then
+			d:Destroy()
+		end
+	end
+	copy.LocalTransparencyModifier = 0
+	copy.Transparency = 0 -- (the server may already have hidden the real one)
+	copy.Anchored = false
+	copy.CanQuery = false
+	copy.CanTouch = false
+	copy:SetAttribute("OverkillGore", true)
+	copy.Parent = m
+	m.PrimaryPart = copy
+	return m, copy
+end
+
+-- what is left of a torn-off arm: its upper half, still on the shoulder and swinging with it,
+-- dressed like the arm (its sleeve), ending where it tore in the gore kit's torn arm end - flesh and
+-- bone - turned to face down. Returns the nub (in the gore folder, welded to the hidden real arm)
+-- and the attachment at the torn end the blood comes from
+local function makeNub(b: Body, arm: BasePart, side: string): (Model, Attachment)
+	local m, nub = dressedCopy(b, arm, "GoreNub")
+	nub.Size = Vector3.new(arm.Size.X, arm.Size.Y * 0.5, arm.Size.Z)
+	nub.CanCollide = false
+	nub.Massless = true
+	weldTo(nub, arm, arm.CFrame * CFrame.new(0, arm.Size.Y * 0.25, 0))
+	local e = if side == "Right" then KIT.RightEnd else KIT.LeftEnd
+	local k = Vector3.new(nub.Size.X / STD.Arm.X, nub.Size.Y / STD.Arm.Y, nub.Size.Z / STD.Arm.Z)
+	-- centred on the nub and wrapping it with a thin skin (2% round), so in every pose it fills only
+	-- the space the arm filled - never a flap poking out of it (the kit's own X/Z offsets and its
+	-- deeper piece were measured on its own model)
+	local size = scaled(e.Size, e.Rot, k)
+	local torn = kitPiece(e.Name, Vector3.new(nub.Size.X * 1.02, size.Y, nub.Size.Z * 1.02))
+	torn:SetAttribute("OverkillGore", true)
+	torn.Parent = m
+	-- (the kit's torn end is measured at an arm's TOP; the nub tore at its bottom: turned over)
+	weldTo(torn, nub, nub.CFrame * CFrame.Angles(math.pi, 0, 0) * CFrame.new(0, e.Pos.Y * k.Y, 0) * e.Rot)
+	local a = Instance.new("Attachment")
+	a.Name = "GoreBleed"
+	a.CFrame = CFrame.new(0, -nub.Size.Y * 0.5, 0) * CFrame.Angles(math.pi, 0, 0)
+	a.Parent = nub
+	-- your own body in first person: the camera hides it (its head's LocalTransparencyModifier); the
+	-- nub isn't part of the body, so it follows that the same way (never floating in front of you)
+	if Players.LocalPlayer and b.Model == Players.LocalPlayer.Character and b.Head then
+		local head = b.Head
+		local function sync()
+			local k = if (head :: any).LocalTransparencyModifier ~= nil then head.LocalTransparencyModifier else 0
+			nub.LocalTransparencyModifier = k
+			torn.LocalTransparencyModifier = k
+		end
+		local conn = head:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(sync)
+		table.insert(b.Conns, conn)
+		sync()
+	end
+	-- the arm it rides taken away (streamed out, removed): the nub goes with it (never left behind,
+	-- falling on its own)
+	table.insert(b.Conns, arm.AncestryChanged:Connect(function()
+		if not arm:IsDescendantOf(workspace) then
+			m:Destroy()
+		end
+	end))
+	m.Parent = holder()
+	return m, a
+end
+Gore.MakeNub = makeNub
+
 local function tearArm(b: Body, side: string, quiet: boolean?)
 	local arm = if side == "Right" then b.Right else b.Left
 	if not (arm and arm.Parent) then
@@ -326,47 +455,25 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 		for _, h in ipairs(accessoriesOn(b.Model, arm)) do
 			hide(b, h)
 		end
-		local stump = fit(if side == "Right" then KIT.RightStump else KIT.LeftStump, torso, STD.Torso)
-		stump.Parent = b.Model
-		table.insert(b.Added, stump)
+		local nubModel, att = makeNub(b, arm, side)
+		table.insert(b.Added, nubModel)
+		bleed(att, function()
+			return att.WorldCFrame.UpVector -- (out of the torn end)
+		end, 0, 0.8, b.Model, GC.DripTime)
 		return
 	end
-	-- the torn-off arm: a copy of it (with its sleeve), thrown with the blow
-	local gib = Instance.new("Model")
-	gib.Name = "GoreArm"
-	local gh = Instance.new("Humanoid") -- (so the NPC's shirt dresses the copy like the real arm)
-	gh.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	gh.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-	gh.RequiresNeck = false
-	gh.BreakJointsOnDeath = false
-	gh.EvaluateStateMachine = false
-	gh.Parent = gib
-	local shirt = b.Model:FindFirstChildOfClass("Shirt")
-	if shirt then
-		copyOf(shirt).Parent = gib
-	end
-	local copy = copyOf(arm)
-	-- (no joint or constraint comes along: a ragdoll's socket would tie the copy to the live torso)
-	for _, d in ipairs(copy:GetDescendants()) do
-		if d:IsA("JointInstance") or d:IsA("WeldConstraint") or d:IsA("Constraint") then
-			d:Destroy()
-		end
-	end
-	copy.LocalTransparencyModifier = 0
-	copy.Transparency = 0 -- (the server may already have hidden the real one)
-	copy.Anchored = false
+	-- the torn-off forearm (the arm tears at its middle): a copy of the lower half (with its
+	-- sleeve), thrown with the blow
+	local gib, copy = dressedCopy(b, arm, "GoreArm")
+	copy.Size = Vector3.new(arm.Size.X, arm.Size.Y * 0.5, arm.Size.Z)
 	copy.CanCollide = true
-	copy.CanQuery = false
-	copy.CanTouch = false
 	copy.Massless = false
 	copy.CollisionGroup = "Debris"
-	copy.CFrame = arm.CFrame
-	copy.Parent = gib
+	copy.CFrame = arm.CFrame * CFrame.new(0, -arm.Size.Y * 0.25, 0)
 	-- its torn top end
 	local wound = fit(if side == "Right" then KIT.RightEnd else KIT.LeftEnd, copy, STD.Arm)
 	wound.CollisionGroup = "Debris"
 	wound.Parent = gib
-	gib.PrimaryPart = copy
 	gib.Parent = holder()
 	hide(b, arm)
 	for _, h in ipairs(accessoriesOn(b.Model, arm)) do
@@ -387,19 +494,15 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 		return copy.CFrame.UpVector
 	end, 1.2, 0.55, gib)
 	expire(gib, GC.GibLife)
-	-- the stump on the shoulder, pumping blood
-	local stump = fit(if side == "Right" then KIT.RightStump else KIT.LeftStump, torso, STD.Torso)
-	stump.Parent = b.Model
-	table.insert(b.Added, stump)
-	local a = Instance.new("Attachment")
-	a.Name = "GoreBleed"
-	a.CFrame = CFrame.lookAt(Vector3.zero, if side == "Right" then Vector3.new(1, 0.4, 0) else Vector3.new(-1, 0.4, 0)) * CFrame.Angles(-math.pi / 2, 0, 0)
-	a.Parent = stump
+	-- what is left on the shoulder: the upper arm, torn open at its end, pumping blood
+	local nubModel, a = makeNub(b, arm, side)
+	table.insert(b.Added, nubModel)
 	bleed(a, function()
-		return (out + Vector3.new(0, 0.5, 0)).Unit
-	end, GC.BleedTime, 1, b.Model)
-	-- the burst of the tear itself
-	Blood.Spray(arm.Position + Vector3.new(0, arm.Size.Y * 0.4, 0), drive, "Finisher", b.Model, if side == "Right" then 1 else -1)
+		-- (out of the torn end: down the arm, a little away from the body)
+		return (a.WorldCFrame.UpVector + out * 0.35).Unit
+	end, GC.BleedTime, 1.25, b.Model, GC.DripTime)
+	-- the burst of the tear itself, where it tore (the middle of the arm)
+	Blood.Spray(arm.Position, drive, "Finisher", b.Model, if side == "Right" then 1 else -1)
 	sound("GoreTear", arm.Position)
 	give(b.Model, { Roll = if side == "Right" then -14 else 14, Yaw = if side == "Right" then 10 else -10, NeckYaw = if side == "Right" then -18 else 18 }, 12)
 end
@@ -503,6 +606,12 @@ local restore: (b: Body) -> ()
 local function forget(b: Body)
 	for _, c in ipairs(b.Conns) do
 		c:Disconnect()
+	end
+	-- (what hangs on the body from outside it - an arm's nub lives in the gore folder - goes with it)
+	for _, inst in ipairs(b.Added) do
+		if inst.Parent and inst.Parent == folder then
+			inst:Destroy()
+		end
 	end
 	if bodies[b.Model] == b then
 		bodies[b.Model] = nil

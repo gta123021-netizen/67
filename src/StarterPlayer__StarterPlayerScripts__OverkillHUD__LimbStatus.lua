@@ -5,16 +5,16 @@
 	the hero / coins / level pills' capsule, dress, glow, outline, caption and value):
 
 	  YOUR PILL, over the hotbar
-	    badge  the hero pill's ringed disc in the state's colour, holding a fighter glyph (the hero
-	           screen's white-and-ink figure) with its arms: a lost arm is gone from it, a growing
-	           one grows back in green as the clock runs
+	    badge  a card in the hero pill's portrait rings (the band in the state's colour) holding an
+	           R6 body seen from the front - head, torso, arms, legs, white with an ink outline: a
+	           lost arm is filled red, one growing back fills green from the shoulder down
 	    value  ONE ARM (gold) / NO ARMS (red) / ARM RESTORED (green, for a moment)
 	    caption  what it means: SINGLE STRIKES · WEAK GUARD / NO GUARD · NO ATTACKS
 	    socket   the pill's right end (the coins +, the hero CHANGE): seconds until the next arm
 	    A press the body can't answer (a strike or a guard with no arms) shakes it (CombatClient
 	    sets the player's LimbDenied attribute).
-	  EVERY OTHER FIGHTER missing an arm: the same pill, smaller, over its head (value, badge and
-	    socket - no caption), gone when it is whole again or down.
+	  EVERY OTHER FIGHTER missing an arm: the same pill, smaller, over its head (the badge, its word
+	    centred, the socket - no caption), gone when it is whole again or down.
 
 	Nothing while whole, nothing once down. The HUD's hide toggle hides your pill.
 ]]
@@ -50,53 +50,57 @@ return function(ctx: any)
 	-- the fighter glyph with arms (the hero screen's figure: white, an ink outline, a soft shade)
 	-- The figure faces you, so its RIGHT arm is on your left.
 	---------------------------------------------------------------------------
-	local function figure(parent: GuiObject, size: number, z: number)
-		local s = size
-		local stroke = math.max(2.5, s * 0.07)
-		local holder = new("Frame", { Name = "Figure", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(s, s), ZIndex = z, Parent = parent })
-		local function piece(name: string, w: number, h: number, pos: UDim2, anchor: Vector2, zz: number, round: boolean, host: Instance?)
-			local f = new("Frame", { Name = name, BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = anchor, Position = pos, Size = UDim2.fromOffset(w, h), ZIndex = zz, Parent = host or holder })
-			if round then
-				Kit.pill(f)
-			else
-				new("UICorner", { CornerRadius = UDim.new(0, math.floor(s * 0.16)), Parent = f })
-			end
-			local st = Kit.stroke(f, stroke, C.Ink, 0, true)
+	local function figure(parent: GuiObject, w: number, h: number, z: number)
+		-- an R6 body seen from the front, in R6's own proportions: head, torso, two arms, two legs.
+		-- Each limb white with an ink outline (the HUD's icon art); a LOST arm filled red; one growing
+		-- back filled green from the shoulder down as the clock runs
+		local u = math.min(w / 4.3, h / 5.4)
+		local holder = new("Frame", { Name = "Figure", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(math.floor(4.3 * u), math.floor(5.4 * u)), ZIndex = z, Parent = parent })
+		local stroke = math.max(1.6, u * 0.2)
+		local gap = u * 0.12
+		local cx = 2.15 * u
+		local WHITE = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(214, 224, 242))
+		local RED = ColorSequence.new(Kit.lighten(C.Red, 0.12), C.RedDeep)
+		local GREEN = ColorSequence.new(Kit.lighten(C.Green, 0.2), C.GreenDeep)
+		local function piece(name: string, x: number, y: number, pw: number, ph: number, radius: number, zz: number)
+			local f = new("Frame", { Name = name, BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromOffset(math.floor(x + 0.5), math.floor(y + 0.5)), Size = UDim2.fromOffset(math.floor(pw + 0.5), math.floor(ph + 0.5)), ZIndex = zz, Parent = holder })
+			new("UICorner", { CornerRadius = UDim.new(0, math.max(2, math.floor(radius + 0.5))), Parent = f })
+			Kit.stroke(f, stroke, C.Ink, 0, true)
 			local g = Kit.gradient(f, Color3.new(1, 1, 1), Color3.fromRGB(214, 224, 242), 90)
-			return f, st, g
+			return f, g
 		end
-		-- arms first (under the torso's outline, so they hang from its shoulders): each on a pivot
-		-- at its shoulder, turned a little outward
-		local armW, armH = math.floor(s * 0.17), math.floor(s * 0.44)
+		local limbW = 0.95 * u
+		piece("Head", cx, 0, 1.25 * u, 1.05 * u, 0.36 * u, z + 1)
+		piece("Torso", cx, 1.15 * u, 2 * u, 2 * u, 0.2 * u, z + 1)
+		piece("RightLeg", cx - 0.5 * u - 0.03 * u, 3.25 * u, limbW, 2.05 * u, 0.2 * u, z)
+		piece("LeftLeg", cx + 0.5 * u + 0.03 * u, 3.25 * u, limbW, 2.05 * u, 0.2 * u, z)
 		local arms = {}
 		for i, side in ipairs({ "Right", "Left" }) do
 			local sx = if i == 1 then -1 else 1 -- (its right arm on your left)
-			local pivot = new("Frame", {
-				Name = side .. "Shoulder",
-				BackgroundTransparency = 1,
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.new(0.5, sx * math.floor(s * 0.27), 0, math.floor(s * 0.43)),
-				Size = UDim2.fromOffset(armW, armH * 2),
-				Rotation = sx * 14,
-				ZIndex = z,
-				Parent = holder,
-			})
-			local arm, st, g = piece(side .. "Arm", armW, armH, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0), z, true, pivot)
-			arms[side] = { Frame = arm, Stroke = st, Shade = g, Full = armH }
+			local f, g = piece(side .. "Arm", cx + sx * (1 * u + gap + limbW / 2), 1.15 * u, limbW, 2 * u, 0.2 * u, z + 1)
+			-- the part growing back: green, from the shoulder down
+			local grow = new("Frame", { Name = "Grow", BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Size = UDim2.fromScale(1, 0), Visible = false, ZIndex = z + 2, Parent = f })
+			new("UICorner", { CornerRadius = UDim.new(0, math.max(2, math.floor(0.2 * u + 0.5))), Parent = grow })
+			Kit.gradient(grow, Kit.lighten(C.Green, 0.2), C.GreenDeep, 90)
+			arms[side] = { Frame = f, Shade = g, Grow = grow }
 		end
-		piece("Torso", math.floor(s * 0.46), math.floor(s * 0.46), UDim2.new(0.5, 0, 0, math.floor(s * 0.34)), Vector2.new(0.5, 0), z + 1, false)
-		piece("Head", math.floor(s * 0.36), math.floor(s * 0.36), UDim2.new(0.5, 0, 0, math.floor(s * 0.01)), Vector2.new(0.5, 0), z + 2, true)
 		local api = {}
-		-- how much of each arm there is: 1 whole, 0 gone, in between growing back (in green)
+		-- how much of each arm there is: 1 whole (white), 0 lost (red), in between growing back
 		function api.Set(right: number, left: number)
 			for side, amount in pairs({ Right = right, Left = left }) do
 				local a = arms[side]
-				a.Frame.Visible = amount > 0.02
-				a.Frame.Size = UDim2.fromOffset(armW, math.max(armW, math.floor(a.Full * math.clamp(amount, 0, 1))))
-				local growing = amount < 0.999
-				a.Shade.Color = if growing then ColorSequence.new(Kit.lighten(C.Green, 0.2), C.GreenDeep) else ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(214, 224, 242))
+				local k = math.clamp(amount, 0, 1)
+				if k >= 0.999 then
+					a.Shade.Color = WHITE
+					a.Grow.Visible = false
+				else
+					a.Shade.Color = RED
+					a.Grow.Visible = k > 0.02
+					a.Grow.Size = UDim2.fromScale(1, k)
+				end
 			end
 		end
+		api.Red, api.Green = RED, GREEN
 		return api
 	end
 
@@ -107,19 +111,23 @@ return function(ctx: any)
 	local function limbPill(name: string, withCaption: boolean)
 		local holder, pill, caption, glow = ctx.StatusPill(name, 0, "", C.Gold, nil)
 		holder.Parent = nil -- (built by the status column's own builder; placed by the caller)
-		-- the badge: the hero pill's portrait disc - ink, a band in the state's colour, ink - with
-		-- the figure on its face
-		local disc = new("Frame", { Name = "Badge", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(M.BadgeX, M.BadgeY), Size = UDim2.fromOffset(72, 72), ZIndex = 5, Parent = holder })
-		Kit.pill(disc)
-		local _, grads = Kit.rings(disc, UDim.new(1, 0), { { 3, C.Ink }, { 5, { Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90 } }, { 3, C.Ink } }, 8)
-		Kit.edgeStrokes(disc, UDim.new(1, 0), { { 2, C.Ink, nil, "Center" } }, 9)
+		-- the badge: a card in the hero pill's portrait rings - ink, a band in the state's colour,
+		-- ink - standing on the pill's left cap like its coin and star, the body on its navy face (so
+		-- a red lost arm always shows, whatever the state's colour)
+		local CARD = UDim.new(0, 16)
+		local disc = new("Frame", { Name = "Badge", BackgroundColor3 = Color3.new(1, 1, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(M.BadgeX, M.BadgeY), Size = UDim2.fromOffset(62, 78), ZIndex = 5, Parent = holder })
+		new("UICorner", { CornerRadius = CARD, Parent = disc })
+		local _, grads = Kit.rings(disc, CARD, { { 3, C.Ink }, { 4, { Kit.lighten(C.Gold, 0.25), C.GoldDeep, 90 } }, { 3, C.Ink } }, 8)
+		Kit.edgeStrokes(disc, CARD, { { 2, C.Ink, nil, "Center" } }, 9)
 		local bandGrad = grads[2]
-		local faceGrad = Kit.gradient(disc, Kit.lighten(C.Gold, 0.1), Kit.darken(C.GoldDeep, 0.35), 90)
-		local glyph = figure(disc, 44, 7)
+		Kit.gradient(disc, Kit.lighten(C.Navy500, 0.1), C.Navy800, 90)
+		local glyph = figure(disc, 42, 56, 7)
 		local value = ctx.PillValue(pill, "", C.Gold, M.RightPad + SOCKET_W + 12)
 		if not withCaption then
+			-- (a tag over a fighter: its word alone, centred in the pill)
 			caption.Visible = false
 			value.Position = UDim2.fromOffset(M.TextX, math.floor((M.Height - 32) / 2))
+			value.TextXAlignment = Enum.TextXAlignment.Center
 		end
 		-- the socket: the pill's right end, like its actions (never pressed: it shows the clock)
 		local socket = ctx.PillAction(pill, { Name = "Regrow", Width = SOCKET_W, Text = "", TextSize = 22, Color = C.Green, Deep = C.GreenDeep, HoverScale = 1 })
@@ -131,7 +139,6 @@ return function(ctx: any)
 		function api.Paint(st: any)
 			glow.BackgroundColor3 = st.Accent
 			bandGrad.Color = ColorSequence.new(Kit.lighten(st.Accent, 0.25), st.Deep)
-			faceGrad.Color = ColorSequence.new(Kit.lighten(st.Accent, 0.1), Kit.darken(st.Deep, 0.35))
 			value.Text = st.Value
 			value.TextColor3 = Kit.lighten(st.Accent, 0.3)
 			caption.Text = if withCaption then st.Caption or "" else ""
@@ -353,7 +360,7 @@ return function(ctx: any)
 	---------------------------------------------------------------------------
 	type Tag = { Char: Model, Gui: BillboardGui?, Pill: any, Stage: number, Serial: number, Conns: { RBXScriptConnection } }
 	local tags: { [Model]: Tag } = {}
-	local TAG_SCALE = 0.5
+	local TAG_SCALE = 0.62 -- (big enough that the body on its badge reads at a glance)
 
 	local function dropGui(t: Tag)
 		if t.Gui then
@@ -373,7 +380,7 @@ return function(ctx: any)
 		end
 		local bb = new("BillboardGui", {
 			Name = "LimbTag",
-			Size = UDim2.fromOffset(460 * TAG_SCALE, M.Height * TAG_SCALE + 12),
+			Size = UDim2.fromOffset(460 * TAG_SCALE, (M.Height + 24) * TAG_SCALE),
 			-- (high enough to clear the name and health bar Roblox draws over a head)
 			StudsOffset = Vector3.new(0, 3.8, 0),
 			AlwaysOnTop = true,

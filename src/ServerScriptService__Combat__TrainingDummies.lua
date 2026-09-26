@@ -361,6 +361,17 @@ local function spar(Service: any, e: any)
 		end
 		return
 	end
+	if arms == 0 then
+		-- no arms: nothing to fight with - it keeps its distance (faster: Config.MoveScale)
+		e.Hum.WalkSpeed = Config.WalkSpeed * Config.MoveScale(e.GoreStage)
+		if free and dist < 9 then
+			local away = flat(e.Root.Position - target.Root.Position)
+			e.Hum:MoveTo(e.Root.Position + away * 8)
+		else
+			e.Hum:Move(Vector3.zero)
+		end
+		return
+	end
 	if dist > 4.4 then
 		if free and t > (e.RestUntil or 0) then
 			e.Hum:MoveTo(target.Root.Position - flat(target.Root.Position - e.Root.Position) * 3.3)
@@ -370,9 +381,6 @@ local function spar(Service: any, e: any)
 	e.Hum:Move(Vector3.zero)
 	if t < (e.RestUntil or 0) then
 		return
-	end
-	if arms == 0 then
-		return -- (no arms: no attack of any kind)
 	end
 	if e.State == "Idle" then
 		face(e, target.Root.Position)

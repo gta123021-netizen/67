@@ -694,7 +694,9 @@ local function damageKind(def: any, brk: boolean, blocked: boolean, launched: bo
 		else "Light"
 end
 
-local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
+-- at: where the blow lands on the body's surface; fist: the striking limb's own point there (a
+-- guard meets it there: a block's and a guard break's effects go there, like the server's)
+local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3, fist: Vector3?)
 	local def = a.Def
 	local class = def.ClassDef
 	local root = ctx.Root
@@ -713,6 +715,9 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3)
 		Restarted = w.StunChain ~= nil and w.StunChain ~= a.ChainKey and (w.ControlSince == nil or now() - w.ControlSince < Config.Combo.ResetGrace),
 	})
 	local blocked = guarded and not brk
+	if (blocked or brk) and fist then
+		at = fist
+	end
 	-- (a launcher inside a chain takes them down, unless held)
 	local launched = not guarded and not held and def.Launch ~= nil and a.Slot > 0
 	local prevStun = w.StunChain
@@ -801,20 +806,20 @@ local function predictImpact(a: any)
 			local root = c.Root
 			local acf = CFrame.lookAt(root.Position, root.Position + flat(root.CFrame.LookVector))
 			local best: Body? = nil
-			local bestD, bestAt = math.huge, nil
+			local bestD, bestAt, bestFist = math.huge, nil, nil
 			for _, body in ipairs(strikeCandidates()) do
 				local vr = body.Root
 				local dist = (vr.Position - root.Position).Magnitude
 				if dist < 12 and dist < bestD then
 					local vcf = CFrame.lookAt(vr.Position, vr.Position + flat(vr.CFrame.LookVector))
-					local hit, at = HitDetect.Sweep(def.Id, acf, vcf, from, to, radius, body.Model:GetAttribute("GoreStage"), myStage())
+					local hit, at, fist = HitDetect.Sweep(def.Id, acf, vcf, from, to, radius, body.Model:GetAttribute("GoreStage"), myStage())
 					if hit and at and clearTo(acf.Position + Vector3.new(0, 1, 0), at, vr.Position.Y) then
-						best, bestD, bestAt = body, dist, at
+						best, bestD, bestAt, bestFist = body, dist, at, fist
 					end
 				end
 			end
 			if best and bestAt then
-				localImpact(a, best.Model, best.Root, bestAt)
+				localImpact(a, best.Model, best.Root, bestAt, bestFist)
 				;(conn :: RBXScriptConnection):Disconnect()
 				return
 			end
@@ -1247,7 +1252,7 @@ function tryDash()
 	local serial = ctx.DashSerial
 	ctx.DashDir = dirName
 	ctx.DashStart = t
-	ctx.DashCooldownUntil = t + def.Lock + Config.Dash.Cooldown
+	ctx.DashCooldownUntil = t + def.Lock + Config.DashCooldownFor(myStage())
 	endChain()
 	ctx.IdleTime = 0
 	setLocal("Dashing", def.Lock)
@@ -1858,8 +1863,10 @@ local function updateLocomotion(dt: number)
 	else
 		ctx.Speed = target
 	end
-	if hum.WalkSpeed ~= ctx.Speed then
-		hum.WalkSpeed = ctx.Speed
+	-- (no arms: faster - Config.MoveScale)
+	local walk = ctx.Speed * Config.MoveScale(myStage())
+	if hum.WalkSpeed ~= walk then
+		hum.WalkSpeed = walk
 	end
 	-- no jumping out of a live combo: the chain's window is for its next strike (a jump there was the
 	-- way to reset a string into a Ground Smash)

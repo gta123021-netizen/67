@@ -119,6 +119,7 @@ do
 	end }
 	local watchHandle = Env.withAttributes(part("Handle"))
 	watchHandle.FindFirstChild = function() return nil end
+	watchHandle.GetChildren = function() return {} end
 	watchHandle.GetDescendants = function()
 		return { weld }
 	end
@@ -128,8 +129,30 @@ do
 		return if n == "Handle" then watchHandle else nil
 	end }
 	table.insert(B.Accessories, watch)
+	-- a pad worn at the shoulder (its attachment matches the arm's RightShoulderAttachment, and a weld)
+	local function attachment(name)
+		return { Name = name, ClassName = "Attachment", IsA = function(_, c)
+			return c == "Attachment"
+		end }
+	end
+	local armShoulder = attachment("RightShoulderAttachment")
+	arm.FindFirstChild = function(_, n)
+		return if n == armShoulder.Name then armShoulder else nil
+	end
+	local padAtt = attachment("RightShoulderAttachment")
+	local padWeld = { ClassName = "Weld", Part0 = nil, Part1 = arm, IsA = weld.IsA }
+	local padHandle = Env.withAttributes(part("Handle"))
+	padHandle.FindFirstChild = function() return nil end
+	padHandle.GetChildren = function() return { padAtt } end
+	padHandle.GetDescendants = function()
+		return { padAtt, padWeld }
+	end
+	table.insert(B.Accessories, { Name = "Pad", ClassName = "Accessory", IsA = watch.IsA, FindFirstChild = function(_, n)
+		return if n == "Handle" then padHandle else nil
+	end })
 	eB.Hum:TakeDamage(30)
 	check("an accessory held on the lost arm is hidden with it", watchHandle.Transparency == 1)
+	check("... but not one worn on its shoulder: the nub (the arm's upper half) still wears it", padHandle.Transparency == 0 and padHandle:GetAttribute("GoreHidden") == nil)
 	check("... and what each looked like before is kept on it (the HUD's portraits show the fighter whole)", arm:GetAttribute("GoreHidden") == 0 and watchHandle:GetAttribute("GoreHidden") == 0)
 	B:Destroy()
 	Env.step()
@@ -177,6 +200,7 @@ do
 		return c == "Weld" or c == "JointInstance"
 	end }
 	watchHandle.FindFirstChild = function() return nil end
+	watchHandle.GetChildren = function() return {} end
 	watchHandle.GetDescendants = function()
 		return { weld }
 	end
@@ -366,20 +390,120 @@ do
 	check("a right straight lands with the right arm, and never once it is gone", HD.Sweep("Swing1", acf, vcf, path.From, path.To, r, 0, 0) and not HD.Sweep("Swing1", acf, vcf, path.From, path.To, r, 0, 1))
 	local p3 = HD.Paths.Swing3
 	check("a two-handed hook still lands with the hand that is left", HD.Sweep("Swing3", acf, vcf, p3.From, p3.To, HD.Radius("Swing3"), 0, 1) and not HD.Sweep("Swing3", acf, vcf, p3.From, p3.To, HD.Radius("Swing3"), 0, 2))
-	-- a blow that only grazed the tip of the arm that is gone now misses
-	local grazed, missed = 0, 0
-	for dx = -2.6, 2.6, 0.05 do
-		local v2 = CF.lookAt(V3.new(dx, 3, -3.2), V3.new(dx, 3, 0))
-		local h0 = HD.Sweep("Swing2", acf, v2, HD.Paths.Swing2.From, HD.Paths.Swing2.To, HD.Radius("Swing2"), 0, 0)
-		local h2 = HD.Sweep("Swing2", acf, v2, HD.Paths.Swing2.From, HD.Paths.Swing2.To, HD.Radius("Swing2"), 2, 0)
-		if h0 then
-			grazed += 1
+	-- where a blow lands: its contact on the body's surface (blood, a clean hit's impact), the fist's
+	-- own point just in front of it (a guard's sparks)
+	do
+		local ok, onSurface, fistOut = true, 0, 0
+		for dz = 2.4, 3.6, 0.2 do
+			for _, key in ipairs({ "Swing1", "Swing2", "Swing3", "Uppercut" }) do
+				local v2 = CF.lookAt(V3.new(0, 3, -dz), V3.new(0, 3, 0))
+				local p = HD.Paths[key]
+				local hit, at, fist = HD.Sweep(key, acf, v2, p.From, p.To, HD.Radius(key), 0, 0)
+				if hit then
+					local ls, lf = v2:PointToObjectSpace(at), v2:PointToObjectSpace(fist)
+					local B = Config.Hitbox.Body
+					local onFace = math.abs(math.abs(ls.X) - B.HalfWidth) < 1e-3 or math.abs(math.abs(ls.Z) - B.HalfDepth) < 1e-3 or math.abs(ls.Y - B.Top) < 1e-3
+					local inside = math.abs(ls.X) <= B.HalfWidth + 1e-3 and math.abs(ls.Z) <= B.HalfDepth + 1e-3 and ls.Y <= B.Top + 1e-3 and ls.Y >= B.Bottom - 1e-3
+					if onFace and inside then
+						onSurface += 1
+					else
+						ok = false
+					end
+					if (lf - ls).Magnitude <= HD.Radius(key) + 1e-3 then
+						fistOut += 1
+					end
+				end
+			end
 		end
-		if h0 and not h2 then
-			missed += 1
-		end
+		check(("every blow's contact lies on the body's surface (%d), its fist within the limb's reach of it (%d)"):format(onSurface, fistOut), ok and onSurface > 10 and fistOut == onSurface)
 	end
-	check(("sweeping a jab across a body: %d offsets hit it whole, %d of them only the arms it no longer has"):format(grazed, missed), grazed > 0 and missed > 0 and missed < grazed)
+	-- ...at every limb stage (the nubs), every step up or down, every heading, anywhere on the map:
+	-- the contact always on what is there of the body - never in the air where a lost forearm was,
+	-- never inside it - and the fist's own point always within its reach
+	do
+		local B, NB, THIN = Config.Hitbox.Body, Config.Hitbox.Nub, Config.Hitbox.ArmlessHalfWidth
+		local function boxes(stage)
+			local L = if stage >= 2 then THIN else B.HalfWidth
+			local R = if stage >= 1 then THIN else B.HalfWidth
+			local out = { { -L, R, B.Bottom, B.Top } }
+			if stage >= 1 then
+				table.insert(out, { 0, B.HalfWidth, NB.Bottom, NB.Top })
+			end
+			if stage >= 2 then
+				table.insert(out, { -B.HalfWidth, 0, NB.Bottom, NB.Top })
+			end
+			return out
+		end
+		local function onBody(l, bx)
+			local on, deep, e = false, false, 2e-3
+			for _, b in ipairs(bx) do
+				if l.X >= b[1] - e and l.X <= b[2] + e and l.Y >= b[3] - e and l.Y <= b[4] + e and math.abs(l.Z) <= B.HalfDepth + e then
+					on = true
+				end
+				if l.X > b[1] + e and l.X < b[2] - e and l.Y > b[3] + e and l.Y < b[4] - e and math.abs(l.Z) < B.HalfDepth - e then
+					deep = true
+				end
+			end
+			return on and not deep
+		end
+		local function inside(l, bx)
+			for _, b in ipairs(bx) do
+				if l.X > b[1] + 2e-3 and l.X < b[2] - 2e-3 and l.Y > b[3] + 2e-3 and l.Y < b[4] - 2e-3 and math.abs(l.Z) < B.HalfDepth - 2e-3 then
+					return true
+				end
+			end
+			return false
+		end
+		local total, bad, far, perStage = 0, 0, 0, { 0, 0, 0 }
+		for _, base in ipairs({ CF.new(0, 0, 0), CF.new(1234, 4000, -777), CF.new(-2900, -300, 2900) }) do
+			for stage = 0, 2 do
+				for _, key in ipairs({ "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep", "DashAttack", "Downslam" }) do
+					local p = HD.Paths[key]
+					for _, rise in ipairs({ -1.6, -0.8, 0, 0.8, 1.6 }) do
+						for _, turn in ipairs({ 0, 0.6, 1.57, 3.14, -2.2 }) do
+							for dz = 2.2, 3.8, 0.4 do
+								for dx = -1.5, 1.5, 0.75 do
+									local a = base * acf
+									local v = base * CF.new(dx, 3 + rise, -dz) * CF.Angles(0, turn, 0)
+									local hit, at, fist = HD.Sweep(key, a, v, p.From, p.To, HD.Radius(key), stage, 0)
+									if hit then
+										total += 1
+										perStage[stage + 1] += 1
+										local l = v:PointToObjectSpace(at)
+										if not onBody(l, boxes(stage)) then
+											bad += 1
+										end
+										local lf = v:PointToObjectSpace(fist)
+										-- (within reach, and never sunk inside the body where a guard's sparks would hide)
+										if (lf - l).Magnitude > HD.Radius(key) + 2e-3 or inside(lf, boxes(stage)) then
+											far += 1
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		check(("%d blows (%d whole / %d one arm / %d none; steps of +-1.6, any heading, 4000 studs up): every contact on what is left of the body (%d off), every fist within reach and outside it (%d)"):format(total, perStage[1], perStage[2], perStage[3], bad, far), total > 1000 and bad == 0 and far == 0)
+	end
+	-- across a body: a blow at the shoulder still meets a lost arm's nub (its upper half stays on); one
+	-- lower down, where only the forearm that is gone was, now misses
+	local function across(key, stage)
+		local hits = 0
+		for dx = -2.6, 2.6, 0.05 do
+			local v2 = CF.lookAt(V3.new(dx, 3, -3.2), V3.new(dx, 3, 0))
+			if HD.Sweep(key, acf, v2, HD.Paths[key].From, HD.Paths[key].To, HD.Radius(key), stage, 0) then
+				hits += 1
+			end
+		end
+		return hits
+	end
+	local j0, j1, j2 = across("Swing2", 0), across("Swing2", 1), across("Swing2", 2)
+	check(("a jab (shoulder height) swept across a body: %d offsets land whole, %d / %d with one / both arms lost - the nubs still take it"):format(j0, j1, j2), j0 > 0 and j1 == j0 and j2 == j0)
+	local d0, d1, d2 = across("DashAttack", 0), across("DashAttack", 1), across("DashAttack", 2)
+	check(("a dash strike (waist height) swept across: %d land whole, %d with one arm lost, %d with none - only the forearms' space is gone"):format(d0, d1, d2), d0 > d1 and d1 > d2 and d2 > 0)
 end
 do
 	local x = lane()
