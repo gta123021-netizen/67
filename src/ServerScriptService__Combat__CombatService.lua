@@ -291,6 +291,7 @@ function Service.Register(char: Model, player: Player?): Entity?
 		RegrowAt = nil, -- (a player) when its next lost arm grows back
 		Stowed = nil, -- (a player) the tool its lost right hand held, back in its hand with the arm
 		GuardSpans = {}, -- the guard's recent history: { Up, Down? } (see guardedAt)
+		StageLog = {}, -- the gore stage's recent changes: { At, Stage } (see stageAt)
 		Escape = false, -- in the escape window (no stun can land) - the Escape attribute too
 		EscapeLog = {}, -- its recent flips: { At, On }
 		Locks = {},
@@ -890,6 +891,26 @@ local function goreFor(e: Entity): boolean
 	return Config.Gore.Enabled and (e.Npc or Config.Gore.Players == true)
 end
 
+-- its gore stage as it stood at `tau` (an attacker's screen shows it a round trip late: the damage
+-- multiplier and the narrower body are judged as that screen had them, so its number is the one dealt)
+local function stageAt(e: Entity, tau: number): number
+	if not goreFor(e) then
+		return 0
+	end
+	local log = e.StageLog
+	if log then
+		for i = #log, 1, -1 do
+			if log[i].At <= tau then
+				return log[i].Stage
+			end
+		end
+		if #log > 0 then
+			return log[1].Was
+		end
+	end
+	return e.GoreStage or 0
+end
+
 -- an accessory hangs on `part`: by a weld to it, or (rigid accessories) a constraint to it
 local function heldBy(j: Instance, part: BasePart): boolean
 	if j:IsA("JointInstance") or j:IsA("WeldConstraint") then
@@ -993,6 +1014,13 @@ local function setGore(e: Entity, st: number)
 		return
 	end
 	e.GoreStage = st
+	local log = e.StageLog
+	if log then
+		table.insert(log, { At = now(), Stage = st, Was = was })
+		if #log > 8 then
+			table.remove(log, 1)
+		end
+	end
 	e.Char:SetAttribute("GoreStage", st)
 	for i = was + 1, st do
 		local part = e.Char:FindFirstChild(LIMBS[i])
@@ -1088,8 +1116,10 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		local landed = job.Start + job.HitTau / def.Speed
 		tau = math.clamp(landed - latency(att), t - Config.Hitbox.RewindMax, t)
 	end
-	local toAtt = att.Root.Position - vic.Root.Position
-	local facing = flat(vic.Root.CFrame.LookVector):Dot(flat(toAtt)) > Config.Guard.Arc
+	-- (facing: the two bodies where the attacker's screen had them when the blow landed there)
+	local vFrame = if job.HitVcf then job.HitVcf else vic.Root.CFrame
+	local toAtt = (if job.HitAcf then job.HitAcf.Position else att.Root.Position) - vFrame.Position
+	local facing = flat(vFrame.LookVector):Dot(flat(toAtt)) > Config.Guard.Arc
 	local guarded = facing and guardedAt(vic, tau) and (vic.State == "Blocking" or States.Allows(vic.State, "Block"))
 	-- a guard breaker is held off by a fighter that was in its escape window (the same moment)
 	local breakHeld = escapeAt(vic, tau) or resetLockedAt(att, vic, tau)
@@ -1126,7 +1156,7 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	-- a body missing arms takes more, and a one-armed guard stops less (Config.GoreDamage: the
 	-- attacker's screen predicts the same number on its own impact frame)
 	if goreFor(vic) then
-		dmg = Config.GoreDamage(dmg, vic.GoreStage, data.B)
+		dmg = Config.GoreDamage(dmg, stageAt(vic, tau), data.B)
 	end
 	-- damage. The blow that knocks them out throws the body: the strike's own launch (the sweep,
 	-- the stomp), or the KO throw straight back from the attacker for any other blow - after the
@@ -1437,7 +1467,7 @@ local function stepJob(job: any, t: number): boolean
 				end
 				local vcf = rewoundFrame(v, seenAt)
 				-- (a lost arm: that side of the body is narrower, and a limb gone never lands)
-				local hit, at = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius, if goreFor(v) then v.GoreStage else 0, if goreFor(e) then e.GoreStage else 0)
+				local hit, at = HitDetect.Sweep(def.Id, acf, vcf, a, b, radius, stageAt(v, seenAt), if goreFor(e) then e.GoreStage else 0)
 				if debugHits then
 					-- Studio tuning: remember how close each strike came to each body
 					job.Dbg = job.Dbg or {}
@@ -1460,6 +1490,7 @@ local function stepJob(job: any, t: number): boolean
 						job.Hit[v.Char] = true
 						job.Count += 1
 						job.HitTau = b
+						job.HitAcf, job.HitVcf = acf, vcf -- (the two bodies as the attacker's screen had them)
 						applyHit(e, v, def, contact, job)
 					end
 				end

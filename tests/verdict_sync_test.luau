@@ -3,8 +3,8 @@
 	The attacker's screen and the server give every blow the same verdict - and so the same damage
 	number. Hundreds of random blows on the REAL server (CombatService on the simulated world): the
 	victim raises and drops its guard at random moments around the blow, falls into and out of its
-	escape window, faces the attacker or not; the attacker has a random ping; half the blows are
-	guard breakers. For each, the verdict the attacker's screen reaches (Rules.Verdict - the very
+	escape window, loses an arm to someone else just before or after, faces the attacker or not; the
+	attacker has a random ping; half the blows are guard breakers. For each, the verdict the attacker's screen reaches (Rules.Verdict - the very
 	function CombatClient calls) from what that screen had seen of the victim (its CombatState and
 	Escape attributes as they had arrived by then) is compared with the server's own Hit.
 
@@ -42,7 +42,7 @@ local function logged(char)
 end
 -- what the attacker's screen had of the victim at `tau`: the attributes that had arrived by then
 local function seenAt(log, tau)
-	local state, esc, since = "Idle", false, -math.huge
+	local state, esc, since, stage = "Idle", false, -math.huge, 0
 	for _, e in ipairs(log) do
 		if e.T <= tau + 1e-9 then
 			if e.K == "CombatState" then
@@ -52,16 +52,18 @@ local function seenAt(log, tau)
 				state = e.V
 			elseif e.K == "Escape" then
 				esc = e.V == true
+			elseif e.K == "GoreStage" then
+				stage = e.V
 			end
 		end
 	end
-	return state, since, esc
+	return state, since, esc, stage
 end
 
 local def = Config.Attacks.Swing1
 local breaker0, breakDmg0 = def.GuardBreak, def.GuardBreakDamage
 local trials, hits, agree, numbers = 220, 0, 0, 0
-local kinds = { clean = 0, blocked = 0, broken = 0 }
+local kinds = { clean = 0, blocked = 0, broken = 0, wounded = 0 }
 local firstBad = nil
 for i = 1, trials do
 	local x = i * 300
@@ -85,6 +87,9 @@ for i = 1, trials do
 	if math.random() < 0.3 then
 		eB.StunImmuneUntil = Env.now() + math.random() * 0.5
 	end
+	-- someone else takes its right arm off round the blow (the damage it takes goes up by a share)
+	local woundAt = if math.random() < 0.35 then math.random() * 0.5 - 0.05 else math.huge
+	local wounded = false
 	local t0 = Env.now()
 	local from = #Env.events
 	Service.RequestAttack(A, { Kind = "Light" })
@@ -100,6 +105,10 @@ for i = 1, trials do
 			down = true
 			Service.RequestBlock(B, false)
 		end
+		if not wounded and el >= woundAt then
+			wounded = true
+			eB.Hum:TakeDamage(eB.Hum.MaxHealth * 0.26)
+		end
 		Env.step()
 		for k = from + 1, #Env.events do
 			local ev = Env.events[k]
@@ -114,7 +123,7 @@ for i = 1, trials do
 	if hit then
 		hits += 1
 		local tau = Service._lastTau
-		local state, since, esc = seenAt(log, tau)
+		local state, since, esc, seenStage = seenAt(log, tau)
 		local guarded, brk = Rules.Verdict(def, {
 			Blocking = state == "Blocking",
 			GuardFor = tau - since,
@@ -123,7 +132,11 @@ for i = 1, trials do
 			Restarted = false,
 		})
 		local blocked = guarded and not brk
-		local predicted = if brk then def.GuardBreakDamage elseif blocked then def.Damage * Config.Guard.DamageScale else def.Damage
+		local base = if brk then def.GuardBreakDamage elseif blocked then def.Damage * Config.Guard.DamageScale else def.Damage
+		local predicted = Config.GoreDamage(base, seenStage, blocked)
+		if seenStage > 0 then
+			kinds.wounded += 1
+		end
 		local same = hit.G == brk and hit.B == blocked
 		if same then
 			agree += 1
@@ -132,6 +145,8 @@ for i = 1, trials do
 		end
 		if math.abs(predicted - hit.D) < 1e-6 then
 			numbers += 1
+		elseif not firstBad then
+			firstBad = ("blow %d: number %.3f on the screen, %.3f dealt (stage seen %d)"):format(i, predicted, hit.D, seenStage)
 		end
 		kinds[if brk then "broken" elseif blocked then "blocked" else "clean"] += 1
 	end
@@ -141,10 +156,10 @@ for i = 1, trials do
 end
 def.GuardBreak, def.GuardBreakDamage = breaker0, breakDmg0
 
-print(("  (%d blows landed: %d clean, %d blocked, %d guard breaks)"):format(hits, kinds.clean, kinds.blocked, kinds.broken))
+print(("  (%d blows landed: %d clean, %d blocked, %d guard breaks; %d on a one-armed body)"):format(hits, kinds.clean, kinds.blocked, kinds.broken, kinds.wounded))
 check("every kind of verdict came up (clean, blocked, broken)", kinds.clean > 20 and kinds.blocked > 20 and kinds.broken > 10)
 check(("the attacker's screen and the server agree on every blow (%d / %d)"):format(agree, hits), hits > trials * 0.9 and agree == hits, firstBad)
-check(("...so the number stamped on the impact frame is the one dealt (%d / %d)"):format(numbers, hits), numbers == hits)
+check(("...so the number stamped on the impact frame is the one dealt, a lost arm's extra share included (%d / %d)"):format(numbers, hits), numbers == hits and kinds.wounded > 10, firstBad)
 
 print(("\n%d passed, %d failed"):format(passed, failed))
 if failed > 0 then
