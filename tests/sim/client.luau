@@ -24,10 +24,14 @@ return function(Env)
 		Attachment = "Instance", ParticleEmitter = "Instance", Decal = "Instance", Texture = "Decal", SpecialMesh = "Instance",
 		Folder = "Instance", PointLight = "Instance", Trail = "Instance", Beam = "Instance", Sound = "Instance",
 		EqualizerSoundEffect = "Instance", DistortionSoundEffect = "Instance", Camera = "Instance", Instance = nil,
+		UnionOperation = "BasePart", Weld = "JointInstance", Motor6D = "JointInstance", JointInstance = "Instance",
+		WeldConstraint = "Instance", BallSocketConstraint = "Instance", Humanoid = "Instance", Accessory = "Instance",
+		Shirt = "Clothing", Pants = "Clothing", Clothing = "Instance", SurfaceAppearance = "Instance", Bone = "Attachment",
 	}
 	local DEFAULTS = {
-		BasePart = { Anchored = false, CanCollide = true, CanQuery = true, CanTouch = true, CastShadow = true, Transparency = 0, Reflectance = 0, Size = V3.new(4, 1, 2), Material = roblox.Enum.Material.Plastic, MaterialVariant = "", Color = roblox.Color3.new(0.64, 0.64, 0.64) },
-		Decal = { Transparency = 0, Texture = "", Face = roblox.Enum.NormalId.Front },
+		BasePart = { Anchored = false, CanCollide = true, CanQuery = true, CanTouch = true, CastShadow = true, Transparency = 0, Reflectance = 0, Size = V3.new(4, 1, 2), Material = roblox.Enum.Material.Plastic, MaterialVariant = "", Color = roblox.Color3.new(0.64, 0.64, 0.64),
+			LocalTransparencyModifier = 0, Massless = false, CollisionGroup = "Default", AssemblyLinearVelocity = V3.zero, AssemblyAngularVelocity = V3.zero },
+		Decal = { Transparency = 0, Texture = "", Face = roblox.Enum.NormalId.Front, LocalTransparencyModifier = 0 },
 		ParticleEmitter = { Enabled = true, Rate = 5, Lifetime = roblox.NumberRange.new(5, 10), Speed = roblox.NumberRange.new(5, 5), Acceleration = V3.zero, Drag = 0, SpreadAngle = roblox.Vector2.new(0, 0), EmitCount = 0 },
 		Attachment = { },
 		PointLight = { Brightness = 1, Range = 8 },
@@ -104,6 +108,16 @@ return function(Env)
 			if ch.ClassName == c then
 				return ch
 			end
+		end
+		return nil
+	end
+	function proto:FindFirstAncestorOfClass(c)
+		local p = self._p.Parent
+		while p do
+			if p.ClassName == c then
+				return p
+			end
+			p = if p._p then p._p.Parent else nil
 		end
 		return nil
 	end

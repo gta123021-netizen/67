@@ -77,18 +77,43 @@ local function holder(): Folder
 	return f
 end
 
-local function fighters(): { Model }
+-- every body the smash must not treat as ground: the players, the practice dummies, and any other
+-- character (an NPC anywhere in the map) standing near the smash
+local function fighters(center: Vector3?): { Model }
 	local list = {}
+	local seen: { [Model]: boolean } = {}
+	local function add(m: Model)
+		if not seen[m] then
+			seen[m] = true
+			table.insert(list, m)
+		end
+	end
 	for _, pl in ipairs(Players:GetPlayers()) do
 		if pl.Character then
-			table.insert(list, pl.Character)
+			add(pl.Character)
 		end
 	end
 	local dummies = workspace:FindFirstChild("PracticeDummies")
 	if dummies then
 		for _, m in ipairs(dummies:GetChildren()) do
 			if m:IsA("Model") then
-				table.insert(list, m)
+				add(m)
+			end
+		end
+	end
+	if center then
+		local ok, parts = pcall(function()
+			return workspace:GetPartBoundsInRadius(center, R + 6)
+		end)
+		if ok and parts then
+			for _, p in ipairs(parts) do
+				local m = p:FindFirstAncestorOfClass("Model")
+				while m and not m:FindFirstChildOfClass("Humanoid") do
+					m = m:FindFirstAncestorOfClass("Model")
+				end
+				if m then
+					add(m)
+				end
 			end
 		end
 	end
@@ -103,9 +128,9 @@ local overlap = OverlapParams.new()
 overlap.FilterType = Enum.RaycastFilterType.Exclude
 overlap.RespectCanCollide = true
 
-local function setIgnore()
+local function setIgnore(center: Vector3?)
 	local ignore: { Instance } = { holder() }
-	for _, m in ipairs(fighters()) do
+	for _, m in ipairs(fighters(center)) do
 		table.insert(ignore, m)
 	end
 	for _, name in ipairs({ "CombatFX", "CombatBlood", "CombatDebugDraw" }) do
@@ -302,7 +327,15 @@ local function step(dt: number)
 			local v = f.Vel - Vector3.new(0, GRAVITY * dt, 0)
 			local delta = v * dt
 			local hit = workspace:Raycast(f.Pos, delta + delta.Unit * f.Size * 0.4, rayParams)
-			if hit and hit.Normal.Y > 0.55 then
+			if hit and hit.Material == Enum.Material.Water then
+				-- into water: gone under
+				table.remove(flights, i)
+				f.Part.CFrame = PARK
+				if f.Done then
+					task.defer(f.Done)
+				end
+				continue
+			elseif hit and hit.Normal.Y > 0.55 then
 				if f.Bounces < 1 and v.Magnitude > 9 then
 					-- one heavy bounce: most of the energy goes into the ground
 					f.Bounces += 1
@@ -560,14 +593,18 @@ local function build(ground: RaycastResult, attacker: Model?, rng: Random)
 		table.insert(mains, a)
 		local reach = if rng:NextNumber() < 0.62 then R * rng:NextNumber(0.9, 1.0) else R * rng:NextNumber(0.42, 0.75)
 		local dir = Vector3.new(math.cos(a), 0, math.sin(a))
-		grow(center, center + dir * 0.25, dir, reach, rng:NextNumber(0.3, 0.44), 0, rng, segs)
+		-- (it starts on the ground beside the foot, wherever the ground is there)
+		local start = floorAt(center + dir * 0.25, center.Y, 0.7)
+		if start and start.Material ~= Enum.Material.Water then
+			grow(center, start.Position, dir, reach, rng:NextNumber(0.3, 0.44), 0, rng, segs)
+		end
 	end
 	table.sort(mains)
 
 	-- the slabs: heaved between the main breaks, a raised rim round the sunken centre
 	local slabs: { Slab } = {}
 	local bodies: { Vector3 } = {}
-	for _, m in ipairs(fighters()) do
+	for _, m in ipairs(fighters(center)) do
 		local root = m:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") and m ~= attacker then
 			table.insert(bodies, root.Position)
@@ -662,7 +699,7 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 	if cam and (cam.CFrame.Position - pos).Magnitude > VIEW then
 		return
 	end
-	setIgnore()
+	setIgnore(pos)
 	local ground = floorAt(pos, pos.Y, 3)
 	sound("Slam", pos)
 	sound("SlamSub", pos)
@@ -764,7 +801,7 @@ function Shatter.Play(pos: Vector3, attacker: Model?)
 	end
 	local rocks: { BasePart } = {}
 	local roots: { Vector3 } = {}
-	for _, m in ipairs(fighters()) do
+	for _, m in ipairs(fighters(center)) do
 		local root = m:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") and m ~= attacker then
 			table.insert(roots, root.Position)
@@ -988,7 +1025,7 @@ end
 
 -- the finished fracture standing still, for looking at in Studio (no fighters, no animation)
 function Shatter.Preview(ground: Vector3, _parent: Instance?, seed: number?): number
-	setIgnore()
+	setIgnore(ground)
 	local hit = floorAt(ground, ground.Y, 3)
 	if not hit then
 		return 0

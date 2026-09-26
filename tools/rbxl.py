@@ -524,6 +524,11 @@ def _clone_instance(self, src_ref, parent_ref, name=None):
             v = vals[idx]
             if pname == "Name" and name is not None:
                 v = name.encode()
+            elif pname == "ScriptGuid" and v:
+                # (a script's identity in Studio: every script needs its own)
+                import uuid as _uuid
+
+                v = ("{%s}" % str(_uuid.uuid4()).upper()).encode()
             vals.append(v)
             new_body = b"".join(struct.pack("<I", len(x)) + x for x in vals)
         elif t == 0x02:
@@ -565,7 +570,25 @@ def _clone_instance(self, src_ref, parent_ref, name=None):
     return new_ref
 
 
+def _set_color3uint8(self, ref, pname, rgb):
+    """set one instance's Color3uint8 property (type 0x1A: all R bytes, then all G, then all B)"""
+    cid = self.ref_class[ref]
+    info = self.classes[cid]
+    idx = info["refs"].index(ref)
+    n = len(info["refs"])
+    ch = self.props[(cid, pname)]
+    head = _prop_head(ch)
+    if ch.data[head - 1] != 0x1A:
+        raise ValueError("%s is not a Color3uint8 property" % pname)
+    body = bytearray(ch.data[head:])
+    for k in range(3):
+        body[k * n + idx] = rgb[k]
+    ch.data = bytes(ch.data[:head]) + bytes(body)
+    ch.dirty = True
+
+
 Place.set_parent = _set_parent_entry
 Place.set_name = _set_name
+Place.set_color3uint8 = _set_color3uint8
 Place.find = _find
 Place.clone_instance = _clone_instance

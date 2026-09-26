@@ -188,7 +188,8 @@ end
 -- a solid box (a wall, a step, a crate...): opts.Transparency, opts.Material (for ray results)
 function Env.addBox(name, min, max, canCollide, opts)
 	opts = opts or {}
-	local b = { Name = name, Min = min, Max = max, CanCollide = canCollide ~= false, Transparency = opts.Transparency or 0, Material = opts.Material or roblox.Enum.Material.Plastic, IsA = boxIsA }
+	local b = { Name = name, Min = min, Max = max, CanCollide = canCollide ~= false, Transparency = opts.Transparency or 0, Material = opts.Material or roblox.Enum.Material.Plastic,
+		Color = opts.Color or roblox.Color3.fromRGB(128, 128, 128), MaterialVariant = "", IsA = boxIsA }
 	table.insert(boxes, b)
 	return b
 end
@@ -544,6 +545,7 @@ local moduleFiles = {
 	["ReplicatedStorage/Combat/CombatShatter"] = "ReplicatedStorage__Combat__CombatShatter.lua",
 	["ReplicatedStorage/Combat/CombatVFX"] = "ReplicatedStorage__Combat__CombatVFX.lua",
 	["ReplicatedStorage/Combat/CombatFX"] = "ReplicatedStorage__Combat__CombatFX.lua",
+	["ReplicatedStorage/Combat/CombatGore"] = "ReplicatedStorage__Combat__CombatGore.lua",
 	["ServerScriptService/Combat/CombatService"] = "ServerScriptService__Combat__CombatService.lua",
 	["ReplicatedStorage/OverkillUI/Theme"] = "ReplicatedStorage__OverkillUI__Theme.lua",
 }
@@ -551,6 +553,8 @@ modules["ReplicatedStorage/Combat/Motion"] = Motion
 modules["ReplicatedStorage/Combat/Ragdoll"] = Ragdoll
 modules["ReplicatedStorage/Combat/AnimController"] = AnimController
 Env.Motion = Motion
+Env.modules = modules -- (a test can stand a stub in for a module before it is first required)
+Env.combatFolder = nil -- (set below)
 
 local function node(path, children)
 	local n = { __path = path, Name = string.match(path, "[^/]+$"), _children = children or {} }
@@ -573,6 +577,7 @@ local combatFolder = node("ReplicatedStorage/Combat", {
 	CombatRequest = remote("CombatRequest"),
 })
 local rs = node("ReplicatedStorage", { Combat = combatFolder })
+Env.combatFolder = combatFolder
 local sssCombat = node("ServerScriptService/Combat")
 local services = {
 	ReplicatedStorage = rs,

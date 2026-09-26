@@ -30,11 +30,16 @@ end
 
 local X, Y, Z = V3.new(1, 0, 0), V3.new(0, 1, 0), V3.new(0, 0, 1)
 
-function CF.new(a, b, c)
+function CF.new(a, b, c, ...)
 	if a == nil then
 		return make(V3.zero, X, Y, Z)
 	end
 	if type(a) == "number" then
+		if select("#", ...) >= 9 then
+			-- (x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22): the rows of the rotation
+			local m = { ... }
+			return make(V3.new(a, b, c), V3.new(m[1], m[4], m[7]), V3.new(m[2], m[5], m[8]), V3.new(m[3], m[6], m[9]))
+		end
 		return make(V3.new(a, b, c), X, Y, Z)
 	end
 	if b ~= nil then
@@ -120,6 +125,16 @@ function CF:Inverse()
 	local nz = V3.new(x.Z, y.Z, z.Z)
 	local inv = make(V3.zero, nx, ny, nz)
 	return make(-rot(inv, self._p), nx, ny, nz)
+end
+function CF:ToObjectSpace(o)
+	return self:Inverse() * o
+end
+function CF:ToWorldSpace(o)
+	return self * o
+end
+function CF:GetComponents()
+	local p, x, y, z = self._p, self._x, self._y, self._z
+	return p.X, p.Y, p.Z, x.X, y.X, z.X, x.Y, y.Y, z.Y, x.Z, y.Z, z.Z
 end
 function CF:PointToWorldSpace(v)
 	return self * v

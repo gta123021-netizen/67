@@ -1,10 +1,11 @@
 # Overkill
 
-- `Overkill_premium_polish_v46.rbxl` - **the latest place. Open this one in Roblox Studio.**
-- `Overkill_premium_polish_v45.rbxl` - the place this refinement started from (binary, kept for comparison).
+- `Overkill_premium_polish_v47.rbxl` - **the latest place. Open this one in Roblox Studio.**
+- `Overkill_premium_polish_v46.rbxl` - the previous build (before the VFX library and gore models were added).
+- `Overkill_premium_polish_v45.rbxl` - the place the v46 refinement started from (binary, kept for comparison).
 - `Overkill_premium_polish_v33.rbxlx` ... `v30.rbxlx` - older XML builds.
 - `src/` - every script in the place, extracted as plain Luau (file name = its path in the game tree).
-  These are the v46 sources.
+  These are the v47 sources.
 - `tools/` - place tooling:
   - `rbxl.py` reads and writes binary places (byte-exact round trip; only changed chunks are re-encoded)
   - `extract_rbxl.py <place.rbxl> <dir>` - every script into a folder
@@ -15,14 +16,73 @@
     python3 tools/build_rbxl.py Overkill_premium_polish_v45.rbxl src Overkill_premium_polish_v46.rbxl
     ```
 
+  - `build_v47.py <v46 with the VFX library and gore models.rbxl> src <out.rbxl>` - the v47 build: the new
+    modules, the effect templates and gore models moved into `ReplicatedStorage.Combat`, the rest of the
+    imported library out of the live world into `ServerStorage.VFXLibrary`, then `src/`
   - `sourcemap.py` - a Rojo-style sourcemap so `luau-lsp analyze` can type-check `src/`
   - `build_place.py` - the older writer for the `.rbxlx` builds
 - `tests/` - headless tests, run with [Lune](https://github.com/lune-org/lune) from the repository root:
   - `lune run tests/combat_sim.luau` - the real server combat modules from `src/` driven frame by frame
-    (60 Hz, simulated clock, bodies on a flat ground with walls): chains, the target lock, anti-stunlock,
+    (60 Hz, simulated clock, bodies on a flat ground with walls): chains, free-form contact, anti-stunlock,
     Ground Smash rules, guard, lag compensation, spacing, walls
   - `lune run tests/logic_test.luau` - the facing turn, the input buffer, client/server agreement under
     latency, and the HUD column's spacing math
+  - `lune run tests/chain_net.luau` - 400 networked chains (every sequence, 0-150 ms, players and dummies,
+    flat / uphill / downhill / bumps / a step): every strike connects, the attacker's screen agrees with the
+    server, every impact within its reach
+  - `lune run tests/blood_test.luau` - the blood's physics: exact flight, splatters on every surface and never
+    over an edge, water / glass / thin walls, outward spray, stain shapes, drying, pooling, the cap
+  - `lune run tests/gore_test.luau` - the NPC gore: thresholds, order, NPC-only, heal restore, every piece's
+    seat on scaled / stretched / turned rigs, gibs, jaw, head burst, cleanup
+  - `lune run tests/shatter_test.luau` - the Ground Smash visuals on flat ground, slopes, bumps, platforms,
+    steps, walls, ledges, water; pools, overlap, the descent
+  - `python3 tests/gore_kit_check.py <place.rbxl>` - CombatGore's measured kit offsets against the place
+  (`SEED=n lune run ...` draws another random sample for the randomized suites)
+
+## What changed in v47 (free-form combat, blood, gore, Ground Smash)
+
+### No target lock - free-form, measured contact
+- The target lock is gone completely (no ownership, facing, magnetism or tether). A strike hits whatever
+  its limb reaches, from any angle.
+- The step-in runs along the attacker's own facing and stops at a body in its lane (never homing); after a
+  clean hit a short carry keeps the gap the next strike of the chain needs. Knockback runs along the
+  attacker's facing and sets up the next strike.
+- Each attack's reach, hitbox and ideal distance were measured from the animations' own limb paths
+  (`tools/anim.py`, `tools/contact.py`): the hitbox is the limb.
+- The attacker's client judges its own strike with the server's hit test (`HitDetect`, now shared in
+  `ReplicatedStorage.Combat`) and shows the impact on its own frame; the server confirms it (lag
+  compensation up to 0.3 s, reports clamped to a drift limit).
+- Every legal pair of strikes has its own cross-fade and entry time (`Config.Transitions`), so a chain
+  flows pose to pose; victim reactions blend from the current pose and never snap back.
+- One impact event drives the damage, reaction, sound, VFX, hit-stop, knockback, camera and counter.
+- The attacking practice dummy is gone; the still and guarding dummies remain.
+
+### Effects
+- The imported VFX library supplies the hit flashes, block sparks, dust and cracks (templates in
+  `ReplicatedStorage.Combat.VFX`); everything else from the import is kept in `ServerStorage.VFXLibrary`,
+  out of the live world.
+- Layered, recorded combat sounds; a subtle directional camera kick per blow.
+
+### Blood (`CombatBlood`)
+- Droplets fly exact ballistic paths with air drag, land on whatever they meet (floor, slope, wall,
+  ceiling) and leave a splatter fitted flat to that surface, shaped by the impact angle; they dry darker,
+  fade and return to a pool. Water swallows them; glass and decorations don't stop them.
+- The spray leaves the wound outward, carried the way the blow drove it, tiered by the blow.
+
+### NPC gore (`CombatGore`) - NPCs only, never players
+- As an R6 NPC's health falls it comes apart, in this order: the right arm is torn off (75%), the left arm
+  (50%), the jaw snaps (25%), and the killing blow bursts the head in a thick red mist.
+- Torn arms are dressed copies thrown with the blow on real physics, with the gore kit's torn ends; the
+  shoulders keep the kit's stumps, pumping blood. The smashed-jaw head takes the NPC's own skin colour,
+  with teeth thrown and flesh hanging. The burst leaves the neck stump and skull base, with droplets,
+  chunks and a fountain. The kit's torso hole is never used.
+- Works on any R6 NPC: every piece is fitted to that body's own part sizes and pose. Practice dummies
+  healed back to full are whole again.
+
+### Ground Smash
+- Branching fissures that follow the ground and end on the gameplay radius (stopping at steps, walls,
+  ledges and water), heaved slabs in the floor's own material, rocks on real arcs that land and rest,
+  a shockwave that ends on the radius, dust, and a smooth fade back into pooled pieces.
 
 ## What changed in v46 (combat refinement + HUD spacing)
 

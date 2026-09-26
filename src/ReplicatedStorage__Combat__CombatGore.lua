@@ -30,18 +30,19 @@
 	full (the practice dummies) is whole again.
 
 	  Gore.Start()                      watch every NPC in the workspace (CombatClient calls it)
-	  Gore.Hit(npc, damage, drive, at)  a blow of `damage` just landed (drive: the way it travels)
+	  Gore.Hit(npc, health, drive)      a blow just landed and left the NPC `health` (drive: the way
+	                                    it travels): its stage plays on the blow, not a round trip later
 	  Gore.StageOf(npc)                 how far that NPC has come apart (0..4)
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local CombatFolder = ReplicatedStorage:WaitForChild("Combat")
 local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local Blood = require(CombatFolder:WaitForChild("CombatBlood"))
+local FX = require(CombatFolder:WaitForChild("CombatFX"))
 
 local Gore = {}
 local GC = Config.Gore
@@ -97,6 +98,7 @@ local function kitPiece(name: string, size: Vector3, color: Color3?): BasePart
 		p = tpl:Clone() :: BasePart
 	else
 		p = Instance.new("Part")
+		p.Name = name
 		p.Color = color or FLESH
 		p.Material = Enum.Material.Sand
 	end
@@ -163,23 +165,12 @@ local function holder(): Folder
 end
 
 local function sound(name: string, pos: Vector3)
-	local fx = CombatFolder:FindFirstChild("CombatFX")
-	if fx and fx:IsA("ModuleScript") then
-		local ok, mod = pcall(require, fx)
-		if ok and mod and mod.Sound then
-			mod.Sound(name, pos, 1)
-		end
-	end
+	FX.Sound(name, pos, 1)
 end
 
+-- the body jerks with the wound (the additive spring reel every blow uses)
 local function give(char: Model, peak: any, omega: number)
-	local fx = CombatFolder:FindFirstChild("CombatFX")
-	if fx and fx:IsA("ModuleScript") then
-		local ok, mod = pcall(require, fx)
-		if ok and mod and mod.Give then
-			mod.Give(char, peak, omega, 0.04)
-		end
-	end
+	FX.Give(char, peak, omega, 0.04)
 end
 
 local function nseq(points: { { number } }): NumberSequence
@@ -270,7 +261,7 @@ end
 ---------------------------------------------------------------------------
 type Body = {
 	Model: Model, Hum: Humanoid, Torso: BasePart, Head: BasePart, Right: BasePart?, Left: BasePart?,
-	Stage: number, Queue: { number }, Busy: boolean, Hidden: { Instance }, Added: { Instance },
+	Stage: number, Target: number, Gen: number, Busy: boolean, Hidden: { Instance }, Added: { Instance },
 	Drive: Vector3, Conns: { RBXScriptConnection },
 }
 local bodies: { [Model]: Body } = {}
@@ -377,8 +368,11 @@ local function tearArm(b: Body, side: string)
 	for _, h in ipairs(accessoriesOn(b.Model, arm)) do
 		hide(b, h)
 	end
-	-- thrown: out from the shoulder and along the blow, up, tumbling
-	local v = (drive * 13 + out * 7 + Vector3.new(0, 15, 0))
+	-- thrown: out from the shoulder and along the blow, up, tumbling. A blow that drives the arm into
+	-- the body shears it off instead: what it can't push through the torso pops it up and out
+	local into = math.min(0, drive:Dot(out))
+	local along = drive - out * into
+	local v = along * 13 + out * (7 + into * 4) + Vector3.new(0, 15 - into * 5, 0)
 	copy.AssemblyLinearVelocity = v
 	copy.AssemblyAngularVelocity = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5).Unit * 14
 	-- the torn end trails blood and sheds drops as it flies
@@ -587,7 +581,6 @@ local function burstHead(b: Body)
 		Blood.Launch(at + dir * 0.4 * s, dir * (10 + math.random() * 20) + b.Drive * 5, 0.1 + math.random() * 0.1)
 	end
 	-- chunks of flesh and bits of skull on real arcs
-	local kit = templates()
 	for i = 1, GC.BurstChunks do
 		local bone = i % 3 == 0
 		local size = (0.18 + math.random() * 0.3) * s
@@ -638,15 +631,12 @@ local function burstHead(b: Body)
 		return torso.CFrame.UpVector
 	end, GC.BleedTime, 1.3)
 	sound("GoreBurst", at)
+	-- close enough and the camera takes the blast
 	local cam = workspace.CurrentCamera
 	if cam then
 		local d = (cam.CFrame.Position - at).Magnitude
 		if d < 26 then
-			local fx = CombatFolder:FindFirstChild("CombatFX")
-			local ok, mod = pcall(require, fx :: ModuleScript)
-			if ok and mod and mod.Camera then
-				mod.Camera(nil, "StompNear", cam.CFrame.Position - at, math.clamp(1 - d / 26, 0.2, 0.8))
-			end
+			FX.Camera(nil, "StompNear", cam.CFrame.Position - at, math.clamp(1 - d / 26, 0.2, 0.8))
 		end
 	end
 end
@@ -677,36 +667,65 @@ function Gore.StageFor(health: number, max: number): number
 	return n
 end
 
--- play every stage up to `target`, each in turn, a beat apart (never out of order, never twice)
+local restore: (b: Body) -> ()
+
+local function forget(b: Body)
+	for _, c in ipairs(b.Conns) do
+		c:Disconnect()
+	end
+	if bodies[b.Model] == b then
+		bodies[b.Model] = nil
+	end
+end
+
+-- (a player's model can reach this client before its Player.Character does: checked again on
+-- every blow, never trusted from the first look)
+local function isPlayers(b: Body): boolean
+	if Players:GetPlayerFromCharacter(b.Model) then
+		if b.Stage > 0 then
+			restore(b)
+		end
+		b.Gen += 1
+		forget(b)
+		return true
+	end
+	return false
+end
+
+-- play every stage up to `target`, each in turn, a beat apart (never out of order, never twice; a
+-- body made whole again part-way through stops the rest)
 local function advance(b: Body, target: number)
-	if target <= b.Stage then
+	if target <= b.Stage or isPlayers(b) then
 		return
 	end
-	table.insert(b.Queue, target)
+	b.Target = math.max(b.Target, math.min(target, #STAGE_FN))
 	if b.Busy then
 		return
 	end
 	b.Busy = true
+	local gen = b.Gen
 	task.spawn(function()
-		while #b.Queue > 0 do
-			local want = table.remove(b.Queue, 1)
-			while b.Stage < want and b.Model.Parent do
-				b.Stage += 1
-				local ok, err = pcall(STAGE_FN[b.Stage], b)
-				if not ok then
-					warn("[Combat] gore:", err)
-				end
-				if b.Stage < want then
-					task.wait(GC.Stagger)
-				end
+		while b.Gen == gen and b.Stage < b.Target and b.Model.Parent and not isPlayers(b) do
+			b.Stage += 1
+			local fn = STAGE_FN[b.Stage]
+			local ok, err = pcall(function()
+				fn(b)
+			end)
+			if not ok then
+				warn("[Combat] gore:", err)
+			end
+			if b.Stage < b.Target then
+				task.wait(GC.Stagger)
 			end
 		end
-		b.Busy = false
+		if b.Gen == gen then
+			b.Busy = false
+		end
 	end)
 end
 
 -- whole again (a practice dummy healed back to full)
-local function restore(b: Body)
+function restore(b: Body)
 	for _, inst in ipairs(b.Hidden) do
 		if inst.Parent then
 			(inst :: any).LocalTransparencyModifier = 0
@@ -718,7 +737,9 @@ local function restore(b: Body)
 	end
 	table.clear(b.Added)
 	b.Stage = 0
-	table.clear(b.Queue)
+	b.Target = 0
+	b.Gen += 1
+	b.Busy = false
 end
 
 local function track(model: Model)
@@ -729,7 +750,7 @@ local function track(model: Model)
 	local b: Body = {
 		Model = model, Hum = hum, Torso = model:FindFirstChild("Torso") :: BasePart, Head = model:FindFirstChild("Head") :: BasePart,
 		Right = model:FindFirstChild("Right Arm") :: BasePart, Left = model:FindFirstChild("Left Arm") :: BasePart,
-		Stage = 0, Queue = {}, Busy = false, Hidden = {}, Added = {}, Drive = Vector3.new(0, 0, -1), Conns = {},
+		Stage = 0, Target = 0, Gen = 0, Busy = false, Hidden = {}, Added = {}, Drive = Vector3.new(0, 0, -1), Conns = {},
 	}
 	bodies[model] = b
 	local last = hum.Health
@@ -745,17 +766,14 @@ local function track(model: Model)
 	end))
 	table.insert(b.Conns, model.AncestryChanged:Connect(function(_, parent)
 		if parent == nil then
-			for _, c in ipairs(b.Conns) do
-				c:Disconnect()
-			end
-			bodies[model] = nil
+			forget(b)
 		end
 	end))
 end
 
--- a blow of `damage` just landed on `model` (the attacker's own impact frame, or the server's Hit):
--- the stage it earns plays now, on the blow, not a round trip later
-function Gore.Hit(model: Instance?, damage: number, drive: Vector3?, _at: Vector3?)
+-- a blow just landed on `model` and left it `health` (the attacker's own impact frame, or the
+-- server's Hit): the stage it earns plays now, on the blow, not a round trip later
+function Gore.Hit(model: Instance?, health: number, drive: Vector3?)
 	if not GC.Enabled or not (model and model:IsA("Model")) then
 		return
 	end
@@ -764,10 +782,10 @@ function Gore.Hit(model: Instance?, damage: number, drive: Vector3?, _at: Vector
 	if not b then
 		return
 	end
-	if drive and drive.Magnitude > 1e-3 then
+	if drive and Vector3.new(drive.X, 0, drive.Z).Magnitude > 1e-3 then
 		b.Drive = Vector3.new(drive.X, 0, drive.Z).Unit
 	end
-	advance(b, Gore.StageFor(math.max(0, b.Hum.Health - (damage or 0)), b.Hum.MaxHealth))
+	advance(b, Gore.StageFor(math.max(0, health), b.Hum.MaxHealth))
 end
 
 function Gore.StageOf(model: Model): number

@@ -5,7 +5,10 @@
 
 1. structure
    - HitDetect moves to ReplicatedStorage.Combat (the attacking client runs the same hit test)
-   - new ModuleScripts: ReplicatedStorage.Combat.CombatChoreo, ReplicatedStorage.Combat.CombatBlood
+   - new ModuleScripts: ReplicatedStorage.Combat.CombatChoreo, CombatBlood, CombatGore
+   - the gore models go to ReplicatedStorage.Combat.Gore: the gore kit (the Workspace Model with the
+     stumps, torn arm ends and 'debry') as GoreKit, and the smashed-jaw head (v.2/Model/Head) as
+     JawHead, skin-coloured (its surface map draws the wound over the part's own colour)
    - the combat's effect templates are taken from the imported packs into
      ReplicatedStorage.Combat.VFX (see TEMPLATES)
    - everything else the import dropped into Workspace (133 packs, models and loose parts: live
@@ -38,7 +41,31 @@ TEMPLATES = [
     ("Workspace/Anime/Wind-02", "Main", "DustBurst", None),
 ]
 
-NEW_MODULES = [("ReplicatedStorage/Combat", "CombatChoreo"), ("ReplicatedStorage/Combat", "CombatBlood")]
+NEW_MODULES = [("ReplicatedStorage/Combat", "CombatChoreo"), ("ReplicatedStorage/Combat", "CombatBlood"), ("ReplicatedStorage/Combat", "CombatGore")]
+
+# the smashed-jaw head's default skin (CombatGore tints it to each NPC's own head colour)
+JAW_SKIN = (234, 184, 146)
+
+
+def gore(p):
+    combat = p.find("ReplicatedStorage/Combat")
+    folder = p.find("ReplicatedStorage/Combat/Gore")
+    if not folder:
+        folder_template = next(r for r in p.ref_class if p.class_name(r) == "Folder")
+        folder = p.clone_instance(folder_template, combat, "Gore")
+    if not p.find("ReplicatedStorage/Combat/Gore/GoreKit"):
+        kit = next((r for r in find_all(p, "Workspace/Model") if any(p.names.get(k) == "debry" for k in p.children.get(r, []))), None)
+        assert kit, "gore kit (Workspace/Model with 'debry') missing"
+        p.set_parent(kit, folder)
+        p.set_name(kit, "GoreKit")
+        print("gore kit -> ReplicatedStorage.Combat.Gore.GoreKit")
+    if not p.find("ReplicatedStorage/Combat/Gore/JawHead"):
+        jaw = next((r for r in find_all(p, "Workspace/v.2/Model/Head") if p.class_name(r) == "MeshPart"), None)
+        assert jaw, "smashed-jaw head (Workspace/v.2/Model/Head) missing"
+        p.set_parent(jaw, folder)
+        p.set_name(jaw, "JawHead")
+        p.set_color3uint8(jaw, "Color3uint8", JAW_SKIN)
+        print("smashed-jaw head -> ReplicatedStorage.Combat.Gore.JawHead (skin %s)" % (JAW_SKIN,))
 
 
 def find_all(p, path):
@@ -91,6 +118,7 @@ def structure(p, old_workspace_children):
         p.set_parent(found, vfx)
         p.set_name(found, name)
         print("template", name, "<-", pack)
+    gore(p)
     # the rest of the import: out of the live world
     ws = p.find("Workspace")
     ss = p.find("ServerStorage")
