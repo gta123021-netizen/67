@@ -21,6 +21,7 @@ local BRAKE = 900 -- studs/s^2: how hard a drive brakes into a body in its path 
 -- a knocked-back body stops this far (root to root) short of another body in its lane (this wide
 -- either side of its line) - never shoved through or into it. The same rule everywhere a slide is
 -- worked out: the server (NPCs), the victim's own client, every other screen (CombatFX's lead)
+Motion.BRAKE = BRAKE
 Motion.BODY_GAP = 2.4
 Motion.BODY_WIDTH = 2.2
 

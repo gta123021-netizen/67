@@ -1,10 +1,9 @@
 # Overkill
 
-- `Overkill_overhaul_v76.rbxl` - **the latest place. Open this one in Roblox Studio.**
-- `Overkill_overhaul_v75.rbxl` - the build before it.
-- `Overkill_overhaul_v74.rbxl` - the build v75 and v76 were made from.
+- `Overkill_overhaul_v75.rbxl` - **the latest place. Open this one in Roblox Studio.**
+- `Overkill_overhaul_v74.rbxl` - the build v75 was made from.
 - `Overkill_premium_polish_v30.rbxlx` .. `v33.rbxlx` - older builds.
-- `src/` - every script in v76, extracted as plain Luau (file name = its path in the game tree;
+- `src/` - every script in v75, extracted as plain Luau (file name = its path in the game tree;
   `src/_manifest.tsv` lists each file's class and path).
 - `tools/rbxtool` - reads and writes binary places. Build it with
   `cargo build --release --manifest-path tools/rbxtool/Cargo.toml`, then:
@@ -12,113 +11,37 @@
   ```
   rbxtool dump  <place.rbxl> <dir>              # every script into <dir>
   rbxtool tree  <place.rbxl> <out.txt> [full]   # the whole game tree (full: with properties)
-  rbxtool build <in.rbxl> src <out.rbxl> [--adds f] [--graft f] [--set f] [--delete f]
+  rbxtool build <in.rbxl> src <out.rbxl> [--adds f] [--graft f] [--set f]
   ```
 
   `build` writes `src/` back into a place (only the scripts that changed) and checks the result
-  reads back exactly what `src/` holds. v76 was built with:
+  reads back exactly what `src/` holds. v75 was built with:
 
   ```
-  rbxtool build Overkill_overhaul_v74.rbxl src Overkill_overhaul_v76.rbxl \
-      --adds tools/v76_adds.tsv --graft tools/v76_graft.tsv --delete tools/v76_delete.tsv
+  rbxtool build Overkill_overhaul_v74.rbxl src Overkill_overhaul_v75.rbxl \
+      --adds tools/v75_adds.tsv --graft tools/v75_graft.tsv --set tools/v75_set.tsv
   ```
 
   (`--adds`: new scripts; `--graft`: effects copied out of the place's own VFX packs into
-  `ReplicatedStorage.Combat.VFX`; `--set`: property changes; `--delete`: scripts removed.)
+  `ReplicatedStorage.Combat.VFX`; `--set`: property changes, e.g. switching scripts off.)
 - `tools/tests` - the combat's client and server modules run outside Studio on a small stand-in for
-  the engine (`rbxmock.lua`, with a floor, walls, a ledge, two platforms with a crack between them,
-  Terrain hills and a pond). Build the runner with
+  the engine (`rbxmock.lua`). Build the runner with
   `cargo build --release --manifest-path tools/luau/Cargo.toml`, then:
 
   ```
-  tools/luau/target/release/luaurun tools/tests/blood_test.lua .       # every blood profile, stains, water, wounds, walls, budgets, cleanup
-  tools/luau/target/release/luaurun tools/tests/fluid_test.lua .       # the liquid on Terrain: hollows, slopes, cliffs, cracks, ledges, water, grass vs plastic
+  tools/luau/target/release/luaurun tools/tests/blood_test.lua .       # every blood profile, wounds, walls, budgets, cleanup
   tools/luau/target/release/luaurun tools/tests/gore_test.lua .        # arms torn off, head burst, bleeding, drips
   tools/luau/target/release/luaurun tools/tests/server_test.lua .      # CombatService: a full string between two NPCs
   tools/luau/target/release/luaurun tools/tests/pool_shape_test.lua .  # prints the pools as text
   tools/luau/target/release/luaucheck src/*.lua                        # every script compiles
   ```
 
-  They check that the code runs and behaves (no errors, the blood goes where it should, budgets
-  kept, everything cleaned up) - not how it looks.
+  They check that the code runs (no errors, budgets kept, everything cleaned up) - not how it looks.
+- `tools/build_place.py` - the old tool for the `.rbxlx` builds.
 
-## What changed in v76
+## What changed in v75
 
-### Blood: one colour
-
-All the blood - drops, streaks, the effects, the pools, the stains - is one dark red
-(`Config.Blood.Color`) from the moment it leaves the body until it soaks away. It never dries to
-another shade and never shines: the glossy spots on the pools are gone. Only the outer edge of a
-pool is a shade darker (`Config.Blood.Pool.Rim`).
-
-### Blood on the ground is a liquid
-
-The ground under the blood - floors, stairs, slopes, platforms and Terrain alike - is a height
-field of 0.4-stud cells that follows the surface. Each drop pours its volume in where it lands, and
-from there the blood moves by its level (the ground's height plus how deep the blood is):
-
-- it runs downhill and gathers in dips and hollows; a pool's deep middle spreads out until its edge
-  is a thin film, and the edge grows unevenly, in lobes, not circles
-- it seeps through a crack between two parts and drips onto whatever is below; at an open ledge it
-  pours over and drips down, pooling underneath - nothing ever hangs past an edge
-- a Terrain slope too steep to hold it: it trickles down to the foot. Walls get thin runs straight
-  down that drip off at the bottom; under a ceiling it gathers and drips back down
-- it never lies on water: blood falling into water clouds in it (the place's own spreading-pool
-  effect, `BloodDisperse`)
-- the ground's material decides how it takes it: grass, sand, dirt, mud, snow, fabric and carpet
-  drink it in (the pool shrinks as it soaks in); wood, brick and stone a little; plastic, metal,
-  glass, marble and ice keep all of it and let it run freely (`Config.Blood.Pool.Materials`)
-- pools that meet are one pool with one clock: every cell inside a pool covers its square
-  completely, only the outside edge is shaped by how much blood is there - no see-through overlap,
-  no darker intersections, no seams, no repeated circles. A pool lies about 40 s from the last blood
-  poured into it, then soaks away from its thin edges inward
-
-**Spatter reads like spatter.** A drop that comes in at a slant leaves an ellipse stretched the way
-it was going (long / wide = 1 / sin of its angle, as real blood stains do), with a tail smeared on
-after it and fine specks flung ahead. A fast, heavy drop breaks up as it hits: the crown of its
-splash throws a few tiny droplets back up, which land around it.
-
-### Blood on the fighters
-
-Blood now stays on the bodies (`Blood.Stain`):
-
-- where a blow lands: a splash on the struck part, a few flecks round it, and often a streak
-  running down from it (harder blows more often, longer)
-- on the fist or foot that threw the blow (the limb the strike was thrown with, `CombatPaths`)
-- down the chin and onto the chest when blood is spat or coughed out
-- a torn shoulder soaks the torso round it and runs down its side, front and back; after the head
-  bursts, the chest and back under the neck; and a stump keeps adding fresh streaks below it while
-  it bleeds
-
-Stains are welded on and move with the limb; a torn-off arm keeps its blood as it flies. They hide
-with the part they are on (a popped head, first person, a corpse fading out), never collide, are
-never hit, touched or queried, and are not copied into portraits. Up to 9 on one body part and 140
-in all; past that the oldest goes.
-
-### Budgets
-
-Tuned to cost at most around 5-10 FPS in the heaviest fights: 170 drops in the air, 720 pool
-cells, 160 specks of spray, 140 stains. Players on low graphics settings or on a phone get half to
-three quarters of that. Every drop and pool piece is reused; steppers stop when nothing is left.
-
-### Deleted: unused code
-
-- the 33 demo scripts inside the VFX showcase packs in the Workspace (switched off in v75) and the
-  pack's READ_ME script are gone from the place (`tools/v76_delete.tsv`); the packs' effects stay
-- `Kit.bevel` (it only made an empty, invisible frame - 17 calls), `Shatter.Preview` (a
-  Studio-only helper), `Blood.Burst`, `Pools.Clear`, and exports nothing read: `Gore.Bodies`,
-  `FX.GroundHit`, `States.Rules`, `States.Control`, `HD.RawPaths`, `HD.SurfacePoint`,
-  `HD.SegmentBox`, `Motion.BRAKE`, `Ragdoll.Joints`, `Theme.HUD_GROUP_GAP`
-- unused locals and parameters (a stale serial in CombatService, a list AuraSprites filled and
-  never read, `Choreo.CarrySpeed`'s `dt`, LimbStatus' `apply` character), an empty branch and a
-  duplicated one
-- `tools/build_place.py`, the old `.rbxlx` tool (`rbxtool` does it all)
-
-## Older builds
-
-### What changed in v75
-
-#### Blood: one system instead of loose effects
+### Blood: one system instead of loose effects
 
 **Every kind of blow bleeds its own way.** The blood of a blow comes from its profile
 (`Config.Blood.Profiles`): the straights, the hook, the uppercut, the dash strike, the Ground Smash,
@@ -179,7 +102,7 @@ blow). Nothing is built out of the camera's reach.
 Tuning lives in `Config.Blood` (profiles, `Wound` for the heartbeat, `Pool` for the ground) and
 `Config.Gore` (`BleedTime`, `DripTime`, `DripFrom`, `DripRate`).
 
-#### The place's own blood effects
+### The place's own blood effects
 
 No new effects were made. 13 effects were copied out of the blood packs already in the Workspace
 into `ReplicatedStorage.Combat.VFX` (their emitters untouched, switched off, with emit counts):
@@ -203,13 +126,13 @@ into `ReplicatedStorage.Combat.VFX` (their emitters untouched, switched off, wit
 and takes more options (speed, spread, lifetime, gravity, velocity inheritance, delay, sprites
 facing the camera).
 
-#### Health and regen
+### Health and regen
 
 The health bar over a player now shows the health their regen reserve will still give back: a
 faint teal stretch past the fill. It is dim while the fight is on, clearer as the regen delay runs
 out, and breathes with the heart while it heals, the fill growing into it.
 
-#### Combat and animation
+### Combat and animation
 
 - A hit reaction no longer runs out and snaps back to the stance in the middle of a stun when a
   second blow lands without restarting it (players and NPCs). A reaction clip that is started again
@@ -220,15 +143,17 @@ out, and breathes with the heart while it heals, the fill growing into it.
   fades out. Their strike clips fade out at the end instead of popping back to the idle pose.
 - A body knocked down again and again no longer collects dead connections.
 
-#### Optimization
+### Optimization
 
 The 32 demo scripts inside the VFX showcase packs in the Workspace are switched off. They ran on the
 live server forever: Hollow Purple's two scripts created about 26 parts a second (20 of them loose
 physics debris), and the "Grow", spin and shield scripts rewrote parts' orientation and transparency
 every frame - all of it replicated to every player. The packs themselves are untouched and still in
-the Workspace to browse. (v76 deleted these scripts: `tools/v76_delete.tsv`.)
+the Workspace to browse (the list is `tools/v75_set.tsv`).
 
-(v34 - v74 were made outside this repository; v74 is the place v75 and v76 were built from.)
+## Older builds
+
+(v34 - v74 were made outside this repository; v74 is the place v75 was built from.)
 
 ### What changed in v33
 

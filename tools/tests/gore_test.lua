@@ -11,7 +11,7 @@ local combat = M.folder(RS, "Combat")
 local function src(name)
 	return ROOT .. "/src/ReplicatedStorage__Combat__" .. name .. ".lua"
 end
-for _, n in ipairs({ "CombatConfig", "CombatVFX", "BloodPools", "CombatBlood", "Motion", "CombatPaths", "CombatFX", "CombatGore" }) do
+for _, n in ipairs({ "CombatConfig", "CombatVFX", "BloodPools", "CombatBlood", "Motion", "CombatFX", "CombatGore" }) do
 	M.module(combat, n, src(n))
 end
 local vfx = M.folder(combat, "VFX")

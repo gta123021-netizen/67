@@ -224,7 +224,7 @@ Theme.HotbarSlots = 5 -- ability-bar style: keys 1-5, everything else lives in t
 Theme.Hud = {
 	Outline = 4.5, -- every HUD group's ink outline (Kit.stroke units; x1.35 on screen)
 	ThinOutline = 3.5, -- tags, chips and small badges on those groups
-	GroupGap = 20, -- between stacked HUD groups (frame edge to frame edge)
+	GroupGap = 20, -- HUD_GROUP_GAP: between stacked HUD groups (frame edge to frame edge)
 	IconGap = 12, -- between repeated tiles in a row (the dock)
 	RowGap = 12, -- between repeated rows inside a group (party members)
 	Margin = 30, -- the column's distance from the screen's left edge
@@ -241,6 +241,7 @@ Theme.Hud = {
 	PartyRowHeight = 62,
 	PartyHeaderHeight = 32,
 }
+Theme.HUD_GROUP_GAP = Theme.Hud.GroupGap
 
 -- background music: add Sound ids here (they play in a loop, volume is in Settings)
 Theme.Music = {}

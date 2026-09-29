@@ -524,7 +524,7 @@ function Kit.shake(o: GuiObject)
 		home = o.Position
 	end
 	task.spawn(function()
-		for _, dx in ipairs({ 10, -9, 7, -5, 3, 0 }) do
+		for i, dx in ipairs({ 10, -9, 7, -5, 3, 0 }) do
 			o.Position = home + UDim2.fromOffset(dx, 0)
 			task.wait(0.035)
 		end
@@ -679,6 +679,7 @@ function Kit.button(o: { [string]: any })
 		Kit.corner(gloss, if typeof(r) == "UDim" then r else math.max(4, r - 5))
 		Kit.gradient(gloss, Color3.new(1, 1, 1), Color3.new(1, 1, 1), 90, 0.7, 0.97)
 	end
+	Kit.bevel(face, if typeof(r) == "UDim" then r else math.max(4, r - 3), 3, z + 1)
 	local content = new("Frame", {
 		Name = "Content",
 		BackgroundTransparency = 1,
@@ -1582,6 +1583,14 @@ function Kit.rays(parent: GuiObject, color: Color3, size: number, transparency: 
 		TweenService:Create(rays, TweenInfo.new(26, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = rays.Rotation + 360 }):Play()
 	end
 	return rays
+end
+
+---------------------------------------------------------------------------
+-- bevel: a thin light edge on the top of a rounded surface
+---------------------------------------------------------------------------
+function Kit.bevel(parent: GuiObject, radius: any, inset: number?, z: number?): Frame
+	-- surfaces are flat: no inner highlight line (it read as a silver sliver on rounded corners)
+	return new("Frame", { Name = "Bevel", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = z or parent.ZIndex, Parent = parent })
 end
 
 ---------------------------------------------------------------------------

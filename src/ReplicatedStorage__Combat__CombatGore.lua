@@ -339,6 +339,7 @@ type Body = {
 	Drive: Vector3, Conns: { RBXScriptConnection },
 }
 local bodies: { [Model]: Body } = {}
+Gore.Bodies = bodies
 
 -- an R6 body this covers: a model with a Humanoid and the R6 body parts (a player's character too,
 -- unless Config.Gore.Players is off)
@@ -530,7 +531,6 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 	copy.CollisionGroup = "Debris"
 	flesh(copy)
 	copy.CFrame = arm.CFrame
-	Blood.Carry(arm, copy) -- (the blood on the arm goes with it)
 	-- its torn top end
 	local wound = fit(if side == "Right" then KIT.RightEnd else KIT.LeftEnd, copy, STD.Arm)
 	wound.CollisionGroup = "Debris"
@@ -570,12 +570,6 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 	-- a stream of blood strung out behind the departing limb, then a second gush a beat later as the
 	-- artery empties - and then the heart takes over (the pulses below)
 	Blood.Spray(socket, (drive + out * 0.8).Unit, "Tear", b.Model, if side == "Right" then 1 else -1)
-	-- the torso round the socket, soaked, and running down its side, front and back
-	local tc, th = torso.CFrame, torso.Size * 0.5
-	local sx = if side == "Right" then 1 else -1
-	Blood.Stain(torso, tc:PointToWorldSpace(Vector3.new(sx * (th.X + 0.1), th.Y * 0.7, 0)), 0.55, 1)
-	Blood.Stain(torso, tc:PointToWorldSpace(Vector3.new(sx * th.X * 0.7, th.Y * 0.75, -th.Z - 0.1)), 0.35, 1)
-	Blood.Stain(torso, tc:PointToWorldSpace(Vector3.new(sx * th.X * 0.7, th.Y * 0.75, th.Z + 0.1)), 0.3, 0.8)
 	Blood.Effect("BloodGush", socket, outUp, { Parent = b.Torso, Inherit = 0.85, Scale = 0.8 + math.random() * 0.25, Count = 0.8 })
 	local vUnit = if v.Magnitude > 0.1 then v.Unit else outUp
 	local n = 10 + math.random(0, 5)
@@ -634,11 +628,6 @@ local function burstHead(b: Body, quiet: boolean?)
 	bleed(a, function()
 		return torso.CFrame.UpVector
 	end, GC.BleedTime, 1.35, b.Model, GC.DripTime * 0.5, 0.3, 3)
-	-- the chest and the back under the neck, soaked and running
-	local tc, th = torso.CFrame, torso.Size * 0.5
-	for _, z in ipairs({ -1, -1, 1 }) do
-		Blood.Stain(torso, tc:PointToWorldSpace(Vector3.new((math.random() - 0.5) * th.X, th.Y * 0.8, z * (th.Z + 0.1))), 0.3 + math.random() * 0.25, 1)
-	end
 	-- close enough and the camera takes the blast
 	local cam = workspace.CurrentCamera
 	if cam then

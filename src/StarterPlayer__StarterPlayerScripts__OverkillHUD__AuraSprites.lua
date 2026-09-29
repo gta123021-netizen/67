@@ -329,6 +329,7 @@ function AuraSprites.new(parent: GuiObject, aura: Instance, o: { [string]: any }
 	---------------------------------------------------------------------------
 	-- beams: a scrolling strip of the beam texture, faded along its length
 	---------------------------------------------------------------------------
+	local beamStrips = {}
 	-- beams that share both ends are drawn in one group (one fade for all of them)
 	local groups: { [string]: any } = {}
 	for _, b in ipairs(beams) do
@@ -371,6 +372,7 @@ function AuraSprites.new(parent: GuiObject, aura: Instance, o: { [string]: any }
 		strip.ZIndex = g.CG.ZIndex
 		strip.Parent = g.CG
 		table.insert(g.Strips, { Img = strip, Speed = b.B.TextureSpeed, Offset = rng:NextNumber() })
+		table.insert(beamStrips, g.Strips[#g.Strips])
 	end
 
 	---------------------------------------------------------------------------

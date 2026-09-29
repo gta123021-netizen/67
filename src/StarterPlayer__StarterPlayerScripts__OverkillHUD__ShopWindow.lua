@@ -195,6 +195,7 @@ return function(ctx: any)
 			Gradient = { C.Navy600, C.Navy800 },
 		})
 		local cardScale = Kit.fx(card)
+		Kit.bevel(card, 20, 4, 12)
 		local fancy = (r.Order or 1) >= 4 -- legendary + mythic get a moving shine on the border
 		local cardStroke = card:FindFirstChildOfClass("UIStroke") :: UIStroke
 		local shimmer = nil

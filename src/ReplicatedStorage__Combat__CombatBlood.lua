@@ -32,17 +32,15 @@
 	jittered a little, every heartbeat is a little early or late.
 
 	  Blood.Spray(pos, drive, profile, victim?, dirSign?, opts?)  a clean blow's blood (CombatFX)
-	      opts = { Damage, Health (share left), Push = { Time, Delay }, Launched, Striker (the
-	      attacker's model), Limbs (the limbs the blow was thrown with: CombatPaths) }
+	      opts = { Damage, Health (share left), Push = { Time, Delay }, Launched }
 	  Blood.Wound(att, opts) -> { Stop }   a wound that bleeds on its own (CombatGore); opts =
 	      { Strength, Pump (seconds of spurting), Ooze (seconds of oozing after), Delay (first beat),
 	        Gushes (the first gushes, 0..3), Dir (() -> world direction; default: the attachment's
 	        UpVector), Body (the model it bleeds from) }
 	  Blood.Trail(part, delay, time, strength)   drops shed from a moving part (a slide, a launch)
 	  Blood.Splash(pos, strength, normal?)       blood hitting a surface all at once (a limb landing)
-	  Blood.Stain(part, at, size, run?)          blood on a body part (a streak running down it: run)
-	  Blood.Carry(from, to)                      a part's stains go over to its copy (a torn limb)
 	  Blood.Effect(name, pos, dir, opts?)        one of the place's effects (CombatVFX.Play options)
+	  Blood.Burst(pos, dir, name, scale?, count?)   the same, the old way
 	  Blood.Launch(pos, vel, size, kind?)        one droplet ("Fine" | "Drop" | "Blob")
 	  Blood.Cone(dir, deg) / Blood.Ignore(body)
 
@@ -92,10 +90,7 @@ local DROP_LIFE = 2.4 -- a drop that has met nothing by then (off a cliff) is go
 local SUBSTEP = 1 / 30 -- (the longest chord one ray covers)
 local G = Vector3.new(0, -workspace.Gravity, 0)
 local PARK = CFrame.new(0, -5000, 0)
--- ONE COLOUR. All the blood is the same dark red from the moment it leaves the body - the drops, their
--- streaks, the place's effects (tinted to it) and the pools - never brighter, never drying
-local RED = B.Color
-local RED_SEQ = ColorSequence.new(RED)
+local WET = B.Color
 
 local function rand(a: number, b: number): number
 	return a + math.random() * (b - a)
@@ -244,8 +239,8 @@ local function newDrop(): Drop
 	p.CanTouch = false
 	p.CastShadow = false
 	p.Material = Enum.Material.SmoothPlastic
-	p.Reflectance = 0
-	p.Color = RED
+	p.Reflectance = 0.15 -- (a wet shine)
+	p.Color = WET
 	p.Size = Vector3.new(0.12, 0.12, 0.2)
 	p.CFrame = PARK
 	local m = Instance.new("SpecialMesh")
@@ -258,7 +253,7 @@ local function newDrop(): Drop
 	tr.FaceCamera = true
 	tr.Lifetime = 0.09
 	tr.MinLength = 0.02
-	tr.Color = RED_SEQ
+	tr.Color = ColorSequence.new(WET, B.Pool.Fresh)
 	tr.Transparency = STREAK_T
 	tr.WidthScale = STREAK_W
 	tr.LightInfluence = 1
@@ -334,39 +329,7 @@ local function landingSplash(hit: RaycastResult, d: Drop)
 	end
 	splashBudget -= 1
 	local sc = math.clamp(d.Size * 1.6 + speed * 0.008, 0.18, 0.42)
-	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = sc, Life = rand(0.7, 1), Color = RED_SEQ })
-end
-
--- a fast drop smacking into something breaks up: the crown of its splash throws a few tiny ones back
--- off the surface, on along the way it was going (while there is room in the air for them)
-local liveDrops = 0
-local function satellites(hit: RaycastResult, d: Drop)
-	local speed = d.Vel.Magnitude
-	if d.Size < 0.075 or speed < 11 or liveDrops > MAX_DROPS * 0.7 then
-		return
-	end
-	local n = hit.Normal
-	local along = d.Vel - n * d.Vel:Dot(n)
-	for _ = 1, math.random(0, math.min(3, math.floor(speed / 9))) do
-		local out = n * rand(1.5, 4.5) + along * rand(0.15, 0.4) + Vector3.new(rand(-1.5, 1.5), 0, rand(-1.5, 1.5))
-		Blood.Launch(hit.Position + n * 0.04, out, d.Size * rand(0.22, 0.38), "Fine")
-	end
-end
-
--- blood falling into water clouds in it and spreads (the pack's spreading pool, lying on the water)
-local disperseAt = 0
-local disperseBudget = 0
-local function disperse(hit: RaycastResult, d: Drop)
-	local now = os.clock()
-	disperseBudget = math.min(3, disperseBudget + (now - disperseAt) * 3)
-	disperseAt = now
-	if d.Size < 0.06 or disperseBudget < 1 then
-		return
-	end
-	disperseBudget -= 1
-	VFX.Play("BloodDisperse", VFX.Along(hit.Position + Vector3.new(0, 0.03, 0), Vector3.yAxis), {
-		Scale = math.clamp(d.Size * 2.8 * d.Weight, 0.2, 0.75), Life = rand(1.6, 2.6), Color = RED_SEQ,
-	})
+	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = sc, Life = rand(0.7, 1) })
 end
 
 ---------------------------------------------------------------------------
@@ -405,19 +368,10 @@ local function wake()
 	end
 end
 
--- (drops launched while the drops are being stepped - a splash's bounce, a trickle off a slope -
--- wait until the step has moved its parts: one reused mid-step would be parked on top)
-local stepping = false
-local deferred: { { any } } = {}
-
 -- one droplet. kind: "Fine" (a speck of spray: small, fast, hangs in the air a moment), "Drop",
 -- "Blob" (a heavy one: falls straight through the air, pours a lot where it lands)
 function Blood.Launch(pos: Vector3, vel: Vector3, size: number, kind: string?)
 	if not B.Enabled or not inView(pos) then
-		return
-	end
-	if stepping then
-		table.insert(deferred, { pos, vel, size, kind })
 		return
 	end
 	local d = takeDrop()
@@ -468,247 +422,12 @@ function Blood.Effect(name: string, pos: Vector3, dir: Vector3, opts: any?): Att
 	if not inView(pos) then
 		return nil
 	end
-	if o.Color == nil then
-		o = table.clone(o)
-		o.Color = RED_SEQ
-	end
 	return VFX.Play(name, cf, o)
 end
 local effect = Blood.Effect
 
----------------------------------------------------------------------------
--- stains: the blood on the fighters themselves - splashed on where a blow lands, running down the
--- body from there, round a stump, on the chin and chest, on the fist or foot that struck. Flattened
--- beads welded onto the part (they move with it; a torn arm takes its blood with it: Blood.Carry),
--- never collided with, touched, queried or copied, hidden with the part they are on. MaxStains in
--- all, StainsPerPart on any one part (past either, the oldest goes)
----------------------------------------------------------------------------
-type Stain = {
-	Part: Part,
-	Weld: Weld,
-	Host: BasePart,
-	Face: CFrame, -- (the face it lies on, in the host's own space: X out of the face)
-	U: number,
-	V: number, -- (where it starts on that face)
-	Du: number,
-	Dv: number, -- (the way it runs: down the face)
-	H: number, -- (how far off the face: stains laid over each other never fight)
-	Len: number,
-	Wide: number,
-	T0: number,
-	Grow: number, -- (seconds it takes to spread / run to its full length)
-}
-local stains: { Stain } = {}
-local growing: { Stain } = {}
-local watched: { [BasePart]: { RBXScriptConnection } } = {}
-local MAX_STAINS = math.floor(B.MaxStains * BUDGET)
-local STAIN_THICK = 0.022
-local stainSerial = 0
-
--- a stain is as hidden as the part it is on (a torn-off arm, a popped head, first person, a corpse
--- fading out)
-local function mirror(host: BasePart)
-	local m = math.max(host.LocalTransparencyModifier, host.Transparency)
-	m = if m >= 0.99 then 1 else m
-	for _, st in ipairs(stains) do
-		if st.Host == host then
-			st.Part.LocalTransparencyModifier = m
-		end
-	end
-end
-local function watch(host: BasePart)
-	if watched[host] then
-		return
-	end
-	local function changed()
-		mirror(host)
-	end
-	watched[host] = {
-		host:GetPropertyChangedSignal("Transparency"):Connect(changed),
-		host:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(changed),
-	}
-end
-
-local function dropStain(i: number)
-	local st = table.remove(stains, i) :: Stain
-	st.Len = -1 -- (a growing one stops)
-	st.Part:Destroy()
-end
--- (gone with their body, or the oldest past the budgets; hosts nothing is on any more let go)
-local function pruneStains(host: BasePart?)
-	local onHost = 0
-	for i = #stains, 1, -1 do
-		local st = stains[i]
-		if not (st.Part.Parent and st.Host.Parent) then
-			dropStain(i)
-		elseif st.Host == host then
-			onHost += 1
-		end
-	end
-	if host and onHost >= B.StainsPerPart then
-		for i, st in ipairs(stains) do
-			if st.Host == host then
-				dropStain(i)
-				break
-			end
-		end
-	end
-	while #stains >= MAX_STAINS do
-		dropStain(1)
-	end
-	for h, conns in pairs(watched) do
-		local used = false
-		for _, st in ipairs(stains) do
-			if st.Host == h then
-				used = true
-				break
-			end
-		end
-		if not used then
-			for _, c in ipairs(conns) do
-				c:Disconnect()
-			end
-			watched[h] = nil
-		end
-	end
-end
-
--- the face of `part`'s box nearest `at` (in the part's own space, X out of it), the point on it
--- nearest `at` (along the face's Y, Z) and the face's half extents
-local AXES = { Vector3.xAxis, Vector3.yAxis, Vector3.zAxis }
-local function faceOf(part: BasePart, at: Vector3): (CFrame, number, number, number, number)
-	local half = part.Size * 0.5
-	local p = part.CFrame:PointToObjectSpace(at)
-	local rx, ry, rz = math.abs(p.X) / half.X, math.abs(p.Y) / half.Y, math.abs(p.Z) / half.Z
-	local i = if rx >= ry and rx >= rz then 1 elseif ry >= rz then 2 else 3
-	local axis = AXES[i]
-	local n = axis * (if p:Dot(axis) >= 0 then 1 else -1)
-	local u = if i == 2 then Vector3.zAxis else Vector3.yAxis
-	local v = n:Cross(u)
-	local eu = math.abs(half:Dot(u))
-	local ev = math.abs(half:Dot(v))
-	return CFrame.fromMatrix(n * half:Dot(axis), n, u, v), math.clamp(p:Dot(u), -eu, eu), math.clamp(p:Dot(v), -ev, ev), eu, ev
-end
-
--- where a stain lies now (its length so far `len`), kept on its face
-local function stainCF(st: Stain, len: number): CFrame
-	local rot = math.atan2(st.Dv, st.Du)
-	return st.Face * CFrame.new(st.H, st.U + st.Du * len * 0.5, st.V + st.Dv * len * 0.5) * CFrame.Angles(rot, 0, 0)
-end
-
-local function placeStain(st: Stain, k: number)
-	local len = math.max(st.Len * k, st.Wide * math.min(1, 0.35 + k * 2))
-	local wide = st.Wide * math.min(1, 0.35 + k * 2)
-	st.Part.Size = Vector3.new(STAIN_THICK, len, wide)
-	st.Weld.C0 = stainCF(st, len - wide)
-end
-
-local function addStain(host: BasePart, face: CFrame, u: number, v: number, du: number, dv: number, len: number, wide: number, grow: number)
-	stainSerial += 1
-	local p = Instance.new("Part")
-	p.Name = "BloodStain"
-	p.Archivable = false
-	p.Anchored = false
-	p.Massless = true
-	p.CanCollide = false
-	p.CanQuery = false
-	p.CanTouch = false
-	p.CastShadow = false
-	p.Material = Enum.Material.SmoothPlastic
-	p.Reflectance = 0
-	p.Color = RED
-	p:SetAttribute("OverkillGore", true)
-	local m = Instance.new("SpecialMesh")
-	m.MeshType = Enum.MeshType.Sphere
-	m.Parent = p
-	local w = Instance.new("Weld")
-	w.Part0 = host
-	w.Part1 = p
-	w.Parent = p
-	local st: Stain = {
-		Part = p, Weld = w, Host = host, Face = face, U = u, V = v, Du = du, Dv = dv,
-		H = 0.002 + (stainSerial % 6) * 0.0014, Len = len, Wide = wide, T0 = os.clock(), Grow = grow,
-	}
-	placeStain(st, 0)
-	p.CFrame = host.CFrame * w.C0
-	p.LocalTransparencyModifier = host.LocalTransparencyModifier
-	p.Parent = host
-	table.insert(stains, st)
-	table.insert(growing, st)
-end
-
--- blood on a body part: a splash `size` studs across on its surface nearest `at`; run (0..1): the
--- chance and the length of a streak of it running on down the part (down as the part lies now)
-function Blood.Stain(part: Instance?, at: Vector3, size: number, run: number?)
-	if not B.Enabled or not (part and part:IsA("BasePart") and part.Parent) or not inView(at) then
-		return
-	end
-	local host = part :: BasePart
-	if host.Transparency >= 0.99 or host.LocalTransparencyModifier >= 0.99 or host.Size.Magnitude < 0.3 then
-		return
-	end
-	pruneStains(host)
-	local face, u, v, eu, ev = faceOf(host, at)
-	-- the splash, kept on its face
-	local wide = math.min(size, eu * 1.6, ev * 1.6)
-	local r = wide * 0.5
-	u = math.clamp(u, -eu + r, math.max(-eu + r, eu - r))
-	v = math.clamp(v, -ev + r, math.max(-ev + r, ev - r))
-	local spin = rand(-math.pi, math.pi)
-	addStain(host, face, u, v, math.cos(spin), math.sin(spin), wide * rand(1, 1.25), wide, rand(0.08, 0.14))
-	watch(host)
-	wake()
-	-- the streak: down the face (a face lying flat - the top of the head, the shoulders - holds it)
-	local ru = run or 0
-	local down = (host.CFrame * face):VectorToObjectSpace(Vector3.new(0, -1, 0))
-	local du, dv = down.Y, down.Z
-	local flat = math.sqrt(du * du + dv * dv)
-	if ru <= 0 or flat < 0.3 or math.random() > 0.35 + ru * 0.6 then
-		return
-	end
-	du, dv = du / flat, dv / flat
-	local reach = math.huge
-	if math.abs(du) > 1e-3 then
-		reach = math.min(reach, ((if du > 0 then eu else -eu) - u) / du)
-	end
-	if math.abs(dv) > 1e-3 then
-		reach = math.min(reach, ((if dv > 0 then ev else -ev) - v) / dv)
-	end
-	local thin = math.min(wide * 0.8, rand(0.06, 0.1) + size * 0.15)
-	local len = math.min(size * rand(1.8, 3.5) * (0.5 + ru), reach + wide * 0.3 - thin * 0.4)
-	if len > thin * 1.5 then
-		pruneStains(host)
-		-- (a streak takes its time: the blood runs down, slowing as it thins out)
-		addStain(host, face, u, v, du, dv, len, thin, rand(0.7, 1.4) * len)
-	end
-end
-
--- the stains on `from` go over to `to` (a torn limb's copy, in the same place: they go with it)
-function Blood.Carry(from: BasePart, to: BasePart)
-	for _, st in ipairs(stains) do
-		if st.Host == from then
-			st.Host = to
-			st.Weld.Part0 = to
-			st.Part.Parent = to
-			st.Part.LocalTransparencyModifier = 0
-		end
-	end
-	watch(to)
-	pruneStains(nil)
-end
-
-local function stainStep(now: number)
-	for i = #growing, 1, -1 do
-		local st = growing[i]
-		local k = if st.Len < 0 then 1 else math.clamp((now - st.T0) / st.Grow, 0, 1)
-		if st.Len >= 0 then
-			-- (a run slows as it goes: the blood thins out)
-			placeStain(st, 1 - (1 - k) * (1 - k))
-		end
-		if k >= 1 then
-			table.remove(growing, i)
-		end
-	end
+function Blood.Burst(pos: Vector3, dir: Vector3, name: string, scale: number?, count: number?)
+	effect(name, pos, dir, { Scale = scale or 1, Count = count or 1 })
 end
 
 -- the wound's way out right now: the way it faces, the whip of the artery, sagging as it empties
@@ -874,10 +593,6 @@ local function woundStep(w: Wound, dt: number, now: number, slow: number): boole
 			w.DripAcc -= 1
 			local out = woundDir(w, 0.2) * rand(0.3, 1.5)
 			launch(pos + out * 0.05, out + carry * W.Inherit + Vector3.new(rand(-0.3, 0.3), -rand(0.2, 1), rand(-0.3, 0.3)), rand(0.05, 0.09) * (if age < pumpEnd then 1.15 else 0.9), "Drop")
-			-- and some of it runs down the body instead: a fresh streak below the wound now and then
-			if math.random() < 0.1 then
-				Blood.Stain(if w.Body then w.Body:FindFirstChild("Torso") or part else part, pos, rand(0.12, 0.22), 1)
-			end
 		end
 		-- moving fast, the air strips blood off the wound: a streak of fine drops behind it
 		local fast = carry.Magnitude
@@ -962,23 +677,16 @@ function step(dt: number)
 			table.remove(trails, i)
 		end
 	end
-	stainStep(now)
-	stepping = true
-	liveDrops = 0
 	for _, d in ipairs(drops) do
 		if d.Live then
 			any = true
-			liveDrops += 1
 			local hit = fly(d, h)
 			if hit or d.Age > DROP_LIFE then
 				d.Live = false
 				d.Trail.Enabled = false
 				if hit then
-					if hit.Material == Enum.Material.Water then
-						disperse(hit, d)
-					elseif Pools.Deposit(hit, d.Size, d.Vel, d.Weight) then
+					if Pools.Deposit(hit, d.Size, d.Vel, d.Weight) then
 						landingSplash(hit, d)
-						satellites(hit, d)
 					end
 				end
 				table.insert(moveParts, d.Part)
@@ -994,19 +702,10 @@ function step(dt: number)
 			end
 		end
 	end
-	stepping = false
 	if #moveParts > 0 then
 		workspace:BulkMoveTo(moveParts, moveCfs, Enum.BulkMoveMode.FireCFrameChanged)
 	end
-	if #deferred > 0 then
-		local list = deferred
-		deferred = {}
-		for _, a in ipairs(list) do
-			launch(a[1], a[2], a[3], a[4])
-		end
-		any = true
-	end
-	if not any and #wounds == 0 and #trails == 0 and #lates == 0 and #growing == 0 and stepConn then
+	if not any and #wounds == 0 and #trails == 0 and #lates == 0 and stepConn then
 		stepConn:Disconnect()
 		stepConn = nil
 	end
@@ -1099,7 +798,7 @@ function Blood.Splash(pos: Vector3, strength: number, normal: Vector3?)
 		return
 	end
 	local s = math.clamp(strength, 0.1, 2)
-	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = 0.3 + 0.3 * s, Life = rand(0.8, 1.1), Color = RED_SEQ })
+	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = 0.3 + 0.3 * s, Life = rand(0.8, 1.1) })
 	if math.random() < 0.7 then
 		effect("BloodSplatter", hit.Position + hit.Normal * 0.1, hit.Normal, { Scale = 0.25 + 0.2 * s, Count = 0.25 + 0.25 * s, Speed = 0.6, Life = 0.8 })
 	end
@@ -1254,40 +953,11 @@ function Blood.Spray(pos: Vector3, drive: Vector3, profile: string?, victim: Mod
 			local d = (cf.LookVector * (1 - sp.Up) + Vector3.new(0, sp.Up, 0) + drive * 0.3).Unit
 			local carry = pointVelocity(headPart, mouth)
 			effect("BloodDrip", mouth, d, { Scale = rand(0.35, 0.55), Count = rand(0.5, 0.9), Speed = rand(0.7, 1.1), Spread = 0.5, Inherit = W.Inherit, Parent = headPart })
-			-- down the chin, and dripped onto the chest
-			Blood.Stain(headPart, mouth - cf.UpVector * 0.08, rand(0.1, 0.16), 0.9)
-			local torso = victim and victim:FindFirstChild("Torso")
-			if torso and torso:IsA("BasePart") and math.random() < 0.6 then
-				local tc = torso.CFrame
-				Blood.Stain(torso, tc:PointToWorldSpace(Vector3.new(rand(-0.35, 0.35), torso.Size.Y * rand(0.25, 0.45), -torso.Size.Z * 0.5 - 0.1)), rand(0.1, 0.2), 1)
-			end
 			for _ = 1, math.random(3, 6) do
 				local dd = cone(d, 16)
 				launch(mouth + dd * 0.05, dd * rand(4, 9) + carry * W.Inherit, rand(0.04, 0.08), if math.random() < 0.4 then "Fine" else "Drop")
 			end
 		end)
-	end
-	-- on the body itself: the blow's splash where it landed (a streak running down from it) and a few
-	-- flecks round it, and blood on the fist or foot that threw it
-	if part then
-		Blood.Stain(part, pos, rand(0.2, 0.32) * math.min(sev, 1.5), sev - 0.55)
-		for _ = 1, math.random(0, 1) + (if sev > 1.1 then 1 else 0) do
-			Blood.Stain(part, pos + cone(normal, 85) * rand(0.15, 0.45), rand(0.05, 0.12), 0)
-		end
-	end
-	local striker = o.Striker
-	if striker and o.Limbs and math.random() < 0.45 + 0.3 * sev then
-		local limb, near = nil, 6
-		for _, n in ipairs(o.Limbs) do
-			local l = striker:FindFirstChild(n)
-			if l and l:IsA("BasePart") and (l.Position - pos).Magnitude < near then
-				limb, near = l, (l.Position - pos).Magnitude
-			end
-		end
-		if limb then
-			-- (the knuckles, the shin: the part of the limb nearest the blow)
-			Blood.Stain(limb, pos, rand(0.1, 0.2) * math.min(sev, 1.4), 0.25)
-		end
 	end
 	-- the body goes: it sheds a trail of drops along its slide, or along its flight
 	local body = victim and (victim:FindFirstChild("Torso") or victim:FindFirstChild("UpperTorso") or victim:FindFirstChild("HumanoidRootPart"))

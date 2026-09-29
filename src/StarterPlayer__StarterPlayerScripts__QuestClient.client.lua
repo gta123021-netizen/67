@@ -1053,7 +1053,7 @@ local function bust(parent: GuiObject, heroName: string, framing: string, z: num
 end
 
 ---------------------------------------------------------------------------
--- dialogue panel (Kit window look: navy body, stripes, hero-coloured header band)
+-- dialogue panel (Kit window look: navy body, stripes, hero-coloured header band, bevel rim)
 ---------------------------------------------------------------------------
 local SPEECH = 30 -- speech text size
 local TOP = 104 -- where the words start
@@ -1871,6 +1871,7 @@ local function buildCard(i: number, q: any, tierName: string)
 		Gradient = { C.Navy600, C.Navy800 },
 	})
 	local cardScale = Kit.fx(card)
+	Kit.bevel(card, 19, 4, 13)
 
 	-- the disc is the card's left end: its gap (in the card's colours) and outline are rings on
 	-- that end, so it is exactly as far from the card's left, top and bottom edges
@@ -3093,6 +3094,7 @@ ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt, inp
 		ZIndex = 2,
 		Gradient = { C.Navy700, C.Night },
 	})
+	Kit.bevel(pill, UDim.new(1, 0), 3, 2)
 	Kit.text({ Text = "QUESTS", TextSize = 42, Position = UDim2.fromOffset(36, -2), Size = UDim2.new(1, -44, 1, 0), ZIndex = 3, Stroke = 4.5, Parent = pill })
 	local keyBtn = Kit.button({
 		Name = "Key",

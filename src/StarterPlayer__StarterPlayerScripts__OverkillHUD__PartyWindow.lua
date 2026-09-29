@@ -143,6 +143,7 @@ return function(ctx: any)
 			ZIndex = 12,
 			Gradient = { C.Navy600, C.Navy800 },
 		})
+		Kit.bevel(p, 22, 3, 12)
 		if isLeader then
 			local wash = new("Frame", { Name = "Wash", BackgroundColor3 = C.Gold, Size = UDim2.new(0.6, 0, 1, 0), ZIndex = 12, Parent = p })
 			Kit.corner(wash, 26)
@@ -616,6 +617,7 @@ return function(ctx: any)
 			ZIndex = 14,
 			Gradient = { C.Navy600, C.Navy800 },
 		})
+		Kit.bevel(r, 20, 3, 14)
 		Q.Avatar(r, v, 68, TEAL, 15, { Side = "Left", Gap = 12, Width = 92, Band = { C.Navy600, C.Navy800, 90 } })
 		Kit.outlineOnTop(r, 18)
 		local name = Kit.text({
@@ -763,6 +765,8 @@ return function(ctx: any)
 				btn.Enabled = stateName == "invite"
 				if stateName == "invite" then
 					btn.SetColor(TEAL, TEAL_D)
+				elseif stateName == "member" then
+					btn.SetColor(C.Navy500, C.Navy700)
 				elseif stateName == "pending" then
 					btn.SetColor(Kit.darken(TEAL, 0.35), Kit.darken(TEAL_D, 0.35))
 				else

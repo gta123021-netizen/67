@@ -57,6 +57,7 @@ for key, path in pairs(Paths) do
 	shortened[key] = { From = path.From, To = path.To, Limbs = path.Limbs, Samples = samples }
 end
 HD.Paths = shortened
+HD.RawPaths = Paths
 
 local BODY = Config.Hitbox.Body
 
@@ -122,6 +123,7 @@ local function surfacePoint(p: Vector3, shape: Shape?): Vector3
 	end
 	return best[2]
 end
+HD.SurfacePoint = surfacePoint
 
 -- closest approach of a segment (body space) to the body box, and where along it - EXACT (not
 -- sampled): the distance from a point moving along a line to a box is a convex function of how far
@@ -181,6 +183,7 @@ local function segmentBox(a: Vector3, b: Vector3, shape: Shape?): (number, Vecto
 	end
 	return best, a + d * t
 end
+HD.SegmentBox = segmentBox
 
 -- the limb capsules at clip time tau (interpolated between the measured frames), attacker space
 function HD.CapsulesAt(key: string, tau: number): { { Vector3 } }?

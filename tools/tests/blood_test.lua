@@ -24,7 +24,7 @@ local EFFECTS = {
 	BloodGush = { "Drops", "Puffs" }, BloodBleed = { "Drops" }, BloodDrip = { "Drops" },
 	BloodSplatter = { "Puffs", "Drops" }, BloodSplatterWild = { "Puffs", "Drops" }, BloodStrand = { "Strands" },
 	BloodSplash = { "Splash" }, BloodBurst = { "Cloud", "Drops", "Haze" }, BloodPunch = { "Splat", "SplatBig" },
-	BloodSpatter = { "Flat", "Drops" }, BloodDisperse = { "Bloom", "Cloud" },
+	BloodSpatter = { "Flat", "Drops" },
 }
 for name, emitters in pairs(EFFECTS) do
 	local a = Instance.new("Attachment")
@@ -75,93 +75,10 @@ Blood.Spray(torso.Position, Vector3.new(0, 0, -1), "Body", dummy, 1)
 Blood.Spray(torso.Position, Vector3.new(0, 0, -1), "NoSuchProfile", nil, nil)
 M.run(3)
 local st = Pools.Stats()
-print(string.format("   cells %d walls %d specks %d parts %d  emitted %d  rays %d", st.Cells, st.Walls, st.Specks, st.Parts, M.Emitted or 0, M.Rays))
+print(string.format("   cells %d sheets %d specks %d parts %d gloss %d  emitted %d  rays %d", st.Cells, st.Sheets, st.Specks, st.Parts, st.Gloss, M.Emitted or 0, M.Rays))
 check(st.Cells > 20, "blood pooled on the floor")
 check(st.Cells <= Config.Blood.Pool.MaxCells, "within the cell budget")
 check((M.Emitted or 0) > 0, "the place's effects played")
-check((M.Warnings or 0) == 0, "no warnings")
-
----------------------------------------------------------------------------
-print("-- stains: on the struck part and the fist that struck, welded on, within budget")
-local function stainsOn(model)
-	local n, per, bad = 0, {}, 0
-	for _, x in ipairs(model:GetDescendants()) do
-		if x.Name == "BloodStain" then
-			n += 1
-			per[x.Parent] = (per[x.Parent] or 0) + 1
-			local w = x:FindFirstChildOfClass("Weld")
-			if not (w and w.Part0 == x.Parent and w.Part1 == x) or x.Anchored or x.CanCollide or x.CanQuery or x.CanTouch or x.Archivable ~= false then
-				bad += 1
-			end
-			-- (on its host's surface: its centre within the host's box grown by a hair)
-			local rel = x.Parent.CFrame:PointToObjectSpace(x.Parent.CFrame * w.C0.Position)
-			local h = x.Parent.Size * 0.5 + Vector3.new(0.02, 0.02, 0.02)
-			if math.abs(rel.X) > h.X or math.abs(rel.Y) > h.Y or math.abs(rel.Z) > h.Z then
-				bad += 1
-			end
-		end
-	end
-	local most = 0
-	for _, c in pairs(per) do
-		most = math.max(most, c)
-	end
-	return n, most, bad
-end
-local fighter = M.r6("Fighter", Vector3.new(0, 3, 2.2))
-Blood.Ignore(fighter)
-for i = 1, 30 do
-	-- (the fist at the contact point)
-	fighter["Right Arm"].CFrame = CFrame.new(torso.Position + Vector3.new(0.3, 0.2, 1.4))
-	Blood.Spray(torso.Position + Vector3.new(0, 0.2, 0.55), Vector3.new(0, 0, -1), if i % 3 == 0 then "Heavy" else "Light", dummy, 1, {
-		Damage = 5, Health = 0.4, Striker = fighter, Limbs = { "Right Arm" },
-	})
-	M.run(0.1)
-end
-M.run(2)
-local sn, smost, sbad = stainsOn(dummy)
-local fn = stainsOn(fighter)
-print(string.format("   on the victim %d (most on one part %d), on the fighter %d, bad %d", sn, smost, fn, sbad))
-check(sn > 3, "the struck body is stained")
-check(fn > 0, "the fist that struck is stained")
-check(smost <= Config.Blood.StainsPerPart, "within StainsPerPart")
-check(sbad == 0, "every stain welded on, inert, not copied, on its part")
--- hidden with its part
-dummy.Head.LocalTransparencyModifier = 1
-local hiddenOk = true
-for _, x in ipairs(dummy.Head:GetChildren()) do
-	if x.Name == "BloodStain" and x.LocalTransparencyModifier < 1 then
-		hiddenOk = false
-	end
-end
-dummy.Head.LocalTransparencyModifier = 0
-check(hiddenOk, "a hidden part hides its stains")
--- carried over to a copy
-local copyArm = Instance.new("Part")
-copyArm.Size = fighter["Right Arm"].Size
-copyArm.CFrame = fighter["Right Arm"].CFrame
-copyArm.Parent = workspace
-Blood.Carry(fighter["Right Arm"], copyArm)
-local moved = 0
-for _, x in ipairs(copyArm:GetChildren()) do
-	if x.Name == "BloodStain" and x:FindFirstChildOfClass("Weld").Part0 == copyArm then
-		moved += 1
-	end
-end
-check(moved > 0, "Blood.Carry moved the arm's stains to its copy (" .. moved .. ")")
-copyArm:Destroy()
-
----------------------------------------------------------------------------
-print("-- blood into the pond clouds in the water; fast drops throw off tiny ones")
-local disp0 = (M.EmitsBy or {})["BloodDisperse/Cloud"] or 0
-for _ = 1, 12 do
-	Blood.Launch(Vector3.new(-7, 3, 16), Vector3.new(0, -8, 0), 0.12, "Blob")
-	M.run(0.4)
-end
-check(((M.EmitsBy or {})["BloodDisperse/Cloud"] or 0) > disp0, "the water took the blood in (BloodDisperse)")
-for _ = 1, 20 do
-	Blood.Launch(Vector3.new(4, 2, -4), Vector3.new(18, -14, 0), 0.13, "Drop")
-end
-M.run(2)
 check((M.Warnings or 0) == 0, "no warnings")
 
 ---------------------------------------------------------------------------
@@ -243,9 +160,10 @@ for _ = 1, 40 do
 end
 M.run(3)
 local st3 = Pools.Stats()
-print(string.format("   cells %d walls %d specks %d parts %d", st3.Cells, st3.Walls, st3.Specks, st3.Parts))
+print(string.format("   cells %d sheets %d specks %d parts %d gloss %d", st3.Cells, st3.Sheets, st3.Specks, st3.Parts, st3.Gloss))
 check(st3.Cells <= Config.Blood.Pool.MaxCells, "cells stay within MaxCells")
 check(st3.Specks <= Config.Blood.Pool.MaxSpecks, "specks stay within MaxSpecks")
+check(st3.Gloss <= Config.Blood.Pool.MaxGloss, "sheen within MaxGloss")
 local drops = 0
 for _, c in ipairs(workspace.CombatBlood:GetChildren()) do
 	if c.Name == "BloodDrop" then
@@ -255,25 +173,11 @@ end
 check(drops <= Config.Blood.MaxDrops, "droplets within MaxDrops (" .. drops .. ")")
 
 ---------------------------------------------------------------------------
-print("-- one colour: every drop and pool piece in view is Config.Blood.Color (the edge Config.Blood.Pool.Rim)")
-local off = 0
-for _, c in ipairs(workspace.CombatBlood:GetChildren()) do
-	if c:IsA("BasePart") and c.CFrame.Position.Y > -1000 then
-		local col = c.Color
-		if not (col == Config.Blood.Color or col == Config.Blood.Pool.Rim) then
-			off += 1
-		end
-		if c.Reflectance ~= 0 then
-			off += 1
-		end
-	end
-end
-check(off == 0, "no other shade, no shine (" .. off .. " off)")
 print("-- everything soaks away and the steppers stop")
 h.Stop()
 M.run(Config.Blood.Pool.Life + Config.Blood.Pool.Fade + 30, 1 / 20)
 local st4 = Pools.Stats()
-print(string.format("   cells %d walls %d specks %d  heartbeat conns %d  pending tasks %d", st4.Cells, st4.Walls, st4.Specks, M.heartbeatConns(), M.pendingTasks()))
+print(string.format("   cells %d sheets %d specks %d  heartbeat conns %d  pending tasks %d", st4.Cells, st4.Sheets, st4.Specks, M.heartbeatConns(), M.pendingTasks()))
 check(st4.Cells == 0, "every pool soaked away")
 check(st4.Specks == 0, "every speck gone")
 check(M.heartbeatConns() == 0, "no Heartbeat connection left running")

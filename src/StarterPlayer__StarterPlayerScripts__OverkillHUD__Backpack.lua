@@ -92,6 +92,7 @@ return function(ctx: any)
 		local stroke = plate:FindFirstChildOfClass("UIStroke") :: UIStroke
 		local shimmer = Kit.shimmer(stroke, C.Gold, C.GoldDeep)
 		shimmer.Enabled = false
+		Kit.bevel(plate, 18, 3, 13)
 		local rim = new("Frame", { Name = "Rim", BackgroundTransparency = 1, Position = UDim2.fromOffset(5, 5), Size = UDim2.new(1, -10, 1, -10), ZIndex = 12, Parent = plate })
 		Kit.corner(rim, 17)
 		local rimStroke = Kit.stroke(rim, 2, C.Rim, 0.6, true)

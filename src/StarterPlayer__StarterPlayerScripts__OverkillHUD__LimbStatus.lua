@@ -232,7 +232,7 @@ return function(ctx: any)
 	local myChar: Model? = nil
 	local conns: { RBXScriptConnection } = {}
 
-	local function apply(stage: number, alive: boolean)
+	local function apply(char: Model, stage: number, alive: boolean)
 		local was = stageNow
 		stageNow = stage
 		if not alive or stage >= 3 then
@@ -267,7 +267,7 @@ return function(ctx: any)
 			return hum == nil or hum.Health > 0
 		end
 		table.insert(conns, char:GetAttributeChangedSignal("GoreStage"):Connect(function()
-			apply(read(), isAlive())
+			apply(char, read(), isAlive())
 		end))
 		task.spawn(function()
 			local hum = char:WaitForChild("Humanoid", 10)

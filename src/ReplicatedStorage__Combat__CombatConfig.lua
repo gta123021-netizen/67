@@ -577,15 +577,9 @@ local function fx(name: string, w: number, scale: { number }, count: { number },
 end
 Config.Blood = {
 	Enabled = true,
-	-- THE colour of all the blood - drops, streaks, the effects (tinted to it) and the pools: one dark
-	-- red from the moment it leaves the body until it has soaked away (it never dries or shines)
-	Color = Color3.fromRGB(58, 4, 8),
+	Color = Color3.fromRGB(150, 8, 14), -- fresh (the droplets)
 	Drag = 2.0, -- air drag on an ordinary droplet (1/s); a small one has more, a big one less
-	MaxDrops = 170, -- droplets in the air at once (pooled; past it the oldest gives way)
-	-- the blood on the fighters themselves (where blows land, running down the body, round a stump, on
-	-- the fist that struck): MaxStains in all, StainsPerPart on one body part (past it the oldest goes)
-	MaxStains = 140,
-	StainsPerPart = 9,
+	MaxDrops = 96, -- droplets in the air at once (pooled; past it the oldest gives way)
 	View = 160, -- nothing is built farther than this from the camera
 	TrailRate = 16, -- drops a second a body sheds sliding from a blow (x the profile's Trail, fading out)
 	Profiles = {
@@ -683,72 +677,31 @@ Config.Blood = {
 	-- out. Inherit: the share of the wound's own velocity its blood leaves with. Moving faster than
 	-- ShedSpeed the air strips drops off it (ShedRate a second per stud/s over)
 	Wound = { BpmHigh = 148, BpmLow = 68, Dribble = { 1.2, 4.5 }, OozeRate = 1.1, Inherit = 0.85, ShedSpeed = 9, ShedRate = 0.35 },
-	-- the liquid on the ground and the walls (BloodPools), all in Color (its outer edge Rim). The ground -
-	-- floors, slopes, stairs, Terrain - is a height field of Cell studs; a drop of size s pours Spot * s^3
-	-- studs² of blood into it. It runs by its level (the ground's height + Depth for a full cell's blood,
-	-- less for less) at FlowRate: downhill, into dips, from a pool's deep middle out to its edge, until
-	-- the edge is a film of Retain of a cell (less on a slope). Over a ledge or into a crack it drips.
-	-- Materials: how each ground takes it (Absorb: the share drunk in a second; Spread: how freely it
-	-- runs). A wall's run leaves WallFilm of a cell as its trail and goes down at RunRate. Life: seconds
-	-- a pool lies there (from the last blood poured into it), the last Fade of them soaking away from its
-	-- edges in. Budgets: MaxCells pool cells, MaxSpecks specks of spray (past MaxCells the oldest pool
-	-- soaks away early); Spare: the pieces kept for reuse once all of it has gone. (Low graphics or a
-	-- phone: the budgets - and MaxDrops, MaxStains - are cut to a half .. three quarters, CombatBlood)
+	-- the liquid on the ground and the walls (BloodPools): a grid of Cell studs on every surface blood
+	-- reaches; a drop of size s pours Spot * s^3 studs² into it. A full cell runs over into its
+	-- neighbours (SpreadRate on the flat; RunRate down slopes and walls, where only WallFilm of a cell is
+	-- left behind as the run's trail). Life: seconds a pool lies there (from the last blood poured into
+	-- it), the last Fade of them soaking away from its edges in. Budgets: MaxCells pool cells, MaxSpecks
+	-- specks of spray, MaxGloss pieces of wet sheen (past MaxCells the oldest pool soaks away early);
+	-- Spare: the pieces kept for reuse once all of it has gone. (Low graphics or a phone: the budgets
+	-- - and MaxDrops - are cut to a half .. three quarters, CombatBlood)
 	Pool = {
-		Cell = 0.4,
+		Cell = 0.5,
 		Spot = 34,
-		Depth = 0.07,
-		Retain = 0.34,
-		FlowRate = 3.2,
+		SpreadRate = 3.5,
 		RunRate = 9,
 		WallFilm = 0.12,
-		Life = 40,
-		Fade = 3,
-		MaxCells = 720,
-		MaxSpecks = 160,
-		Spare = 220, -- pieces kept for reuse once every pool has gone
-		Materials = {
-			Default = { Absorb = 0.004, Spread = 1 },
-			-- soft ground drinks it in and holds it back
-			Grass = { Absorb = 0.03, Spread = 0.7 },
-			LeafyGrass = { Absorb = 0.035, Spread = 0.65 },
-			Sand = { Absorb = 0.045, Spread = 0.6 },
-			Ground = { Absorb = 0.03, Spread = 0.7 },
-			Mud = { Absorb = 0.02, Spread = 0.75 },
-			Snow = { Absorb = 0.04, Spread = 0.65 },
-			Fabric = { Absorb = 0.05, Spread = 0.5 },
-			Carpet = { Absorb = 0.05, Spread = 0.5 },
-			Cardboard = { Absorb = 0.04, Spread = 0.6 },
-			-- wood and stone a little
-			Wood = { Absorb = 0.012, Spread = 0.9 },
-			WoodPlanks = { Absorb = 0.012, Spread = 0.9 },
-			Brick = { Absorb = 0.01, Spread = 0.9 },
-			Cobblestone = { Absorb = 0.008, Spread = 0.85 },
-			Pebble = { Absorb = 0.01, Spread = 0.8 },
-			Concrete = { Absorb = 0.008, Spread = 0.95 },
-			Asphalt = { Absorb = 0.008, Spread = 0.95 },
-			Pavement = { Absorb = 0.006, Spread = 1 },
-			Rock = { Absorb = 0.006, Spread = 0.95 },
-			Slate = { Absorb = 0.005, Spread = 1 },
-			Sandstone = { Absorb = 0.012, Spread = 0.9 },
-			Limestone = { Absorb = 0.01, Spread = 0.9 },
-			Basalt = { Absorb = 0.004, Spread = 1 },
-			Salt = { Absorb = 0.02, Spread = 0.8 },
-			-- sealed and smooth: it lies there and runs freely
-			Plastic = { Absorb = 0, Spread = 1.15 },
-			SmoothPlastic = { Absorb = 0, Spread = 1.2 },
-			Metal = { Absorb = 0, Spread = 1.2 },
-			DiamondPlate = { Absorb = 0, Spread = 1.05 },
-			CorrodedMetal = { Absorb = 0.002, Spread = 1 },
-			Foil = { Absorb = 0, Spread = 1.2 },
-			Glass = { Absorb = 0, Spread = 1.3 },
-			Marble = { Absorb = 0, Spread = 1.25 },
-			Granite = { Absorb = 0.002, Spread = 1.1 },
-			Ice = { Absorb = 0, Spread = 1.35 },
-			Glacier = { Absorb = 0, Spread = 1.3 },
-			Neon = { Absorb = 0, Spread = 1.2 },
-		},
-		Rim = Color3.fromRGB(32, 2, 4), -- the clotting edge round the outside, a shade darker
+		Life = 32,
+		Fade = 2.6,
+		MaxCells = 400,
+		MaxSpecks = 90,
+		MaxGloss = 60,
+		Spare = 160, -- pieces kept for reuse once every pool has gone
+		Fresh = Color3.fromRGB(108, 1, 9),
+		Rim = Color3.fromRGB(70, 0, 6), -- the clotting edge
+		Gloss = Color3.fromRGB(122, 6, 14), -- the wet sheen (a touch lighter than Fresh)
+		Dried = Color3.fromRGB(58, 4, 8),
+		RimDried = Color3.fromRGB(32, 2, 4),
 	},
 }
 
