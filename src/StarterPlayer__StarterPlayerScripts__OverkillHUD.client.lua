@@ -324,7 +324,6 @@ function ctx.Confirm(o: { [string]: any })
 		ZIndex = 41,
 		Gradient = { C.Navy700, C.Navy900 },
 	})
-	Kit.bevel(dialog, 28, 7, 41)
 	local sc = Kit.fx(dialog)
 	sc.Scale = 0.6
 	tween(sc, 0.38, { Scale = 1 }, Enum.EasingStyle.Back)
@@ -341,7 +340,6 @@ function ctx.Confirm(o: { [string]: any })
 		ZIndex = 43,
 		Gradient = { Kit.lighten(color, 0.12), deep },
 	})
-	Kit.bevel(disc, UDim.new(1, 0), 5, 43)
 	if o.Icon then
 		local ic = Kit.image({ Image = o.Icon, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(82, 82), ZIndex = 44, Parent = disc })
 		Kit.wiggle(ic)

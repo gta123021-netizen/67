@@ -7,7 +7,6 @@
 	  Shatter.Descent(char, height)   the drop: the pack's speed lines (VFX SpeedLines) rushing up
 	                                  past the falling body. Returns { Stop }.
 	  Shatter.Play(ground, attacker)  the touchdown
-	  Shatter.Preview(ground)         the crack standing still (Studio inspection)
 
 	THE SEQUENCE (seconds after touchdown) - nothing raised, nothing thrown, no extra impact layers:
 	  0.00  THE CRACK   one 2D ground crack (the pack's GroundCrack1 sheet, its first crisp frame -
@@ -190,7 +189,7 @@ task.defer(function()
 	end
 end)
 
-local function crackDecal(ground: CFrame, diameter: number, spin: number, still: boolean?): any
+local function crackDecal(ground: CFrame, diameter: number, spin: number): any
 	local image = crackSheet()
 	if not image then
 		return nil
@@ -216,19 +215,17 @@ local function crackDecal(ground: CFrame, diameter: number, spin: number, still:
 	label.BackgroundTransparency = 1
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.fromScale(0.5, 0.5)
-	label.Size = if still then UDim2.fromScale(1, 1) else UDim2.fromScale(0.12, 0.12)
+	label.Size = UDim2.fromScale(0.12, 0.12)
 	label.Image = image
 	label.ImageRectOffset = Vector2.zero
 	label.ImageRectSize = CRACK_TILE
 	label.ImageColor3 = Color3.new(0, 0, 0)
-	label.ImageTransparency = if still then 0 else 0.3
+	label.ImageTransparency = 0.3
 	label.Parent = gui
 	p.Parent = holder()
-	if not still then
-		-- it bursts out from the foot and slows as it reaches the rim (the break losing its force)
-		TweenService:Create(label, TweenInfo.new(SPREAD, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1, 1) }):Play()
-		TweenService:Create(label, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { ImageTransparency = 0 }):Play()
-	end
+	-- it bursts out from the foot and slows as it reaches the rim (the break losing its force)
+	TweenService:Create(label, TweenInfo.new(SPREAD, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1, 1) }):Play()
+	TweenService:Create(label, TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { ImageTransparency = 0 }):Play()
 	local gone = false
 	local function kill()
 		if not gone then
@@ -243,9 +240,7 @@ local function crackDecal(ground: CFrame, diameter: number, spin: number, still:
 		TweenService:Create(label, TweenInfo.new(seconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { ImageTransparency = 1 }):Play()
 		task.delay(seconds + 0.05, kill)
 	end
-	if not still then
-		task.delay(HOLD + FADE + 1, kill) -- (never outlives its smash, whatever happens to it)
-	end
+	task.delay(HOLD + FADE + 1, kill) -- (never outlives its smash, whatever happens to it)
 	return { Fade = fade, Kill = kill }
 end
 
@@ -366,22 +361,6 @@ function Shatter.Descent(char: Model, _height: number?): any
 	end
 	task.delay(2, stop) -- never outlives a fall
 	return { Stop = stop }
-end
-
--- the crack standing still, for looking at in Studio (the last preview's goes first)
-local preview: any = nil
-function Shatter.Preview(ground: Vector3, _parent: Instance?, seed: number?): number
-	if preview then
-		preview.Kill()
-		preview = nil
-	end
-	setIgnore(ground)
-	local hit = floorAt(ground, ground.Y, 3)
-	if not hit then
-		return 0
-	end
-	preview = crackDecal(crackFrame(hit.Position, hit.Normal), 2 * R, Random.new(seed or 1):NextNumber(0, math.pi * 2), true)
-	return if preview then 1 else 0
 end
 
 return Shatter

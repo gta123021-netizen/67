@@ -20,32 +20,44 @@ local Blood = require(combat.CombatBlood)
 local Pools = require(combat.BloodPools)
 math.randomseed(tonumber(ARGS[3]) or 7)
 
+local CELL = require(combat.CombatConfig).Blood.Pool.Cell
+local CAP = CELL * CELL
+local function grid(cells, title, key)
+	local mi, ma, mj, mb = math.huge, -math.huge, math.huge, -math.huge
+	local at = {}
+	for _, c in ipairs(cells) do
+		mi, ma = math.min(mi, c.I), math.max(ma, c.I)
+		mj, mb = math.min(mj, c.J), math.max(mb, c.J)
+		at[c.I .. "," .. c.J] = c
+	end
+	print(string.format("%s: %d cells  i %d..%d j %d..%d", title, #cells, mi, ma, mj, mb))
+	if #cells == 0 or ma - mi > 100 then
+		return
+	end
+	for j = mj, mb do
+		local row = {}
+		for i = mi, ma do
+			local c = at[i .. "," .. j]
+			local ch = " "
+			if c then
+				local f = math.min(1, c.Area / CAP)
+				ch = if f < 0.2 then "." elseif f < 0.6 then "o" elseif not c.Edge then "#" else "O"
+			end
+			table.insert(row, ch)
+		end
+		print("  |" .. table.concat(row) .. "|")
+	end
+end
 local function dump(title)
 	print("== " .. title)
-	for _, s in ipairs(Pools.Debug()) do
-		local mi, ma, mj, mb = math.huge, -math.huge, math.huge, -math.huge
-		local n = 0
+	local d = Pools.Debug()
+	grid(d.Ground, "ground", nil)
+	for _, s in ipairs(d.Walls) do
+		local cells = {}
 		for _, c in pairs(s.Cells) do
-			mi, ma = math.min(mi, c.I), math.max(ma, c.I)
-			mj, mb = math.min(mj, c.J), math.max(mb, c.J)
-			n += 1
+			table.insert(cells, c)
 		end
-		print(string.format("sheet N=%s cells %d clusters %d  i %d..%d j %d..%d", tostring(s.N), n, #s.Clusters, mi, ma, mj, mb))
-		if n > 0 and ma - mi < 90 then
-			for j = mj, mb do
-				local row = {}
-				for i = mi, ma do
-					local c = s.Cells[(i + 65536) * 262144 + (j + 65536)]
-					local ch = " "
-					if c then
-						local f = math.min(1, c.Area / (0.25))
-						ch = if f < 0.2 then "." elseif f < 0.6 then "o" elseif not c.Edge then "#" else "O"
-					end
-					table.insert(row, ch)
-				end
-				print("  |" .. table.concat(row) .. "|")
-			end
-		end
+		grid(cells, "wall N=" .. tostring(s.N))
 	end
 end
 

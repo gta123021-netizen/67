@@ -40,13 +40,11 @@ rule("Ragdolled", { Attack = false, Dash = false, Block = false, Move = false, J
 rule("Recovering", { Attack = false, Dash = false, Block = false, Move = false, Jump = false, Turn = false, Hittable = false, Reacts = false }) -- getting-up i-frames
 rule("Dashing", { Attack = true, Dash = false, Block = false, Move = false, Jump = false, Turn = false, Hittable = true, Reacts = true })
 rule("Dead", { Attack = false, Dash = false, Block = false, Move = false, Jump = false, Turn = false, Hittable = false, Reacts = false })
-States.Rules = R
 
 -- the states in which the fighter is in control of itself (free, striking, guarding, dashing). Time
 -- spent in them is what refills the stun budget (CombatService): stun, guard break, knockdown and
 -- getting up are not control.
 local CONTROL = { Idle = true, Attacking = true, ComboWindow = true, Blocking = true, Dashing = true }
-States.Control = CONTROL
 function States.HasControl(state: string): boolean
 	return CONTROL[state] == true
 end

@@ -423,7 +423,6 @@ return function(ctx: any)
 	}
 	local function tile(key: string, label: string, icon: string, color: Color3, deep: Color3, order: number, glyph: boolean?)
 		local t = Kit.plate({ Name = key, Parent = grid, LayoutOrder = order, Radius = 22, Stroke = 4, ZIndex = 12, Gradient = { C.Navy600, C.Navy800 } })
-		Kit.bevel(t, 18, 3, 12)
 		-- the disc is the tile's top-left corner: its gap (in the tile's colours, the top 78 of
 		-- its 124 high gradient) and outline are rings on that corner, so it is exactly as far
 		-- from the tile's left edge as from its top

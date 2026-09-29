@@ -13,3 +13,4 @@ ReplicatedStorage/Combat/VFX	BloodSplash	14198:1::Splash
 ReplicatedStorage/Combat/VFX	BloodBurst	5907:10::Cloud,5908:24::Drops,5909:8::Haze
 ReplicatedStorage/Combat/VFX	BloodPunch	14211:1::Splat,14212:1::SplatBig
 ReplicatedStorage/Combat/VFX	BloodSpatter	5990:1::Flat,5991:10::Drops
+ReplicatedStorage/Combat/VFX	BloodDisperse	5977:1::Bloom,5978:2::Cloud

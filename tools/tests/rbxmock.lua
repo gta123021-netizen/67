@@ -1039,8 +1039,43 @@ ceilPart.Anchored = true
 ceilPart.Size = Vector3.new(6, 1, 6)
 ceilPart.CFrame = CFrame.new(23, 6.5, 0)
 ceilPart.Parent = ws
-M.Scene = { Floor = floorPart, Wall = wallPart, Step = stepPart, Ceiling = ceilPart }
+-- two raised platforms with a thin crack between them (x 39.9 .. 40.1) over a lower floor, and the far
+-- platform's open edge (x = 50)
+local function box(name, cx, cy, cz, sx, sy, sz, mat)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.Size = Vector3.new(sx, sy, sz)
+	p.CFrame = CFrame.new(cx, cy, cz)
+	p.Material = mat or Enum.Material.Concrete
+	p.Parent = ws
+	return p
+end
+local lower = box("LowerFloor", 42, -0.5, 0, 24, 1, 16)
+local platA = box("PlatformA", 34.95, 1.75, 0, 9.9, 0.5, 10, Enum.Material.SmoothPlastic)
+local platB = box("PlatformB", 45.05, 1.75, 0, 9.9, 0.5, 10, Enum.Material.SmoothPlastic)
+M.Scene = { Floor = floorPart, Wall = wallPart, Step = stepPart, Ceiling = ceilPart, Lower = lower, PlatA = platA, PlatB = platB }
 M.Rays = 0
+M.Boxes = { floorPart, wallPart, stepPart, ceilPart, lower, platA, platB }
+
+-- TERRAIN (x -70 .. -30, z -15 .. 15): rolling grass with a hollow at (-45, 0) and a steep cliff
+-- rising at x < -62; and a pond (water, x -10 .. -4, z 12 .. 20, surface at y 0.2)
+local function terrainH(x, z)
+	local h = 0.25 + 0.18 * math.sin(x * 1.3) * math.cos(z * 0.9) - 0.9 * math.exp(-((x + 45) ^ 2 + z ^ 2) / 14)
+	-- a gentle rise toward the cliff, then the cliff itself
+	if x < -52 then
+		h += (-52 - x) * 0.25
+	end
+	if x < -62 then
+		h += (-62 - x) * 3
+	end
+	return h
+end
+M.TerrainH = terrainH
+local function inTerrain(x, z)
+	return x >= -70 and x <= -30 and z >= -15 and z <= 15
+end
+terrain.Material = Enum.Material.Grass
 
 local function hitResult(pos, normal, inst)
 	return setmetatable({ Position = pos, Normal = normal, Instance = inst, Material = inst.Material or Enum.Material.Plastic, Distance = 0 }, { __type = "RaycastResult" })
@@ -1048,7 +1083,7 @@ end
 -- boxes: { part, min, max } axis aligned
 local function boxes()
 	local out = {}
-	for _, p in ipairs({ floorPart, wallPart, stepPart, ceilPart }) do
+	for _, p in ipairs(M.Boxes) do
 		if p.Parent then
 			local c, s = p.CFrame.Position, p.Size * 0.5
 			table.insert(out, { p, c - s, c + s })
@@ -1114,8 +1149,72 @@ local function raycast(_self, o, d, params)
 			end
 		end
 	end
+	-- the terrain: march along the ray, then close in on the surface
+	local tExcluded = false
+	if params and params.FilterType == Enum.RaycastFilterType.Exclude then
+		for _, f in ipairs(params.FilterDescendantsInstances or {}) do
+			if f == terrain then
+				tExcluded = true
+			end
+		end
+	end
+	if not tExcluded then
+		local len = d.Magnitude
+		local n = math.max(2, math.ceil(len / 0.05))
+		local prevT, prevAbove = 0, nil
+		for k = 0, n do
+			local t = k / n
+			if t >= bt then
+				break
+			end
+			local p = o + d * t
+			if inTerrain(p.X, p.Z) then
+				local above = p.Y > terrainH(p.X, p.Z)
+				if prevAbove == true and not above then
+					local lo, hi = prevT, t
+					for _ = 1, 30 do
+						local m = (lo + hi) / 2
+						local q = o + d * m
+						if q.Y > terrainH(q.X, q.Z) then
+							lo = m
+						else
+							hi = m
+						end
+					end
+					local q = o + d * hi
+					local e = 0.01
+					local nx = -(terrainH(q.X + e, q.Z) - terrainH(q.X - e, q.Z)) / (2 * e)
+					local nz = -(terrainH(q.X, q.Z + e) - terrainH(q.X, q.Z - e)) / (2 * e)
+					local nrm = Vector3.new(nx, 1, nz).Unit
+					best, bt, bn = terrain, hi, nrm
+					break
+				end
+				prevAbove = above
+			else
+				prevAbove = nil
+			end
+			prevT = t
+		end
+	end
+	-- the pond's surface
+	local wy = 0.2
+	if d.Y < 0 and o.Y >= wy then
+		local t = (wy - o.Y) / d.Y
+		if t >= 0 and t <= 1 and t < bt then
+			local p = o + d * t
+			if p.X >= -10 and p.X <= -4 and p.Z >= 12 and p.Z <= 20 then
+				local r = hitResult(p, Vector3.yAxis, terrain)
+				r.Material = Enum.Material.Water
+				return r
+			end
+		end
+	end
 	if best then
-		return hitResult(o + d * bt, bn, best)
+		local r = hitResult(o + d * bt, bn, best)
+		if best == terrain then
+			r.Material = Enum.Material.Grass
+		end
+		return r
 	end
 	return nil
 end

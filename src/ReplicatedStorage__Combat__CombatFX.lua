@@ -33,6 +33,7 @@ local CombatFolder = ReplicatedStorage:WaitForChild("Combat")
 local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local VFX = require(CombatFolder:WaitForChild("CombatVFX"))
 local Blood = require(CombatFolder:WaitForChild("CombatBlood"))
+local Paths = require(CombatFolder:WaitForChild("CombatPaths"))
 local Motion = require(CombatFolder:WaitForChild("Motion"))
 
 local FX = {}
@@ -110,7 +111,6 @@ local function groundHit(pos: Vector3, up: number?, depth: number?): RaycastResu
 	end
 	return nil
 end
-FX.GroundHit = groundHit
 
 local function groundUnder(pos: Vector3): Vector3?
 	local hit = groundHit(pos)
@@ -171,9 +171,8 @@ function FX.Impact(pos: Vector3, tier: string?, dir: Vector3?)
 	elseif k == "Break" then
 		VFX.Play("HitFlashHeavy", cf, { Scale = 0.7 })
 		VFX.Play("BlockSparks", cf, { Scale = 1.1, Count = 1.3 })
-	elseif k == "Stomp" then
-		-- (the smash is its crack and its dust on the floor: no flash on the bodies it catches)
 	end
+	-- (a "Stomp": the smash is its crack and its dust on the floor - no flash on the bodies it catches)
 end
 
 -- the Ground Smash: the whole sequence lives in CombatShatter
@@ -771,7 +770,11 @@ function FX.Connect(info: any)
 		-- the blood: the strike's own profile, sized by the damage and by how hurt the body already is,
 		-- shedding a trail as the body slides back (or flies: a launcher, a knockout)
 		local push = if info.Launched then { Delay = hs } else { Time = if info.Immune then (def.KnockTime or 0) * 0.5 else (def.KnockTime or 0), Delay = hs }
-		Blood.Spray(at, drive, def.Blood or "Light", info.Victim, info.DirSign, { Damage = info.Dmg, Health = info.Hp, Push = push, Launched = info.Launched })
+		local path = Paths[def.Id]
+		Blood.Spray(at, drive, def.Blood or "Light", info.Victim, info.DirSign, {
+			Damage = info.Dmg, Health = info.Hp, Push = push, Launched = info.Launched,
+			Striker = info.Attacker, Limbs = path and path.Limbs,
+		})
 		if type(info.Hp) == "number" and info.Hp <= 0 then
 			-- the knockout: the body bursts, and rains blood along its flight
 			Blood.Spray(at, drive, "KO", info.Victim, info.DirSign, { Damage = info.Dmg, Push = { Delay = hs }, Launched = true })

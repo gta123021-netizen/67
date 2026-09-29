@@ -1353,7 +1353,6 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 	-- NPC victims: the server owns their body
 	if vic.Npc and vic.AC and not data.RD then
 		local hs = data.HS
-		local serial = vic.StateSerial
 		if data.G then
 			vic.AC:Stop("Block", 0.08)
 			npcReact(vic, reaction, data.RS, hs, 0.05)

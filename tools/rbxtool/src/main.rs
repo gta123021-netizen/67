@@ -224,7 +224,7 @@ fn main() {
             eprintln!("{} scripts", list.len());
         }
         "build" => {
-            // build <in> <srcdir> <out> [--adds f] [--graft f] [--set f]
+            // build <in> <srcdir> <out> [--adds f] [--graft f] [--set f] [--delete f]
             let mut dom = load(&args[2]);
             let dir = Path::new(&args[3]);
             let list = scripts(&dom);
@@ -241,16 +241,18 @@ fn main() {
                     updated += 1;
                 }
             }
-            // options after the three positional arguments: --adds f, --graft f, --set f
+            // options after the three positional arguments: --adds f, --graft f, --set f, --delete f
             let mut adds_file: Option<String> = None;
             let mut graft_file: Option<String> = None;
             let mut set_file: Option<String> = None;
+            let mut delete_file: Option<String> = None;
             let mut i = 5;
             while i < args.len() {
                 match args[i].as_str() {
                     "--adds" => adds_file = Some(args[i + 1].clone()),
                     "--graft" => graft_file = Some(args[i + 1].clone()),
                     "--set" => set_file = Some(args[i + 1].clone()),
+                    "--delete" => delete_file = Some(args[i + 1].clone()),
                     other => panic!("unknown option {}", other),
                 }
                 i += 2;
@@ -267,6 +269,18 @@ fn main() {
                     let inst = dom.get_by_ref_mut(r).unwrap();
                     inst.properties.insert(parts[1].into(), parse_variant(parts[2], parts[3]));
                     println!("set {}.{} = {}", parts[0], parts[1], parts[3]);
+                    updated += 1;
+                }
+            }
+            // --delete: file   (a script's src name, or L<line>): the instance and all under it removed
+            if let Some(f) = &delete_file {
+                let names: HashMap<String, Ref> = scripts(&dom).into_iter().map(|(r, n)| (n, r)).collect();
+                for line in fs::read_to_string(f).unwrap().lines() {
+                    if line.trim().is_empty() || line.starts_with('#') { continue; }
+                    let key = line.trim();
+                    let r = if let Some(n) = key.strip_prefix('L') { lines[n.parse::<usize>().unwrap() - 1] } else { *names.get(key).unwrap_or_else(|| panic!("no script {}", key)) };
+                    dom.destroy(r);
+                    println!("deleted {}", key);
                     updated += 1;
                 }
             }
