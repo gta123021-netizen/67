@@ -797,26 +797,6 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3, fis
 	-- (a guard breaker held off is a Heavy's block on the server: CombatService applyHit)
 	local hs = if brk then Config.Guard.BreakHitstop elseif blocked then (if def.GuardBreak then Config.Classes.Heavy else class).BlockHitstop else class.Hitstop
 	local drive = flat(acf.LookVector)
-	a.Impact = { Victim = victim, At = at, Blocked = blocked, Break = brk, T = now(), ChainKey = a.ChainKey, Stuns = stuns, PrevStun = prevStun }
-	ctx.Predicted[a.Seq] = a.Impact
-	dbg("impact", def.Id, victim.Name, if blocked then "blocked" elseif brk then "break" else "clean")
-	FX.Connect({
-		Kind = def.Id, At = at, Dir = drive, Victim = victim, Attacker = ctx.Char,
-		Blocked = blocked, Break = brk, Launched = launched, Immune = held and not guarded, DirSign = reactionSign(acf, vcf, def, at), Me = "Attacker",
-	})
-	hitStop(a, hs)
-	if def.Class == "Finisher" and not guarded then
-		-- (the meter holds for its OVERKILL! stamp from this frame: waiting for the server's word let it
-		-- slide out and back in at higher ping)
-		ctx.CounterHoldUntil = math.max(ctx.CounterHoldUntil, now() + 1.4 + roundTrip())
-	end
-	if a.Slot > 0 then
-		if not guarded and not launched then
-			startCarry(a, hs)
-		elseif blocked then
-			startCarry(a, hs, true)
-		end
-	end
 	-- your damage, stamped on the blow's own frame by the same rules the server deals it by (a body
 	-- missing arms takes more: Config.GoreDamage) - the server's number only corrects it if it
 	-- differs - and the body coming apart with it
@@ -829,6 +809,27 @@ local function localImpact(a: any, victim: Model, vr: BasePart, at: Vector3, fis
 		if hum then
 			-- (a clean blow that leaves it at the head's line or under pops the head: Config.HeadPopDamage)
 			dmg = Config.HeadPopDamage(dmg, hum.Health, hum.MaxHealth, blocked)
+		end
+	end
+	a.Impact = { Victim = victim, At = at, Blocked = blocked, Break = brk, T = now(), ChainKey = a.ChainKey, Stuns = stuns, PrevStun = prevStun }
+	ctx.Predicted[a.Seq] = a.Impact
+	dbg("impact", def.Id, victim.Name, if blocked then "blocked" elseif brk then "break" else "clean")
+	FX.Connect({
+		Kind = def.Id, At = at, Dir = drive, Victim = victim, Attacker = ctx.Char,
+		Blocked = blocked, Break = brk, Launched = launched, Immune = held and not guarded, DirSign = reactionSign(acf, vcf, def, at), Me = "Attacker",
+		Dmg = dmg, Hp = if hum and hum.MaxHealth > 0 then (hum.Health - dmg) / hum.MaxHealth else nil,
+	})
+	hitStop(a, hs)
+	if def.Class == "Finisher" and not guarded then
+		-- (the meter holds for its OVERKILL! stamp from this frame: waiting for the server's word let it
+		-- slide out and back in at higher ping)
+		ctx.CounterHoldUntil = math.max(ctx.CounterHoldUntil, now() + 1.4 + roundTrip())
+	end
+	if a.Slot > 0 then
+		if not guarded and not launched then
+			startCarry(a, hs)
+		elseif blocked then
+			startCarry(a, hs, true)
 		end
 	end
 	a.Impact.D = dmg
@@ -1769,15 +1770,26 @@ end
 ---------------------------------------------------------------------------
 -- being hit
 ---------------------------------------------------------------------------
+-- each start of a reaction clip (PlayFresh takes turns between two copies: a copy started again
+-- is a new play - what was scheduled for its last play is dropped)
+local playGen: { [AnimationTrack]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+-- still reeling from this play of the clip: it is on screen and the body is still stunned / broken (a
+-- later blow that didn't restart the clip keeps it going - it never runs out and pops back mid-stun)
+local function reeling(c: any, track: AnimationTrack, gen: number): boolean
+	return ctx == c and playGen[track] == gen and track.IsPlaying and (c.State == "Stunned" or c.State == "GuardBroken")
+end
+
 -- a non-looping reaction clip freezes on its last pose while the stun lasts
-local function holdReaction(track: AnimationTrack?, speed: number, stunSerial: number)
+local function holdReaction(track: AnimationTrack?, speed: number, gen: number)
 	if not track or speed <= 0 then
 		return
 	end
+	local c = ctx
 	local len = if track.Length > 0 then track.Length else 0.5
 	local left = math.max(0.05, (len - track.TimePosition) / speed - 0.05)
 	task.delay(left, function()
-		if ctx and ctx.StateSerial == stunSerial and track.IsPlaying then
+		if reeling(c, track, gen) then
 			track:AdjustSpeed(0)
 		end
 	end)
@@ -1795,15 +1807,19 @@ local function react(key: string, speed: number, hitstop: number, fade: number?)
 	local f = fade or (if swap then R.SwapBlend else R.Blend)
 	local tr = ctx.AC:PlayFresh(key, { Fade = f, Speed = 0 })
 	ctx.AC:Stop(other, f)
-	local serial = ctx.StateSerial
+	if not tr then
+		return nil
+	end
+	local gen = (playGen[tr] or 0) + 1
+	playGen[tr] = gen
 	local c = ctx
 	task.delay(hitstop, function()
-		if ctx == c and tr and tr.IsPlaying and c.StateSerial == serial then
+		if reeling(c, tr, gen) then
 			tr:AdjustSpeed(speed)
-			holdReaction(tr, speed, serial)
+			holdReaction(tr, speed, gen)
 			if speed > 0 then
 				task.delay(math.max(0, (R.SettleAt - tr.TimePosition) / speed), function()
-					if ctx == c and tr.IsPlaying and c.StateSerial == serial then
+					if reeling(c, tr, gen) then
 						tr:AdjustWeight(R.Settle, R.SettleTime)
 					end
 				end)
@@ -1928,9 +1944,11 @@ Event.OnClientEvent:Connect(function(kind: string, data: any)
 		local shown = mine and ctx.Predicted[data.Seq] ~= nil and ctx.Predicted[data.Seq].Victim == victim
 		if not shown then
 			local drive = if typeof(data.DV) == "Vector3" then data.DV else Vector3.new(data.KB.X, 0, data.KB.Z)
+			local vh = victim and victim:FindFirstChildOfClass("Humanoid")
 			FX.Connect({
 				Kind = data.K, At = data.P, Dir = drive, Victim = victim, Attacker = data.A,
 				Blocked = data.B, Break = data.G, Launched = data.RD, Immune = data.IM, DirSign = data.Dir, Me = me,
+				Dmg = data.D, Hp = if vh and vh.MaxHealth > 0 and type(data.H) == "number" then data.H / vh.MaxHealth else nil,
 			})
 		end
 		if type(data.H) == "number" and victim then

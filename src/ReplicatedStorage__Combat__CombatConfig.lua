@@ -292,7 +292,8 @@ Config.StunBudget = {
 	                        is at Ideal on the Hit frame, and is a short Base step when nobody is there.
 	                        It never turns and never steers: it is the body's weight going into the blow
 	Impact                  the effect tier (CombatFX): Light, Hook, Heavy, Sweep, Dash, Stomp
-	Blood                   the blood tier (CombatBlood): Light, Hook, Heavy, Finisher, Body
+	Blood                   the blood profile (Config.Blood.Profiles): Light, Hook, Heavy, Dash, Stomp,
+	                        Finisher
 	Hitbox                  limb radius around the CombatPaths capsules (+ Config.Hitbox.Pad)
 	Shorten                 (optional) this strike's own Config.Hitbox.Shorten - each strike's hitbox
 	                        is tuned so its reach matches its real limb (tests/reach_probe.luau)
@@ -379,7 +380,7 @@ Config.Attacks = {
 		-- a blow to the gut: the body folds FORWARD over it, the head drops
 		Reel = { Pitch = -16, Yaw = 4, Roll = 0, NeckYaw = 6, NeckPitch = -20, Omega = 12 },
 		Ideal = 4.6,
-		Impact = "Dash", Blood = "Body",
+		Impact = "Dash", Blood = "Dash",
 		Hitbox = 0.5, Name = "Dash Strike", MaxTargets = 1,
 		Cooldown = 0.35,
 	},
@@ -400,7 +401,7 @@ Config.Attacks = {
 		-- (rocked back from the shock, slow enough to reel the whole slide)
 		Reel = { Pitch = 13, Yaw = 6, Roll = 5, NeckYaw = 10, NeckPitch = 18, Omega = 7 },
 		Ideal = 2.5,
-		Impact = "Stomp", Blood = "Body",
+		Impact = "Stomp", Blood = "Stomp",
 		Hitbox = 0.6, Name = "Stomp", MaxTargets = 8,
 		Cooldown = 2.2, Hang = 0.08,
 		-- the clip holds its raised-knee pose until the feet touch down, then stomps: StompAt is the
@@ -554,47 +555,154 @@ Config.RequestRate = 25 -- max combat requests per second per player
 Config.StudioDummies = true -- practice dummies (a still one and a guarding one) near the spawn in Studio
 
 ---------------------------------------------------------------------------
--- blood (client-side, cosmetic; CombatBlood). A clean blow bursts the place's own blood effects
--- (ReplicatedStorage.Combat.VFX: Blood and BloodHeavy, from the Yona blood pack) out of the struck
--- surface - aimed outward from the wound, never back into the body, and carried the way the struck
--- part is thrown: back with a straight, sideways with a hook, up with an uppercut - with liquid
--- droplets flung out on real arcs that splat where they land: wet stains that spread, pool and
--- fade (the gore's bleeding throws the same droplets). All of it pooled and cheap.
+-- blood (client-side, cosmetic; CombatBlood + BloodPools). Droplets on real arcs, the place's own
+-- blood effects (ReplicatedStorage.Combat.VFX - the blood packs copied out of the Workspace), wounds
+-- that keep bleeding, and the liquid on the ground and walls it all ends up as.
 ---------------------------------------------------------------------------
+--[[ A PROFILE is a kind of blow's blood. Ranges are { min, max }: every blow rolls its own.
+	Ref       the damage this profile is sized for: a harder blow bleeds more, and a fighter that is
+	          already badly hurt bleeds more from every blow (CombatBlood.Spray)
+	Core      the place's effects, one picked by weight W per blow: Name, W, Scale, Count
+	Extra     { Chance, List }: sometimes a second one on top
+	Drops     droplets flung out of the wound (Size: their size in studs; Blob: the share that are
+	          heavy blobs), Fine: specks of fine spray in a tighter cone
+	Spread    degrees round the aim; Eject: studs/s out of the wound
+	Carry / Side / Lift   how hard the struck part's own motion throws the blood with it: back along
+	          the blow / sideways (a hook) / up (an uppercut)
+	Squirt    { Chance, Delay, Drops }: a late thin squirt out of the same wound as the body reels
+	Spit      { Chance, Delay, Up }: blood out of the mouth (Up: 1 straight up, 0 straight ahead)
+	Trail     the drops the body sheds as it slides back from the blow (x its strength) ]]
+local function fx(name: string, w: number, scale: { number }, count: { number }, face: boolean?): any
+	return { Name = name, W = w, Scale = scale, Count = count, Face = face }
+end
 Config.Blood = {
 	Enabled = true,
 	Color = Color3.fromRGB(150, 8, 14), -- fresh (the droplets)
-	Drag = 2.0, -- air drag on the droplets (1/s): terminal speed = gravity / drag
-	-- per tier: the place's effects (Name, Scale, Count), and the liquid - Drops droplets flung out of
-	-- the wound within Spread degrees of its aim at Eject studs/s; Carry / Side / Lift: how hard the
-	-- struck part's own motion (back / sideways with the hook / up) throws the blood with it
-	Tiers = {
-		Light = { Effects = { { Name = "Blood", Scale = 0.8, Count = 0.75 } }, Drops = 3, Spread = 30, Eject = { 8, 15 }, Carry = 10, Side = 2.5, Lift = 3 },
-		Hook = { Effects = { { Name = "Blood", Scale = 0.9, Count = 0.9 } }, Drops = 4, Spread = 30, Eject = { 8, 15 }, Carry = 6, Side = 12, Lift = 3 },
-		Heavy = { Effects = { { Name = "BloodHeavy", Scale = 1, Count = 1 } }, Drops = 6, Spread = 35, Eject = { 9, 17 }, Carry = 5, Side = 1.5, Lift = 17 },
-		Finisher = { Effects = { { Name = "BloodHeavy", Scale = 1.15, Count = 1.25 }, { Name = "Blood", Scale = 1, Count = 1 } }, Drops = 8, Spread = 40, Eject = { 9, 17 }, Carry = 12, Side = 3, Lift = 5 },
-		-- an arm torn off at the shoulder: the finisher's burst a touch bigger and thicker, thrown out of
-		-- the socket and after the departing arm (CombatGore tearArm)
-		Tear = { Effects = { { Name = "BloodHeavy", Scale = 1.3, Count = 1.45 }, { Name = "Blood", Scale = 1.15, Count = 1.2 } }, Drops = 10, Spread = 35, Eject = { 10, 19 }, Carry = 9, Side = 2, Lift = 6 },
-		Body = { Effects = { { Name = "Blood", Scale = 0.85, Count = 0.8 } }, Drops = 3, Spread = 30, Eject = { 6, 13 }, Carry = 12, Side = 2, Lift = 2 },
+	Drag = 2.0, -- air drag on an ordinary droplet (1/s); a small one has more, a big one less
+	MaxDrops = 96, -- droplets in the air at once (pooled; past it the oldest gives way)
+	View = 160, -- nothing is built farther than this from the camera
+	TrailRate = 16, -- drops a second a body sheds sliding from a blow (x the profile's Trail, fading out)
+	Profiles = {
+		-- the straights (Swing1, Swing2): the face and chest, thrown back along the blow
+		Light = {
+			Ref = 3.5,
+			Core = { fx("Blood", 3, { 0.55, 0.8 }, { 0.45, 0.8 }), fx("BloodPunch", 1, { 0.28, 0.4 }, { 1, 1 }, true), fx("BloodSpatter", 1, { 0.4, 0.55 }, { 0.45, 0.75 }) },
+			Extra = { Chance = 0.4, List = { fx("BloodSplatter", 2, { 0.25, 0.38 }, { 0.2, 0.4 }), fx("BloodJet", 1, { 0.28, 0.4 }, { 0.3, 0.5 }), fx("BloodWound", 1, { 0.32, 0.45 }, { 0.2, 0.35 }) } },
+			Drops = { 2, 5 }, Size = { 0.07, 0.13 }, Blob = 0.1, Fine = { 2, 6 },
+			Spread = { 22, 36 }, Eject = { 8, 15 }, Carry = 10, Side = 2.5, Lift = 3,
+			Squirt = { Chance = 0.12, Delay = { 0.05, 0.14 }, Drops = { 2, 3 } },
+			Trail = 0.25,
+		},
+		-- the hook (Swing3): the side of the head, flung sideways with the twist
+		Hook = {
+			Ref = 3.5,
+			Core = { fx("Blood", 3, { 0.65, 0.9 }, { 0.6, 0.95 }), fx("BloodSpatter", 1, { 0.5, 0.65 }, { 0.6, 0.9 }), fx("BloodPunch", 1, { 0.32, 0.45 }, { 1, 1 }, true) },
+			Extra = { Chance = 0.5, List = { fx("BloodSplatter", 2, { 0.3, 0.45 }, { 0.3, 0.5 }), fx("BloodJet", 2, { 0.32, 0.45 }, { 0.35, 0.55 }), fx("BloodStrand", 1, { 0.5, 0.8 }, { 0.4, 0.7 }) } },
+			Drops = { 3, 6 }, Size = { 0.07, 0.14 }, Blob = 0.12, Fine = { 3, 7 },
+			Spread = { 24, 38 }, Eject = { 8, 15 }, Carry = 6, Side = 12, Lift = 3,
+			Squirt = { Chance = 0.2, Delay = { 0.05, 0.16 }, Drops = { 2, 4 } },
+			Trail = 0.3,
+		},
+		-- the uppercut: the chin - up and back in a heavy spray, blood spat up out of the mouth
+		Heavy = {
+			Ref = 5.5,
+			Core = { fx("BloodHeavy", 3, { 0.85, 1.1 }, { 0.8, 1.05 }), fx("BloodWound", 2, { 0.6, 0.8 }, { 0.6, 0.9 }), fx("BloodSplatterWild", 1, { 0.4, 0.55 }, { 0.45, 0.7 }) },
+			Extra = { Chance = 0.65, List = { fx("BloodJet", 2, { 0.4, 0.55 }, { 0.45, 0.7 }), fx("BloodStrand", 2, { 0.7, 1 }, { 0.5, 0.9 }), fx("Blood", 1, { 0.6, 0.85 }, { 0.5, 0.8 }) } },
+			Drops = { 5, 9 }, Size = { 0.08, 0.16 }, Blob = 0.2, Fine = { 4, 9 },
+			Spread = { 28, 42 }, Eject = { 9, 17 }, Carry = 5, Side = 1.5, Lift = 17,
+			Squirt = { Chance = 0.3, Delay = { 0.06, 0.18 }, Drops = { 2, 4 } },
+			Spit = { Chance = 0.75, Delay = { 0.02, 0.07 }, Up = 0.85 },
+			Trail = 0.35,
+		},
+		-- the dash strike: the gut - a thick burst thrown back along the lunge, blood coughed out
+		Dash = {
+			Ref = 4.5,
+			Core = { fx("Blood", 2, { 0.65, 0.9 }, { 0.6, 0.9 }), fx("BloodSplatter", 2, { 0.38, 0.52 }, { 0.4, 0.65 }), fx("BloodWound", 1, { 0.5, 0.7 }, { 0.45, 0.7 }) },
+			Extra = { Chance = 0.5, List = { fx("BloodGush", 1, { 0.35, 0.5 }, { 0.25, 0.4 }), fx("BloodBleed", 2, { 0.45, 0.65 }, { 0.5, 0.8 }) } },
+			Drops = { 3, 6 }, Size = { 0.07, 0.14 }, Blob = 0.15, Fine = { 3, 7 },
+			Spread = { 26, 40 }, Eject = { 6, 13 }, Carry = 12, Side = 2, Lift = 2,
+			Squirt = { Chance = 0.18, Delay = { 0.08, 0.2 }, Drops = { 2, 3 } },
+			Spit = { Chance = 0.8, Delay = { 0.04, 0.1 }, Up = 0.1 },
+			Trail = 0.6,
+		},
+		-- the Ground Smash: the shock bursts blood out low and outward, and the long slide trails it
+		Stomp = {
+			Ref = 5,
+			Core = { fx("BloodSplatter", 2, { 0.45, 0.6 }, { 0.5, 0.8 }), fx("BloodSpatter", 1, { 0.5, 0.7 }, { 0.6, 0.9 }), fx("Blood", 1, { 0.6, 0.85 }, { 0.5, 0.8 }) },
+			Extra = { Chance = 0.55, List = { fx("BloodBleed", 2, { 0.5, 0.7 }, { 0.5, 0.8 }), fx("BloodDrip", 1, { 0.6, 0.8 }, { 0.8, 1 }) } },
+			Drops = { 4, 7 }, Size = { 0.07, 0.14 }, Blob = 0.15, Fine = { 3, 6 },
+			Spread = { 30, 48 }, Eject = { 7, 13 }, Carry = 14, Side = 2, Lift = -2,
+			Squirt = { Chance = 0.15, Delay = { 0.1, 0.3 }, Drops = { 2, 3 } },
+			Trail = 0.8,
+		},
+		-- the sweep (the finisher): a heavy burst, wide and wet, and a trail through the whole flight
+		Finisher = {
+			Ref = 6.5,
+			Core = { fx("BloodHeavy", 2, { 1, 1.2 }, { 1, 1.3 }), fx("BloodSplatterWild", 2, { 0.5, 0.65 }, { 0.6, 0.9 }), fx("BloodWound", 1, { 0.8, 1 }, { 0.8, 1.1 }) },
+			Extra = { Chance = 0.7, List = { fx("BloodBurst", 1, { 0.35, 0.5 }, { 0.3, 0.45 }), fx("BloodSplatter", 2, { 0.4, 0.55 }, { 0.45, 0.7 }), fx("BloodStrand", 1, { 0.8, 1.1 }, { 0.6, 1 }) } },
+			Drops = { 7, 11 }, Size = { 0.08, 0.16 }, Blob = 0.25, Fine = { 6, 10 },
+			Spread = { 32, 46 }, Eject = { 9, 17 }, Carry = 12, Side = 3, Lift = 5,
+			Squirt = { Chance = 0.4, Delay = { 0.08, 0.2 }, Drops = { 2, 4 } },
+			Trail = 0.5,
+		},
+		-- the knockout blow, on top of the strike's own (CombatFX): the body bursts, and rains as it flies
+		KO = {
+			Ref = 5,
+			Core = { fx("BloodBurst", 1, { 0.45, 0.65 }, { 0.45, 0.7 }) },
+			Extra = { Chance = 0.6, List = { fx("BloodWound", 1, { 0.8, 1.05 }, { 0.8, 1.1 }), fx("BloodSplatterWild", 1, { 0.55, 0.7 }, { 0.6, 0.9 }) } },
+			Drops = { 6, 10 }, Size = { 0.08, 0.17 }, Blob = 0.3, Fine = { 5, 9 },
+			Spread = { 36, 55 }, Eject = { 9, 18 }, Carry = 10, Side = 2, Lift = 6,
+			Trail = 0.7,
+		},
+		-- an arm torn off at the shoulder (CombatGore): out of the socket and after the departing arm
+		Tear = {
+			Ref = 5,
+			Core = { fx("BloodWound", 2, { 1, 1.25 }, { 1, 1.3 }), fx("BloodHeavy", 1, { 1.15, 1.35 }, { 1.2, 1.5 }) },
+			Extra = { Chance = 0.85, List = { fx("BloodGush", 2, { 0.7, 0.9 }, { 0.6, 0.85 }), fx("BloodSplatterWild", 1, { 0.6, 0.8 }, { 0.7, 1 }), fx("BloodBurst", 1, { 0.4, 0.55 }, { 0.35, 0.5 }) } },
+			Drops = { 9, 13 }, Size = { 0.08, 0.17 }, Blob = 0.3, Fine = { 6, 10 },
+			Spread = { 28, 40 }, Eject = { 10, 19 }, Carry = 9, Side = 2, Lift = 6,
+		},
+		-- the head bursting (CombatGore): the thickest of all
+		Head = {
+			Ref = 5,
+			Core = { fx("BloodBurst", 1, { 1.2, 1.5 }, { 1.1, 1.4 }) },
+			Extra = { Chance = 1, List = { fx("BloodWound", 1, { 1.2, 1.5 }, { 1.2, 1.5 }), fx("BloodSplatterWild", 1, { 0.8, 1 }, { 1, 1.3 }) } },
+			Drops = { 14, 20 }, Size = { 0.08, 0.18 }, Blob = 0.35, Fine = { 10, 14 },
+			Spread = { 45, 70 }, Eject = { 10, 20 }, Carry = 6, Side = 2, Lift = 10,
+		},
 	},
-	MaxDrops = 56, -- droplets in the air at once (pooled)
-	-- where a drop lands, a POOL (CombatBlood): an organic wet puddle with a thin clotting edge, a wet
-	-- highlight, spikes and droplets flung the way the drop was going, a drip running down a wall - it
-	-- splashes out, creeps a little further, darkens and loses its shine as it dries, then soaks away.
-	-- Pools that meet flow together into one puddle (one surface, one colour, one clock)
+	-- a wound that keeps bleeding (CombatGore's stumps, the torn limb, the neck - CombatBlood.Wound):
+	-- a heartbeat of spurts, BpmHigh while the pressure is full, slowing to BpmLow as it empties; a
+	-- dribble of Dribble[1]..[2] drops a second (empty..full), then an ooze of OozeRate a second fading
+	-- out. Inherit: the share of the wound's own velocity its blood leaves with. Moving faster than
+	-- ShedSpeed the air strips drops off it (ShedRate a second per stud/s over)
+	Wound = { BpmHigh = 148, BpmLow = 68, Dribble = { 1.2, 4.5 }, OozeRate = 1.1, Inherit = 0.85, ShedSpeed = 9, ShedRate = 0.35 },
+	-- the liquid on the ground and the walls (BloodPools): a grid of Cell studs on every surface blood
+	-- reaches; a drop of size s pours Spot * s^3 studs² into it. A full cell runs over into its
+	-- neighbours (SpreadRate on the flat; RunRate down slopes and walls, where only WallFilm of a cell is
+	-- left behind as the run's trail). Life: seconds a pool lies there (from the last blood poured into
+	-- it), the last Fade of them soaking away from its edges in. Budgets: MaxCells pool cells, MaxSpecks
+	-- specks of spray, MaxGloss pieces of wet sheen (past MaxCells the oldest pool soaks away early);
+	-- Spare: the pieces kept for reuse once all of it has gone. (Low graphics or a phone: the budgets
+	-- - and MaxDrops - are cut to a half .. three quarters, CombatBlood)
 	Pool = {
-		Max = 16, -- pools on the ground at once (pooled, 22 parts each - only a few used by most)
-		Life = 10, -- seconds a pool lies there, its last Fade soaking away
-		Fade = 1.3,
-		MaxRadius = 1.3, -- the widest a pool grows as drops land in it
+		Cell = 0.5,
+		Spot = 34,
+		SpreadRate = 3.5,
+		RunRate = 9,
+		WallFilm = 0.12,
+		Life = 32,
+		Fade = 2.6,
+		MaxCells = 400,
+		MaxSpecks = 90,
+		MaxGloss = 60,
+		Spare = 160, -- pieces kept for reuse once every pool has gone
 		Fresh = Color3.fromRGB(108, 1, 9),
 		Rim = Color3.fromRGB(70, 0, 6), -- the clotting edge
-		Gloss = Color3.fromRGB(126, 7, 15), -- the wet sheen (a touch lighter than Fresh)
+		Gloss = Color3.fromRGB(122, 6, 14), -- the wet sheen (a touch lighter than Fresh)
 		Dried = Color3.fromRGB(58, 4, 8),
 		RimDried = Color3.fromRGB(32, 2, 4),
 	},
-	View = 160, -- nothing is built farther than this from the camera
 }
 
 ---------------------------------------------------------------------------
@@ -624,8 +732,8 @@ Config.Blood = {
 --               left arm, the head burst (at or under the last one a clean blow kills)
 --   GibRest     seconds a severed arm lies on the ground (once it has come to rest) before it
 --               sinks and fades; GibLife the cap for one that never settles
---   BleedTime   seconds a torn limb keeps pumping blood (slowing with every beat); DripTime the
---               oozing after it
+--   BleedTime   seconds a torn limb keeps pumping blood (slowing with every beat - Config.Blood.Wound);
+--               DripTime the oozing after it
 --   Stagger     seconds between stages when one blow earns several
 ---------------------------------------------------------------------------
 Config.Gore = {
@@ -645,8 +753,12 @@ Config.Gore = {
 	MaxGibs = 8,
 	-- the flesh of a torn-off limb: heavy, grippy, dead (no rubber bounce, it thuds and rolls)
 	Flesh = { Density = 1.1, Friction = 0.9, Elasticity = 0.04 },
-	BleedTime = 7,
+	BleedTime = 8,
 	DripTime = 25, -- ...then the wound keeps oozing a drop a beat this long (or until it heals)
+	-- a body that has lost more than DripFrom of its health drips blood as it moves (CombatGore), up to
+	-- DripRate drops a second at the very end
+	DripFrom = 0.45,
+	DripRate = 2.4,
 	Stagger = 0.14,
 }
 

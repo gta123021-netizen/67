@@ -162,6 +162,32 @@ fn tree(dom: &WeakDom, out: &str, full: bool) {
     }
 }
 
+/// every instance in `tree` order: index 0 = line 1 of a tree dump
+fn line_refs(dom: &WeakDom) -> Vec<Ref> {
+    let mut out = Vec::new();
+    let mut stack = vec![dom.root_ref()];
+    while let Some(r) = stack.pop() {
+        if r != dom.root_ref() {
+            out.push(r);
+        }
+        let inst = dom.get_by_ref(r).unwrap();
+        for c in inst.children().iter().rev() {
+            stack.push(*c);
+        }
+    }
+    out
+}
+
+fn parse_variant(ty: &str, v: &str) -> Variant {
+    match ty {
+        "bool" => Variant::Bool(v == "true"),
+        "float" => Variant::Float32(v.parse().unwrap()),
+        "int" => Variant::Int32(v.parse().unwrap()),
+        "string" => Variant::String(v.to_string()),
+        _ => panic!("unknown type {}", ty),
+    }
+}
+
 fn find_path(dom: &WeakDom, path: &str) -> Ref {
     let mut cur = dom.root_ref();
     for seg in path.split('/') {
@@ -198,7 +224,7 @@ fn main() {
             eprintln!("{} scripts", list.len());
         }
         "build" => {
-            // build <in> <srcdir> <out> [adds.tsv]
+            // build <in> <srcdir> <out> [--adds f] [--graft f] [--set f]
             let mut dom = load(&args[2]);
             let dir = Path::new(&args[3]);
             let list = scripts(&dom);
@@ -215,7 +241,75 @@ fn main() {
                     updated += 1;
                 }
             }
-            if let Some(adds) = args.get(5) {
+            // options after the three positional arguments: --adds f, --graft f, --set f
+            let mut adds_file: Option<String> = None;
+            let mut graft_file: Option<String> = None;
+            let mut set_file: Option<String> = None;
+            let mut i = 5;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--adds" => adds_file = Some(args[i + 1].clone()),
+                    "--graft" => graft_file = Some(args[i + 1].clone()),
+                    "--set" => set_file = Some(args[i + 1].clone()),
+                    other => panic!("unknown option {}", other),
+                }
+                i += 2;
+            }
+            // (refs by tree line are taken before anything is added or moved)
+            let lines = line_refs(&dom);
+            // --set: file \t property \t type \t value   (file: a script's src name, or L<line>)
+            if let Some(f) = &set_file {
+                let names: HashMap<String, Ref> = scripts(&dom).into_iter().map(|(r, n)| (n, r)).collect();
+                for line in fs::read_to_string(f).unwrap().lines() {
+                    if line.trim().is_empty() || line.starts_with('#') { continue; }
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    let r = if let Some(n) = parts[0].strip_prefix('L') { lines[n.parse::<usize>().unwrap() - 1] } else { *names.get(parts[0]).unwrap_or_else(|| panic!("no script {}", parts[0])) };
+                    let inst = dom.get_by_ref_mut(r).unwrap();
+                    inst.properties.insert(parts[1].into(), parse_variant(parts[2], parts[3]));
+                    println!("set {}.{} = {}", parts[0], parts[1], parts[3]);
+                    updated += 1;
+                }
+            }
+            // --graft: parentPath \t NewAttachment \t line:count[:delay][:newName],...
+            // copies of the pack's emitters (tree lines of the INPUT place) in a new Attachment,
+            // switched off, each with its EmitCount / EmitDelay attributes (CombatVFX plays them)
+            if let Some(f) = &graft_file {
+                for line in fs::read_to_string(f).unwrap().lines() {
+                    if line.trim().is_empty() || line.starts_with('#') { continue; }
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    let parent = find_path(&dom, parts[0]);
+                    let exists = dom.get_by_ref(parent).unwrap().children().iter().find(|c| dom.get_by_ref(**c).unwrap().name == parts[1]).copied();
+                    if let Some(old) = exists {
+                        dom.destroy(old);
+                        println!("replaced {}/{}", parts[0], parts[1]);
+                    }
+                    let att = dom.insert(parent, InstanceBuilder::new("Attachment").with_name(parts[1]));
+                    for spec in parts[2].split(',') {
+                        let f: Vec<&str> = spec.split(':').collect();
+                        let n: usize = f[0].parse().unwrap();
+                        let src = lines[n - 1];
+                        let cls = dom.get_by_ref(src).unwrap().class.to_string();
+                        assert!(cls == "ParticleEmitter", "line {} is a {}", n, cls);
+                        let c = dom.clone_within(src);
+                        dom.transfer_within(c, att);
+                        let inst = dom.get_by_ref_mut(c).unwrap();
+                        if f.len() > 3 && !f[3].is_empty() {
+                            inst.name = f[3].to_string();
+                        }
+                        inst.properties.insert("Enabled".into(), Variant::Bool(false));
+                        let mut attrs = match inst.properties.get(&"Attributes".into()) {
+                            Some(Variant::Attributes(a)) => a.clone(),
+                            _ => rbx_dom_weak::types::Attributes::new(),
+                        };
+                        attrs.insert("EmitCount".into(), Variant::Float64(f[1].parse().unwrap()));
+                        attrs.insert("EmitDelay".into(), Variant::Float64(if f.len() > 2 && !f[2].is_empty() { f[2].parse().unwrap() } else { 0.0 }));
+                        inst.properties.insert("Attributes".into(), Variant::Attributes(attrs));
+                    }
+                    println!("grafted {}/{} ({} emitters)", parts[0], parts[1], parts[2].split(',').count());
+                    updated += 1;
+                }
+            }
+            if let Some(adds) = &adds_file {
                 // parentPath \t Name \t Class \t file
                 for line in fs::read_to_string(adds).unwrap().lines() {
                     if line.trim().is_empty() || line.starts_with('#') { continue; }

@@ -9,7 +9,8 @@
 	                             the camera kick (for the fighters it concerns). info = { Kind (attack
 	                             id), At (contact), Dir (the way the blow drives), Victim, Attacker,
 	                             Blocked, Break, Launched, Immune, Me = "Attacker" | "Victim" | nil,
-	                             DirSign (+1 = the blow drove the head to the victim's right) }
+	                             DirSign (+1 = the blow drove the head to the victim's right), Dmg (the
+	                             damage), Hp (the share of health it left: the blood's size) }
 	  Impact(pos, tier, dir)     the effect alone. Tiers: Light, Hook, Heavy, Sweep, Dash, Finisher,
 	                             Block, HeavyBlock, Break (the user's VFX packs, CombatVFX)
 	  (the combat makes no sound: effects, reactions and the camera carry every blow)
@@ -767,7 +768,14 @@ function FX.Connect(info: any)
 			elseif info.Launched and def.Id ~= "Sweep" then "Finisher"
 			else def.Impact or "Light"
 		FX.Impact(at, tier, throw)
-		Blood.Spray(at, drive, def.Blood or "Light", info.Victim, info.DirSign)
+		-- the blood: the strike's own profile, sized by the damage and by how hurt the body already is,
+		-- shedding a trail as the body slides back (or flies: a launcher, a knockout)
+		local push = if info.Launched then { Delay = hs } else { Time = if info.Immune then (def.KnockTime or 0) * 0.5 else (def.KnockTime or 0), Delay = hs }
+		Blood.Spray(at, drive, def.Blood or "Light", info.Victim, info.DirSign, { Damage = info.Dmg, Health = info.Hp, Push = push, Launched = info.Launched })
+		if type(info.Hp) == "number" and info.Hp <= 0 then
+			-- the knockout: the body bursts, and rains blood along its flight
+			Blood.Spray(at, drive, "KO", info.Victim, info.DirSign, { Damage = info.Dmg, Push = { Delay = hs }, Launched = true })
+		end
 	end
 	-- the push, drawn at once on a body this screen sees through replication (FX.Lead; never my own,
 	-- nor one in its escape window - it keeps control and half the push)

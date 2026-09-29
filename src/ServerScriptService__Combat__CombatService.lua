@@ -119,6 +119,7 @@ end
 
 local ATTACK_ANIMS = { "Swing1", "Swing2", "Swing3", "Uppercut", "Sweep", "Downslam", "DashAttack" }
 local DASH_ANIMS = { "DashForward", "DashBackward", "DashLeft", "DashRight" }
+local REACTIONS = { "HitLeft", "HitRight" }
 
 local function now(): number
 	return os.clock()
@@ -910,6 +911,76 @@ local function guardBreak(vic: Entity)
 end
 
 ---------------------------------------------------------------------------
+-- an NPC's body (the server drives it): the same reaction and clip hand-overs a player's own client
+-- gives its body (CombatClient react / tailFade), so a dummy reels, sags and recovers as smoothly
+---------------------------------------------------------------------------
+-- the reaction clip, cross-fading from the pose the body is in (never from neutral): the same side as
+-- the last blow blends quickly, the other side (the head whipping across) a touch longer. It holds
+-- the impact pose through the hit-stop, plays at `speed`, sags part way back toward the stance once
+-- past its peak (Config.React), and holds its last pose while the stun lasts
+local reactGen: { [AnimationTrack]: number } = setmetatable({}, { __mode = "k" }) :: any
+local function npcReact(vic: Entity, reaction: string, speed: number, hitstop: number, fade: number?)
+	local ac = vic.AC
+	if not ac then
+		return
+	end
+	local R = Config.React
+	local other = if reaction == "HitLeft" then "HitRight" else "HitLeft"
+	local f = fade or (if ac:IsPlaying(other) then R.SwapBlend else R.Blend)
+	local tr = ac:PlayFresh(reaction, { Fade = f, Speed = 0 })
+	ac:Stop(other, f)
+	if not tr then
+		return
+	end
+	-- (this play of the clip, still reeling: a later blow that didn't restart it keeps it going - it
+	-- never runs out and pops back to the stance mid-stun - and a copy started again drops what was
+	-- scheduled for its last play)
+	local gen = (reactGen[tr] or 0) + 1
+	reactGen[tr] = gen
+	local function reeling(): boolean
+		return reactGen[tr] == gen and tr.IsPlaying and (vic.State == "Stunned" or vic.State == "GuardBroken")
+	end
+	task.delay(hitstop, function()
+		if not reeling() or speed <= 0 then
+			return
+		end
+		tr:AdjustSpeed(speed)
+		local len = if tr.Length > 0 then tr.Length else 0.5
+		task.delay(math.max(0.05, (len - tr.TimePosition) / speed - 0.05), function()
+			if reeling() then
+				tr:AdjustSpeed(0)
+			end
+		end)
+		task.delay(math.max(0, (R.SettleAt - tr.TimePosition) / speed), function()
+			if reeling() then
+				tr:AdjustWeight(R.Settle, R.SettleTime)
+			end
+		end)
+	end)
+end
+
+-- a strike clip that runs out with nothing after it drops its weight on one frame (a pop back to the
+-- idle pose): it fades out over its last moment instead (a hit-stop's freeze is waited out)
+local function npcTailFade(e: Entity, track: AnimationTrack?, def: any, serial: number)
+	if not track then
+		return
+	end
+	local window = math.min(0.2, def.LengthReal * 0.3)
+	local function check()
+		if not (e.AttackSerial == serial and track.IsPlaying) then
+			return
+		end
+		local left = (def.Length - track.TimePosition) / math.max(def.Speed, 0.05)
+		if track.Speed < 0.05 or left > window then
+			task.delay(math.max(0.03, left - window * 0.8), check)
+			return
+		end
+		track:Stop(math.max(0.05, left * 0.9))
+	end
+	task.delay(math.max(0, def.LengthReal - window), check)
+end
+
+---------------------------------------------------------------------------
 -- applying a connected strike
 ---------------------------------------------------------------------------
 -- ONE CHAIN PER STUN. A victim still reeling from an attacker's chain (or with less than
@@ -1285,19 +1356,9 @@ local function applyHit(att: Entity, vic: Entity, def: any, contact: Vector3, jo
 		local serial = vic.StateSerial
 		if data.G then
 			vic.AC:Stop("Block", 0.08)
-			local tr = vic.AC:PlayFresh(reaction, { Fade = 0.05, Speed = 0 })
-			task.delay(hs, function()
-				if tr and tr.IsPlaying and vic.StateSerial == serial then
-					tr:AdjustSpeed(data.RS)
-				end
-			end)
+			npcReact(vic, reaction, data.RS, hs, 0.05)
 		elseif not data.B and restart and data.S > 0 then
-			local tr = vic.AC:PlayFresh(reaction, { Fade = 0.05, Speed = 0 })
-			task.delay(hs, function()
-				if tr and tr.IsPlaying and vic.StateSerial == serial then
-					tr:AdjustSpeed(data.RS)
-				end
-			end)
+			npcReact(vic, reaction, data.RS, hs)
 		end
 		if data.KT > 0 then
 			local kb, kt = data.KB, data.KT
@@ -1827,7 +1888,10 @@ local function startAttack(e: Entity, name: string, slot: number, start: number,
 				e.AC:Stop(k, blend)
 			end
 		end
-		e.AC:Play(def.Anim, { Fade = blend, Speed = def.Speed, Restart = true, Time = enter })
+		local track = e.AC:Play(def.Anim, { Fade = blend, Speed = def.Speed, Restart = true, Time = enter })
+		if name ~= "Downslam" then
+			npcTailFade(e, track, def, serial)
+		end
 		npcStep(e, def, enter, start, slot > 1)
 	end
 	local job: any = {
@@ -2423,6 +2487,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 			e.StateUntil = nil
 			if s == "Stunned" then
 				e.StunChainStart = nil
+			end
+			if e.Npc and e.AC and (s == "Stunned" or s == "GuardBroken") then
+				e.AC:StopMany(REACTIONS, 0.2)
 			end
 			if s == "Attacking" then
 				e.Attack = nil

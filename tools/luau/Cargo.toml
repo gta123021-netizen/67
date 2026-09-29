@@ -1,0 +1,11 @@
+[package]
+name = "luau-tools"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mlua = { version = "0.12.1", features = ["luau", "vendored"] }
+
+[[bin]]
+name = "luaucheck"
+path = "src/main.rs"

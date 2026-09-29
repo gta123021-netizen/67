@@ -14,6 +14,14 @@
 	      opts.Counts  { [emitter name] = n }: how many to emit (for an emitter the pack runs on
 	                   its Rate rather than a burst count)
 	      opts.Color   a ColorSequence every fired emitter takes (dust tinted like the ground)
+	      opts.Speed   speed multiplier on top of Scale (a weak spurt, a hard gush)
+	      opts.Spread  spread-angle multiplier (a tight squirt, a wide splash)
+	      opts.Life    lifetime multiplier (a longer arc, a shorter puff)
+	      opts.Gravity acceleration multiplier (heavier or lighter liquid)
+	      opts.Inherit the share of the parent part's velocity each particle leaves with (a wound on a
+	                   running, flung or ragdolled body: the blood goes with it, trailing a little)
+	      opts.Face    sprites face the camera (a splat seen from any side)
+	      opts.Delay   seconds before it fires
 	    Returns the effect's Attachment (destroy it to cut the effect short).
 	  VFX.Attach(name, part, offset?)  run an effect continuously on a moving part (its emitters on
 	                                  their own Rate) until handle.Stop(); a Part template (an
@@ -23,6 +31,12 @@
 
 	Effects in the folder (see extract_vfx.py for where each one comes from):
 	  Blood       clean light hit          BloodHeavy  heavy hit / finisher / stomp
+	  (the blood - CombatBlood - also plays the blood packs' own effects, copied here from the
+	  place's Workspace: BloodWound (A - SUDDEN WOUND), BloodJet (I - Veinless), BloodStream
+	  (B - HEMORRHAGE), BloodGush (E - Gushing), BloodBleed (D - Bleeding), BloodDrip (B - Puddle),
+	  BloodSplatter / BloodSplatterWild (G - Splatter / H - Wild Splatter), BloodSpatter
+	  (C - BLOOD SPLATTER), BloodStrand (Anime Blood-02), BloodSplash (Anime Blood-01, lies flat on a
+	  surface), BloodPunch (Blood-Punch-01), BloodBurst (the blood explosion))
 	  Block       blocked hit              GuardBreak  guard shattered
 	  Impact      the white ring that goes with a heavy clean hit
 	  Dash        a dash's kick-off (Anime Smoke-01 puffs, Anime Wind-01 ring + gust, Hit-04 streaks)
@@ -86,6 +100,42 @@ function VFX.Flat(pos: Vector3): CFrame
 	return CFrame.new(pos)
 end
 
+-- a copy of each effect is kept for the next time it plays (a fight plays the same few effects all
+-- the time: nothing is cloned or destroyed per hit once they have all played). Every property a play
+-- changes is put back from the template before the copy is used again.
+local spare: { [string]: { Attachment } } = {}
+local SPARE_MAX = 6
+local TOUCHED = { "Size", "Speed", "Color", "ZOffset", "TimeScale", "SpreadAngle", "Lifetime", "Acceleration", "VelocityInheritance", "Orientation" }
+local function takeCopy(name: string, tpl: Attachment): Attachment
+	local list = spare[name]
+	local a = list and table.remove(list)
+	if a then
+		for _, e in ipairs(a:GetChildren()) do
+			local t = tpl:FindFirstChild(e.Name)
+			if e:IsA("ParticleEmitter") and t and t:IsA("ParticleEmitter") then
+				for _, prop in ipairs(TOUCHED) do
+					(e :: any)[prop] = (t :: any)[prop]
+				end
+			end
+		end
+		return a
+	end
+	return tpl:Clone() :: Attachment
+end
+local function giveBack(name: string, a: Attachment, trimmed: boolean)
+	local list = spare[name]
+	if not list then
+		list = {}
+		spare[name] = list
+	end
+	if trimmed or #list >= SPARE_MAX then
+		a:Destroy()
+		return
+	end
+	a.Parent = nil
+	table.insert(list, a)
+end
+
 function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 	local lib = templates()
 	local tpl = lib and lib:FindFirstChild(name)
@@ -104,8 +154,11 @@ function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 	end
 	local scale = o.Scale or 1
 	local countK = o.Count or 1
+	local speedK = (o.Speed or 1) * scale
 	local ts = VFX.TimeScale()
-	local a = tpl:Clone()
+	-- (a play that keeps only some of the emitters makes a copy of its own: never handed back trimmed)
+	local trimmed = o.Only ~= nil
+	local a = if trimmed then tpl:Clone() :: Attachment else takeCopy(name, tpl)
 	if o.Only then
 		for _, e in ipairs(a:GetChildren()) do
 			if e:IsA("ParticleEmitter") and not o.Only[e.Name] then
@@ -118,6 +171,7 @@ function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 	a.CFrame = cf
 	a.Parent = if o.Parent and o.Parent:IsA("BasePart") then o.Parent else workspace.Terrain
 	local longest = 0
+	local lead = o.Delay or 0
 	for _, e in ipairs(a:GetChildren()) do
 		if e:IsA("ParticleEmitter") then
 			e.Enabled = false
@@ -126,7 +180,24 @@ function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 			end
 			if scale ~= 1 then
 				e.Size = scaleSeq(e.Size, scale, name .. "/" .. e.Name)
-				e.Speed = NumberRange.new(e.Speed.Min * scale, e.Speed.Max * scale)
+			end
+			if speedK ~= 1 then
+				e.Speed = NumberRange.new(e.Speed.Min * speedK, e.Speed.Max * speedK)
+			end
+			if o.Spread and o.Spread ~= 1 then
+				e.SpreadAngle = e.SpreadAngle * o.Spread
+			end
+			if o.Life and o.Life ~= 1 then
+				e.Lifetime = NumberRange.new(e.Lifetime.Min * o.Life, e.Lifetime.Max * o.Life)
+			end
+			if o.Gravity and o.Gravity ~= 1 then
+				e.Acceleration = e.Acceleration * o.Gravity
+			end
+			if o.Inherit then
+				e.VelocityInheritance = o.Inherit
+			end
+			if o.Face then
+				e.Orientation = Enum.ParticleOrientation.FacingCamera
 			end
 			if o.Color then
 				e.Color = o.Color
@@ -136,11 +207,11 @@ function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 			end
 			local base = if o.Counts and o.Counts[e.Name] then o.Counts[e.Name] else (e:GetAttribute("EmitCount") or 1)
 			local count = math.max(1, math.floor(base * countK + 0.5))
-			local delay = (e:GetAttribute("EmitDelay") or 0) / ts
+			local delay = ((e:GetAttribute("EmitDelay") or 0) + lead) / ts
 			-- never Emit() in the same frame the clone was parented: the engine can drop that burst
 			-- (the guard-break bubble never showed), so fire on the next resume at the earliest
 			local function fire()
-				if e.Parent then
+				if e.Parent and a.Parent then
 					e:Emit(count)
 				end
 			end
@@ -153,7 +224,10 @@ function VFX.Play(name: string, cf: CFrame, opts: any?): Attachment?
 		end
 	end
 	task.delay(longest + 0.25, function()
-		a:Destroy()
+		if a.Parent == nil then
+			return -- (cut short by whoever played it)
+		end
+		giveBack(name, a, trimmed)
 	end)
 	return a
 end

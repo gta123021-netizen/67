@@ -19,6 +19,9 @@
 	           glow, the rim and the fill pulse, faster as the head's line (Stages[3]) comes near
 	  reserve  (a player) the slim bar under it: the regen reserve left (Config.Regen - the Reserve
 	           attribute). While the fight is on it is dim, brightening as the Delay runs out
+	  mend     (a player) a faint teal stretch of the health bar past the fill: the health the reserve
+	           will still give back (as much as it holds, up to full). Dim while the fight is on, bright
+	           while it heals - the fill grows into it
 	  healing  it all turns: tile and rim to teal, the tile's heart beating, a teal glow on the health's
 	           growing end, "+N" rising off the tile each beat, teal motes rising off the body
 
@@ -161,6 +164,9 @@ return function(ctx: any)
 		Glint: ImageLabel, -- (white at the fill's end: a blow's hit)
 		Mend: ImageLabel, -- (teal at the fill's end: the health growing)
 		Rg: any?,
+		Ahead: Frame?, -- (the health the reserve will give back, past the fill)
+		AheadAt: number,
+		AheadLit: number,
 		RimGrad: UIGradient,
 		TileGrad: UIGradient,
 		Cross: Frame,
@@ -394,6 +400,9 @@ return function(ctx: any)
 			Glint = glint,
 			Mend = mend,
 			Rg = nil,
+			Ahead = nil,
+			AheadAt = -1,
+			AheadLit = -1,
 			RimGrad = rimGrads[1],
 			TileGrad = tile.Face,
 			Cross = cross,
@@ -430,6 +439,14 @@ return function(ctx: any)
 			Conns = {},
 		}
 		if hasRegen then
+			-- the health the reserve will give back: a capsule from the bar's start (the fill covers the
+			-- health already there), under the blow's chunk and the fill
+			local ahead = new("Frame", { Name = "Ahead", BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(0, 1), ZIndex = 4, Visible = false, Parent = hp.Track })
+			Kit.pill(ahead)
+			new("UISizeConstraint", { MinSize = Vector2.new(hpH, 0), Parent = ahead })
+			Kit.gradient(ahead, Kit.lighten(C.Teal, 0.35), C.TealDeep, 90)
+			hp.Trail.ZIndex = 5
+			v.Ahead = ahead
 			local rg = bar(plate, "Regen", barX, hpY + HP_H + ROW, barW, RG_H, 4, 1.4)
 			rg.Grad.Color = paint(C.Teal, C.TealDeep)
 			rg.Flash.BackgroundColor3 = C.Red -- (its flash: cut off by a blow while healing)
@@ -968,6 +985,29 @@ return function(ctx: any)
 			if math.abs(lit - v.Lit) > 0.005 then
 				v.Lit = lit
 				rg.Fill.BackgroundColor3 = DIM:Lerp(Color3.new(1, 1, 1), lit ^ 2)
+			end
+			-- the health the reserve will still give back, past the fill: faint while the fight is on,
+			-- clearer as the wait runs out, brightest (breathing with the heart) while it heals
+			local ahead = v.Ahead
+			if ahead then
+				local max = math.max(v.Hum.MaxHealth, 1)
+				local back = if v.Spent or v.Health >= 0.999 or v.Down then 0 else math.min(v.Reserve * RG.Reserve / max, 1 - v.Health)
+				local to = if back > 0.004 then math.min(1, v.Shown + back) else -1
+				if math.abs(to - v.AheadAt) > 0.0015 then
+					v.AheadAt = to
+					ahead.Visible = to > 0
+					if to > 0 then
+						ahead.Size = UDim2.fromScale(to, 1)
+					end
+				end
+				if to > 0 then
+					local k = if m > 0 then ((clock - v.HeartAt) / HEART) % 1 else 0
+					local a = 0.2 + 0.25 * lit + 0.25 * m * (1 - k) ^ 2
+					if math.abs(a - v.AheadLit) > 0.01 then
+						v.AheadLit = a
+						ahead.BackgroundTransparency = 1 - a
+					end
+				end
 			end
 		end
 		repaint(v, beat)

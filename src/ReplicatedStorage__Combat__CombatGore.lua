@@ -20,16 +20,23 @@
 	What each stage does
 	  ARM   the whole arm is ripped off at the shoulder. The real arm is hidden (with everything worn
 	        on it) and a copy of it - its colour, its sleeve - is thrown along the way the blow drove,
-	        tumbling, the gore kit's torn end on top bleeding and shedding drops; it hits the ground,
-	        rolls and comes to rest (real physics on this client, colliding with the world, never with
-	        a fighter). The shoulder is a raw stump (the kit's shoulder cap) that pumps blood in pulses
-	        with a slowing heartbeat (Config.Gore.BleedTime), then keeps oozing a drop a beat (DripTime)
-	  HEAD  the head bursts in a thick red mist blown up and out with the blow; what is left is the
-	        neck's torn stump with the base of the skull, and a fountain of blood that dies down in
-	        pulses
-	  (all the blood goes through CombatBlood: the place's own blood effects - ReplicatedStorage.
-	  Combat.VFX Blood and BloodHeavy - and its liquid droplets, which splat where they land)
+	        tumbling, the gore kit's torn end on top bleeding as it flies (its blood flies with it and
+	        rains off it along the way); it slaps down in a splash of blood, rolls and comes to rest
+	        (real physics on this client, colliding with the world, never with a fighter). The shoulder
+	        is a raw stump (the kit's shoulder cap): the tear bursts out of it, then two or three
+	        weaker gushes, then it pumps with a slowing heartbeat - spurts out of the socket the way
+	        the socket faces, short squirts between them, a dribble down the body
+	        (Config.Gore.BleedTime), then it oozes (DripTime)
+	  HEAD  the head bursts in a thick red cloud blown up and out with the blow; what is left is the
+	        neck's torn stump with the base of the skull, and a fountain of blood that gushes, then
+	        dies down in pulses
+	  (all the blood goes through CombatBlood: the place's own blood effects - the blood packs,
+	  ReplicatedStorage.Combat.VFX - its droplets, and the liquid they pool into. A wound bleeds
+	  with the body's own motion: a fighter running with a stump streaks blood behind it, a
+	  ragdolled one throws it along its fall)
 	  (the hole in the torso from the gore kit is never used)
+	A body badly hurt (its Wounds, Config.Gore) drips from its wounds as it moves, and a bleeding body
+	thrown to the ground lands in a splash of its own blood.
 	A torn-off arm is a real body on this client: it thuds down, rolls to a stop and lies there
 	Config.Gore.GibRest seconds, then sinks into the ground as it fades (see addGib).
 
@@ -252,8 +259,10 @@ local function gibStep()
 				local hard = math.clamp(-g.LastV.Y / 40, 0.35, 1)
 				if not g.Landed then
 					g.Landed = true
-					-- (the torn end hits the floor wet: a small splash where it lands, low and flat)
-					Blood.Burst(p.Position - Vector3.new(0, p.Size.Y * 0.25, 0), Vector3.new(0, 1, 0), "Blood", 0.45 * hard, 0.45)
+					-- (the torn end slaps down wet: a splash of blood on the floor where it lands)
+					Blood.Splash(p.Position - Vector3.new(0, p.Size.Y * 0.25, 0), 0.5 + 0.6 * hard)
+				elseif hard > 0.5 then
+					Blood.Splash(p.Position, 0.3 * hard)
 				end
 			end
 			g.LastV = v
@@ -315,45 +324,9 @@ local function addGib(inst: Instance, part: BasePart)
 	end
 end
 
--- pulsing arterial bleeding from a stump: a spurt of the place's own blood effect (VFX Blood) in
--- time with a slowing heartbeat, droplets thrown with it, a drip between beats; the spurts die down
--- over `dur`, then the wound keeps oozing - a drop every beat or so - for `drip` seconds more (or
--- until the wound is gone: the arm grew back, the body left)
-local function bleed(att: Attachment, dir: () -> Vector3, dur: number, strength: number, body: Instance?, drip: number?, after: number?)
-	task.spawn(function()
-		-- (the first beat comes after the tear's own burst, not on top of it)
-		if after and after > 0 then
-			task.wait(after)
-		end
-		local t0 = os.clock()
-		while att:IsDescendantOf(workspace) and os.clock() - t0 < dur do
-			local k = 1 - (os.clock() - t0) / dur
-			local p = att.WorldPosition
-			local d = dir()
-			Blood.Burst(p, d, "Blood", 0.42 * strength * (0.55 + 0.45 * k), 0.25 + 0.45 * k)
-			for _ = 1, math.max(1, math.floor(3 * strength * k + 0.5)) do
-				local v = (d + Vector3.new((math.random() - 0.5) * 0.4, math.random() * 0.3, (math.random() - 0.5) * 0.4)).Unit * ((6 + math.random() * 6) * strength * (0.4 + 0.6 * k))
-				Blood.Launch(p, v, 0.1 + math.random() * 0.06)
-			end
-			-- the heart slows as it empties; the wound drips between beats
-			local gap = 0.55 + (1 - k) * 0.45
-			task.delay(gap * 0.5, function()
-				if att.Parent then
-					Blood.Launch(att.WorldPosition, Vector3.new(0, -1, 0), 0.07 + math.random() * 0.03)
-				end
-			end)
-			task.wait(gap)
-		end
-		local t1 = os.clock()
-		while att:IsDescendantOf(workspace) and os.clock() - t1 < (drip or 0) do
-			local k = 1 - (os.clock() - t1) / (drip or 1)
-			Blood.Launch(att.WorldPosition, Vector3.new((math.random() - 0.5) * 0.4, -0.5, (math.random() - 0.5) * 0.4), 0.07 + math.random() * 0.04)
-			if math.random() < 0.25 * k then
-				Blood.Burst(att.WorldPosition, dir(), "Blood", 0.22 * strength, 0.2)
-			end
-			task.wait(0.45 + math.random() * 0.4 + (1 - k) * 0.5)
-		end
-	end)
+-- a wound that bleeds on its own (CombatBlood.Wound): its gushes, its heartbeat and its ooze
+local function bleed(att: Attachment, dir: () -> Vector3, pump: number, strength: number, body: Instance?, ooze: number?, delay: number?, gushes: number?): any
+	return Blood.Wound(att, { Dir = dir, Pump = pump, Strength = strength, Body = body, Ooze = ooze or 0, Delay = delay or 0, Gushes = gushes or 0 })
 end
 
 ---------------------------------------------------------------------------
@@ -361,7 +334,7 @@ end
 ---------------------------------------------------------------------------
 type Body = {
 	Model: Model, Hum: Humanoid, Torso: BasePart, Head: BasePart, Right: BasePart?, Left: BasePart?,
-	Stage: number, Target: number, Gen: number, Busy: boolean, Hidden: { Instance }, Added: { Instance },
+	Stage: number, Target: number, Gen: number, Busy: boolean, Hidden: { Instance }, Added: { Instance }, DripAcc: number?,
 	Marks: { [number]: { H: number, A: number } }, -- where each stage's hidden / added things start
 	Drive: Vector3, Conns: { RBXScriptConnection },
 }
@@ -547,7 +520,7 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 		local stump, att = shoulderStump(b, side)
 		table.insert(b.Added, stump)
 		bleed(att, function()
-			return (out + Vector3.new(0, 0.5, 0)).Unit
+			return att.WorldCFrame.UpVector
 		end, 0, 0.8, b.Model, GC.DripTime)
 		return
 	end
@@ -586,7 +559,7 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 	tail.Parent = copy
 	bleed(tail, function()
 		return copy.CFrame.UpVector
-	end, 1.3, 0.6, gib, 5)
+	end, 1.6, 0.6, gib, 6, 0.06, 1)
 	addGib(gib, copy)
 	-- the stump on the shoulder: the raw socket, where it all comes out
 	local stump, a = shoulderStump(b, side)
@@ -597,26 +570,20 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 	-- a stream of blood strung out behind the departing limb, then a second gush a beat later as the
 	-- artery empties - and then the heart takes over (the pulses below)
 	Blood.Spray(socket, (drive + out * 0.8).Unit, "Tear", b.Model, if side == "Right" then 1 else -1)
-	Blood.Burst(socket, outUp, "Blood", 0.95, 0.9)
+	Blood.Effect("BloodGush", socket, outUp, { Parent = b.Torso, Inherit = 0.85, Scale = 0.8 + math.random() * 0.25, Count = 0.8 })
 	local vUnit = if v.Magnitude > 0.1 then v.Unit else outUp
-	for i = 1, 12 do
+	local n = 10 + math.random(0, 5)
+	for i = 1, n do
 		-- (the string of it trailing the limb: the first drops nearly keep up, the last fall away)
-		local share = 0.85 - (i / 12) * 0.55
-		local dir = Blood.Cone(vUnit, 14)
-		Blood.Launch(socket + dir * 0.2, dir * v.Magnitude * share + Vector3.new(0, -2 * i / 12, 0), 0.1 + math.random() * 0.08)
+		local share = 0.85 - (i / n) * 0.55
+		local dir = Blood.Cone(vUnit, 10 + i)
+		Blood.Launch(socket + dir * 0.2, dir * v.Magnitude * share + Vector3.new(0, -2 * i / n, 0), 0.08 + math.random() * 0.09, if i <= 3 then "Blob" else "Drop")
 	end
-	task.delay(0.08, function()
-		if a.Parent then
-			Blood.Burst(a.WorldPosition, outUp, "BloodHeavy", 0.8, 0.75)
-			for _ = 1, 6 do
-				local dir = Blood.Cone(outUp, 35)
-				Blood.Launch(a.WorldPosition + dir * 0.15, dir * (9 + math.random() * 8), 0.09 + math.random() * 0.06)
-			end
-		end
-	end)
+	-- the socket: two or three weaker gushes as the artery empties, then the heartbeat - out of the
+	-- socket the way it faces (the body turning, falling or flung turns the jet with it)
 	bleed(a, function()
-		return (out + Vector3.new(0, 0.5, 0)).Unit
-	end, GC.BleedTime, 1.25, b.Model, GC.DripTime, 0.4)
+		return a.WorldCFrame.UpVector
+	end, GC.BleedTime, 1.25, b.Model, GC.DripTime, 0.42, math.random(2, 3))
 	give(b.Model, { Roll = if side == "Right" then -14 else 14, Yaw = if side == "Right" then 10 else -10, NeckYaw = if side == "Right" then -18 else 18 }, 12)
 end
 
@@ -645,12 +612,12 @@ local function burstHead(b: Body, quiet: boolean?)
 	if quiet then
 		return -- (burst before this client saw the body: what is left, nothing replayed)
 	end
-	-- THE MIST: the place's own blood effects (VFX BloodHeavy, Blood) burst big: a thick red cloud
-	-- blown up and out with the blow, a second one driven along it, the splash inside them
+	-- THE BURST: the place's own blood effects blown up and out with the blow - the blood explosion
+	-- (VFX BloodBurst) and the wound's spray, a heavy spray driven along the blow, drops everywhere
 	local up = (Vector3.new(0, 1, 0) + b.Drive * 0.6).Unit
-	Blood.Burst(at, up, "BloodHeavy", 1.9 * s, 1.8)
-	Blood.Burst(at, (b.Drive + Vector3.new(0, 0.35, 0)).Unit, "BloodHeavy", 1.5 * s, 1.2)
-	Blood.Burst(at, up, "Blood", 1.6 * s, 1.5)
+	Blood.Spray(at, b.Drive, "Head", b.Model, 0, { Damage = 5 * s })
+	Blood.Effect("BloodHeavy", at, (b.Drive + Vector3.new(0, 0.35, 0)).Unit, { Scale = 1.4 * s, Count = 1.1, Speed = 1.1 })
+	Blood.Effect("Blood", at, up, { Scale = 1.5 * s, Count = 1.3 })
 	-- the fountain from the neck, dying down
 	local a = Instance.new("Attachment")
 	a.Name = "GoreBleed"
@@ -660,7 +627,7 @@ local function burstHead(b: Body, quiet: boolean?)
 	table.insert(b.Added, a)
 	bleed(a, function()
 		return torso.CFrame.UpVector
-	end, GC.BleedTime, 1.3, b.Model)
+	end, GC.BleedTime, 1.35, b.Model, GC.DripTime * 0.5, 0.3, 3)
 	-- close enough and the camera takes the blast
 	local cam = workspace.CurrentCamera
 	if cam then
@@ -670,6 +637,8 @@ local function burstHead(b: Body, quiet: boolean?)
 		end
 	end
 end
+
+local bleeding: (b: Body) -> number
 
 local STAGE_FN: { (Body, boolean?) -> () } = {
 	function(b: Body, quiet: boolean?)
@@ -683,6 +652,53 @@ local STAGE_FN: { (Body, boolean?) -> () } = {
 
 -- the stage this much health has earned (0..3; the same rule the server keeps)
 Gore.StageFor = Config.GoreStageFor
+
+-- how badly a body is bleeding (0: not at all .. ~1.5): a limb gone, or its wounds past DripFrom
+-- (the server's Wounds - the health it has lost, added up - or, for any other body, its health)
+function bleeding(b: Body): number
+	local w = b.Model:GetAttribute("Wounds")
+	local wounds = if type(w) == "number" then w else 1 - math.clamp(b.Hum.Health / math.max(b.Hum.MaxHealth, 1), 0, 1)
+	local k = math.clamp((wounds - GC.DripFrom) / (1 - GC.DripFrom), 0, 1)
+	return k + (if b.Stage > 0 then 0.5 else 0)
+end
+
+-- A BADLY HURT BODY DRIPS. Past Config.Gore.DripFrom of its health lost, a drop now and then falls from
+-- where it has been hit (low on the torso), faster the worse it is and carried with the body - a
+-- trail of drips behind a fighter that runs, a pool growing under one that stands (DripRate: drops a
+-- second at the worst). Healed back under the line (the regen reserve), it stops.
+local dripConn: RBXScriptConnection? = nil
+local lastDrip = 0
+local function dripStep()
+	local now = os.clock()
+	if now - lastDrip < 0.1 then
+		return
+	end
+	local dt = math.min(now - lastDrip, 0.3)
+	lastDrip = now
+	local cam = workspace.CurrentCamera
+	for model, b in pairs(bodies) do
+		local torso = b.Torso
+		if b.Hum.Health > 0 and torso.Parent and model.Parent and (not cam or (cam.CFrame.Position - torso.Position).Magnitude < 90) then
+			local w = model:GetAttribute("Wounds")
+			local wounds = if type(w) == "number" then w else 1 - math.clamp(b.Hum.Health / math.max(b.Hum.MaxHealth, 1), 0, 1)
+			local k = math.clamp((wounds - GC.DripFrom) / (1 - GC.DripFrom), 0, 1)
+			if k > 0 then
+				b.DripAcc = (b.DripAcc or math.random()) + dt * GC.DripRate * k * (0.6 + 0.8 * math.random())
+				while b.DripAcc >= 1 do
+					b.DripAcc -= 1
+					local cf = torso.CFrame
+					local half = torso.Size * 0.5
+					local p = cf:PointToWorldSpace(Vector3.new((math.random() - 0.5) * half.X * 1.6, -half.Y * (0.2 + 0.7 * math.random()), (math.random() - 0.5) * half.Z * 1.6))
+					local v = torso.AssemblyLinearVelocity
+					if v.Magnitude > 60 then
+						v = v.Unit * 60
+					end
+					Blood.Launch(p, v * 0.85 + Vector3.new((math.random() - 0.5) * 0.6, -0.5, (math.random() - 0.5) * 0.6), 0.05 + math.random() * 0.05, "Drop")
+				end
+			end
+		end
+	end
+end
 
 local restore: (b: Body) -> ()
 
@@ -861,7 +877,8 @@ local function track(model: Model)
 		advance(b, Gore.StageFor(h, hum.MaxHealth))
 	end))
 	-- a body knocked down HITS the ground: dust bursts up where it lands (its first touchdown, and
-	-- a smaller puff if it bounces once) - the ragdoll lands with weight instead of just stopping
+	-- a smaller puff if it bounces once) - the ragdoll lands with weight instead of just stopping.
+	-- A body that is bleeding (a limb gone, or badly hurt) lands in a splash of its own blood
 	local watching = false
 	table.insert(b.Conns, model:GetAttributeChangedSignal("Ragdolled"):Connect(function()
 		if model:GetAttribute("Ragdolled") ~= true or watching then
@@ -877,13 +894,23 @@ local function track(model: Model)
 			local v = torso.AssemblyLinearVelocity
 			if lastV.Y < -14 and v.Y - lastV.Y > 12 then
 				thuds += 1
-				FX.GroundDust(torso.Position, if thuds == 1 then math.clamp(-lastV.Y / 60, 0.45, 0.9) else 0.35)
+				local hard = math.clamp(-lastV.Y / 60, 0.45, 0.9)
+				FX.GroundDust(torso.Position, if thuds == 1 then hard else 0.35)
+				local hurt = bleeding(b)
+				if hurt > 0 then
+					Blood.Splash(torso.Position, (if thuds == 1 then hard else 0.4) * (0.5 + hurt))
+				end
 			end
 			lastV = v
 			if thuds >= 2 or os.clock() - t0 > 2.5 or not torso.Parent then
 				watching = false
 				if conn then
 					conn:Disconnect()
+					-- (a body knocked down again and again never piles up dead connections)
+					local i = table.find(b.Conns, conn)
+					if i then
+						table.remove(b.Conns, i)
+					end
 				end
 			end
 		end)
@@ -973,6 +1000,9 @@ function Gore.Start()
 			end)
 		end
 	end)
+	if not dripConn then
+		dripConn = RunService.Heartbeat:Connect(dripStep)
+	end
 end
 
 return Gore
