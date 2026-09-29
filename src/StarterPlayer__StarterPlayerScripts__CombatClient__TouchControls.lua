@@ -2,7 +2,9 @@
 	TouchControls  (StarterPlayerScripts.CombatClient.TouchControls)
 	Phone/tablet buttons for the same actions the keyboard and mouse have: ATTACK (M1 - hold to keep
 	the chain going), HEAVY (M2 - the uppercut, once per combo), BLOCK (hold) and DASH (direction
-	from the thumbstick). They sit in an arc round Roblox's
+	from the thumbstick), and the traversal's: CROUCH (a tap crouches - running, it slides; a hold
+	crawls) and LEAP. Roblox's own jump button is the double jump in the air, the slide cancel in a
+	slide. They sit in an arc round Roblox's
 	jump button, sized from it, in the HUD's own style, and only show while touch is the active input
 	and nothing else owns the screen.
 ]]
@@ -131,6 +133,24 @@ function Touch.Start(api: any)
 	makeButton("Heavy", "HEAVY", gold, api.Heavy, nil)
 	makeButton("Block", "BLOCK", blue, api.BlockDown, api.BlockUp)
 	makeButton("Dash", "DASH", teal, api.Dash, nil)
+	local slate = if C then { C.Navy500, C.Navy700 } else { Color3.fromRGB(78, 94, 132), Color3.fromRGB(44, 56, 86) }
+	-- CROUCH: how long it is held decides (the crawl goes off while it is still held)
+	local crouchAt, crouchHeld = 0, false
+	makeButton("Crouch", "CROUCH", slate, function()
+		crouchAt = os.clock()
+		crouchHeld = true
+		local mine = crouchAt
+		api.CrouchDown()
+		task.delay(0.4, function()
+			if crouchHeld and crouchAt == mine then
+				api.CrouchHold()
+			end
+		end)
+	end, function()
+		crouchHeld = false
+		api.CrouchUp(os.clock() - crouchAt)
+	end)
+	makeButton("Leap", "LEAP", slate, api.Leap, nil)
 
 	local function layout()
 		local cam = workspace.CurrentCamera
@@ -146,6 +166,8 @@ function Touch.Start(api: any)
 			Block = { center + Vector2.new(-size * 1.02, -size * 1.22), s, 0.22 },
 			Dash = { center + Vector2.new(size * 0.08, -size * 1.28), s, 0.22 },
 			Heavy = { center + Vector2.new(-size * 2.26, -size * 0.5), s, 0.22 },
+			Crouch = { center + Vector2.new(-size * 2.12, -size * 1.62), s * 0.82, 0.2 },
+			Leap = { center + Vector2.new(size * 0.08, -size * 2.42), s * 0.82, 0.22 },
 		}
 		local top = math.huge
 		for name, p in pairs(place) do

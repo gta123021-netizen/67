@@ -39,7 +39,6 @@ return function(ctx: any)
 
 	local function row(order: number, title: string, sub: string, color: Color3, deep: Color3, glyph: string?, icon: string?, parent: Instance?): (Frame, TextLabel, UIStroke?)
 		local r = Kit.plate({ Name = title, Parent = parent or list, Size = UDim2.new(1, 0, 0, 82), LayoutOrder = order, Radius = 24, Stroke = 4, ZIndex = 12, Gradient = { C.Navy600, C.Navy800 } })
-		Kit.bevel(r, 20, 3, 12)
 		-- the icon disc is the row's whole left end: its outline and the gap round it are strokes on
 		-- it (in the row's colours), so the gap is the same at the left, the top and the bottom
 		local disc = Kit.endIcon({

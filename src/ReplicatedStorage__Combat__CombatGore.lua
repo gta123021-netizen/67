@@ -339,7 +339,6 @@ type Body = {
 	Drive: Vector3, Conns: { RBXScriptConnection },
 }
 local bodies: { [Model]: Body } = {}
-Gore.Bodies = bodies
 
 -- an R6 body this covers: a model with a Humanoid and the R6 body parts (a player's character too,
 -- unless Config.Gore.Players is off)
@@ -585,6 +584,14 @@ local function tearArm(b: Body, side: string, quiet: boolean?)
 		return a.WorldCFrame.UpVector
 	end, GC.BleedTime, 1.25, b.Model, GC.DripTime, 0.42, math.random(2, 3))
 	give(b.Model, { Roll = if side == "Right" then -14 else 14, Yaw = if side == "Right" then 10 else -10, NeckYaw = if side == "Right" then -18 else 18 }, 12)
+	-- close by, the moment lands on the camera too: thrown with the blow and pushed in on it
+	local cam = workspace.CurrentCamera
+	if cam then
+		local dist = (cam.CFrame.Position - socket).Magnitude
+		if dist < 30 then
+			FX.Camera(nil, "Dismember", drive, math.clamp(1 - dist / 30, 0.25, 0.9))
+		end
+	end
 end
 
 local function burstHead(b: Body, quiet: boolean?)
@@ -655,6 +662,13 @@ Gore.StageFor = Config.GoreStageFor
 
 -- how badly a body is bleeding (0: not at all .. ~1.5): a limb gone, or its wounds past DripFrom
 -- (the server's Wounds - the health it has lost, added up - or, for any other body, its health)
+-- how much fresh blood a body is losing (0 none .. 1.5 a fresh stump on a badly hurt body): what the
+-- traversal drags along the ground under a crawling or sliding body (CombatBlood.Drag)
+function Gore.Bleeding(model: Instance?): number
+	local b = if model then bodies[model :: Model] else nil
+	return if b and b.Hum.Health > 0 then bleeding(b) else 0
+end
+
 function bleeding(b: Body): number
 	local w = b.Model:GetAttribute("Wounds")
 	local wounds = if type(w) == "number" then w else 1 - math.clamp(b.Hum.Health / math.max(b.Hum.MaxHealth, 1), 0, 1)
@@ -890,8 +904,13 @@ local function track(model: Model)
 		local t0 = os.clock()
 		local thuds = 0
 		local conn: RBXScriptConnection? = nil
-		conn = RunService.Heartbeat:Connect(function()
+		conn = RunService.Heartbeat:Connect(function(dt: number)
 			local v = torso.AssemblyLinearVelocity
+			-- a bleeding body thrown along the ground drags its blood with it (one streak where it slid)
+			local hurt0 = bleeding(b)
+			if hurt0 > 0 and Vector3.new(v.X, 0, v.Z).Magnitude > 1.5 then
+				Blood.Drag(model, dt, hurt0 * 0.8)
+			end
 			if lastV.Y < -14 and v.Y - lastV.Y > 12 then
 				thuds += 1
 				local hard = math.clamp(-lastV.Y / 60, 0.45, 0.9)

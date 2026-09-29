@@ -65,6 +65,12 @@ Theme.Accent = {
 	Dash = { Theme.C.Teal, Theme.C.TealDeep },
 	Sprint = { Theme.C.Green, Theme.C.GreenDeep },
 	ShiftLock = { Theme.C.Purple, Theme.C.PurpleDeep },
+	-- traversal
+	Crouch = { Theme.C.Green, Theme.C.GreenDeep },
+	Crawl = { Theme.C.Green, Theme.C.GreenDeep },
+	Leap = { Theme.C.Teal, Theme.C.TealDeep },
+	AirJump = { Theme.C.Blue, Theme.C.BlueDeep },
+	Parkour = { Theme.C.Gold, Theme.C.GoldDeep },
 }
 
 Theme.Rarity = {
@@ -133,6 +139,8 @@ Theme.DefaultKeys = {
 	Shop = "B", Stats = "P", Bag = "Backquote", Party = "G", Settings = "M",
 	-- combat (StarterPlayerScripts.CombatClient reads these live)
 	Block = "F", Dash = "Q", Sprint = "LeftShift", ShiftLock = "LeftControl",
+	-- traversal (CombatClient -> Traversal)
+	Crouch = "C", Crawl = "X", Leap = "R",
 }
 
 -- the actions listed on the keybinds page, in order
@@ -145,6 +153,11 @@ Theme.KeyActions = {
 	{ Id = "Dash", Label = "Dash", Sub = "Goes where you're moving  ·  forward + M1 to strike  ·  gamepad B", Section = "COMBAT", Draw = "Dash" },
 	{ Id = "Sprint", Label = "Sprint", Sub = "Hold to run  ·  gamepad L3", Section = "COMBAT", Icon = "Boot" },
 	{ Id = "ShiftLock", Label = "Shift Lock", Sub = "Toggle the locked camera  ·  you face where you aim", Section = "COMBAT", Draw = "Lock" },
+	{ Id = "Crouch", Label = "Crouch / Slide", Sub = "Toggle crouch  ·  while running: slide  ·  gamepad R3", Section = "MOVEMENT", Icon = "Boot" },
+	{ Id = "Crawl", Label = "Crawl", Sub = "Toggle crawl (needs both arms)  ·  gamepad D-pad down", Section = "MOVEMENT", Icon = "Boot" },
+	{ Id = "Leap", Label = "Leap", Sub = "A long dive forward from the ground  ·  gamepad RB  ·  M1 in the air to stomp", Section = "MOVEMENT", Draw = "Dash" },
+	{ Id = "AirJump", Label = "Double Jump", Sub = "Jump in the air  ·  in a slide: slide cancel  ·  on a wall: let go", Section = "MOVEMENT", Fixed = "SPACE", Icon = "Boot" },
+	{ Id = "Parkour", Label = "Vault / Climb / Wall Run", Sub = "Run at a low wall, jump at a tall one holding forward, jump along one beside you", Section = "MOVEMENT", Fixed = "AUTO", Icon = "Star" },
 	{ Id = "Shop", Label = "Shop", Sub = "Open the shop", Section = "MENUS" },
 	{ Id = "Stats", Label = "Profile", Sub = "Your profile and stats", Section = "MENUS" },
 	{ Id = "Bag", Label = "Bag", Sub = "Your backpack", Section = "MENUS" },
@@ -224,7 +237,7 @@ Theme.HotbarSlots = 5 -- ability-bar style: keys 1-5, everything else lives in t
 Theme.Hud = {
 	Outline = 4.5, -- every HUD group's ink outline (Kit.stroke units; x1.35 on screen)
 	ThinOutline = 3.5, -- tags, chips and small badges on those groups
-	GroupGap = 20, -- HUD_GROUP_GAP: between stacked HUD groups (frame edge to frame edge)
+	GroupGap = 20, -- between stacked HUD groups (frame edge to frame edge)
 	IconGap = 12, -- between repeated tiles in a row (the dock)
 	RowGap = 12, -- between repeated rows inside a group (party members)
 	Margin = 30, -- the column's distance from the screen's left edge
@@ -241,7 +254,6 @@ Theme.Hud = {
 	PartyRowHeight = 62,
 	PartyHeaderHeight = 32,
 }
-Theme.HUD_GROUP_GAP = Theme.Hud.GroupGap
 
 -- background music: add Sound ids here (they play in a loop, volume is in Settings)
 Theme.Music = {}

@@ -224,7 +224,8 @@ fn main() {
             eprintln!("{} scripts", list.len());
         }
         "build" => {
-            // build <in> <srcdir> <out> [--adds f] [--graft f] [--set f]
+            // build <in> <srcdir> <out> [--adds f] [--graft f] [--set f] [--move f] [--delete f]
+            // (in this order: set, graft, adds, move, delete - a graft copies from what is deleted after)
             let mut dom = load(&args[2]);
             let dir = Path::new(&args[3]);
             let list = scripts(&dom);
@@ -241,16 +242,20 @@ fn main() {
                     updated += 1;
                 }
             }
-            // options after the three positional arguments: --adds f, --graft f, --set f
+            // options after the three positional arguments: --adds f, --graft f, --set f, --delete f
             let mut adds_file: Option<String> = None;
             let mut graft_file: Option<String> = None;
             let mut set_file: Option<String> = None;
+            let mut delete_file: Option<String> = None;
+            let mut move_file: Option<String> = None;
             let mut i = 5;
             while i < args.len() {
                 match args[i].as_str() {
                     "--adds" => adds_file = Some(args[i + 1].clone()),
                     "--graft" => graft_file = Some(args[i + 1].clone()),
                     "--set" => set_file = Some(args[i + 1].clone()),
+                    "--delete" => delete_file = Some(args[i + 1].clone()),
+                    "--move" => move_file = Some(args[i + 1].clone()),
                     other => panic!("unknown option {}", other),
                 }
                 i += 2;
@@ -327,6 +332,42 @@ fn main() {
                     updated += 1;
                 }
             }
+            // --move: L<line> \t parentPath [\t newName]: the instance (tree line of the INPUT place) and
+            // everything under it re-parented (the path's folders are made as needed)
+            if let Some(f) = &move_file {
+                for line in fs::read_to_string(f).unwrap().lines() {
+                    if line.trim().is_empty() || line.starts_with('#') { continue; }
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    let n: usize = parts[0].trim_start_matches('L').parse().unwrap();
+                    let r = lines[n - 1];
+                    let mut parent = dom.root_ref();
+                    for seg in parts[1].split('/') {
+                        let found = dom.get_by_ref(parent).unwrap().children().iter().find(|c| dom.get_by_ref(**c).unwrap().name == seg).copied();
+                        parent = match found {
+                            Some(c) => c,
+                            None => dom.insert(parent, InstanceBuilder::new("Folder").with_name(seg)),
+                        };
+                    }
+                    dom.transfer_within(r, parent);
+                    if parts.len() > 2 && !parts[2].is_empty() {
+                        dom.get_by_ref_mut(r).unwrap().name = parts[2].to_string();
+                    }
+                    println!("moved L{} -> {}", n, parts[1]);
+                    updated += 1;
+                }
+            }
+            // --delete: file   (a script's src name, or L<line>): the instance and all under it removed
+            if let Some(f) = &delete_file {
+                let names: HashMap<String, Ref> = scripts(&dom).into_iter().map(|(r, n)| (n, r)).collect();
+                for line in fs::read_to_string(f).unwrap().lines() {
+                    if line.trim().is_empty() || line.starts_with('#') { continue; }
+                    let key = line.split('\t').next().unwrap().trim(); // (anything after a tab is a comment)
+                    let r = if let Some(n) = key.strip_prefix('L') { lines[n.parse::<usize>().unwrap() - 1] } else { *names.get(key).unwrap_or_else(|| panic!("no script {}", key)) };
+                    dom.destroy(r);
+                    println!("deleted {}", key);
+                    updated += 1;
+                }
+            }
             save(&dom, &args[4]);
             // verify
             let check = load(&args[4]);
@@ -339,6 +380,54 @@ fn main() {
                 }
             }
             println!("{} scripts, {} changes -> {}", a.len(), updated, args[4]);
+        }
+        "kfs" => {
+            // kfs <place> <out.lua>: every KeyframeSequence as a Lua table - its keyframes' times,
+            // markers and each pose's full CFrame (the joint transforms), for studying a clip's motion
+            let dom = load(&args[2]);
+            let mut w = BufWriter::new(fs::File::create(&args[3]).unwrap());
+            writeln!(w, "return {{").unwrap();
+            fn cf(v: Option<&Variant>) -> String {
+                if let Some(Variant::CFrame(c)) = v {
+                    let o = &c.orientation;
+                    format!("{{{},{},{},{},{},{},{},{},{},{},{},{}}}", c.position.x, c.position.y, c.position.z,
+                        o.x.x, o.x.y, o.x.z, o.y.x, o.y.y, o.y.z, o.z.x, o.z.y, o.z.z)
+                } else { "nil".into() }
+            }
+            fn poses(dom: &WeakDom, r: Ref, w: &mut BufWriter<fs::File>) {
+                for c in dom.get_by_ref(r).unwrap().children() {
+                    let p = dom.get_by_ref(*c).unwrap();
+                    if p.class == "Pose" {
+                        writeln!(w, "        [{:?}] = {},", p.name, cf(p.properties.get(&"CFrame".into()))).unwrap();
+                        poses(dom, *c, w);
+                    }
+                }
+            }
+            for d in dom.descendants() {
+                if d.class != "KeyframeSequence" { continue; }
+                let path = path_names(&dom, d.referent()).join("/");
+                let looped = matches!(d.properties.get(&"Loop".into()), Some(Variant::Bool(true)));
+                writeln!(w, "  {{ Name = {:?}, Path = {:?}, Loop = {}, Keyframes = {{", d.name, path, looped).unwrap();
+                let mut kfs: Vec<(f32, Ref)> = d.children().iter().filter_map(|c| {
+                    let k = dom.get_by_ref(*c).unwrap();
+                    if k.class != "Keyframe" { return None; }
+                    let t = match k.properties.get(&"Time".into()) { Some(Variant::Float32(t)) => *t, _ => 0.0 };
+                    Some((t, *c))
+                }).collect();
+                kfs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                for (t, k) in kfs {
+                    let ki = dom.get_by_ref(k).unwrap();
+                    let marks: Vec<String> = ki.children().iter().filter_map(|c| {
+                        let m = dom.get_by_ref(*c).unwrap();
+                        if m.class == "KeyframeMarker" { Some(format!("{:?}", m.name)) } else { None }
+                    }).collect();
+                    writeln!(w, "    {{ T = {}, Name = {:?}, Markers = {{{}}}, Poses = {{", t, ki.name, marks.join(",")).unwrap();
+                    poses(&dom, k, &mut w);
+                    writeln!(w, "    }} }},").unwrap();
+                }
+                writeln!(w, "  }} }},").unwrap();
+            }
+            writeln!(w, "}}").unwrap();
         }
         "count" => {
             let dom = load(&args[2]);

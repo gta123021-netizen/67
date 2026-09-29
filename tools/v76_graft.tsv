@@ -1,0 +1,24 @@
+# ReplicatedStorage.Combat.VFX effects copied from the blood packs already in the place (Workspace).
+# parentPath	NewEffect	treeLine:EmitCount:EmitDelay:NewName,...   (tree lines of Overkill_overhaul_v74.rbxl)
+ReplicatedStorage/Combat/VFX	BloodWound	5399:22::Drops,5400:2::Mist,5401:1::Splat
+ReplicatedStorage/Combat/VFX	BloodJet	5800:12::Drops,5801:3::Puffs
+ReplicatedStorage/Combat/VFX	BloodStream	5994:14::Drops,5995:2::Stream
+ReplicatedStorage/Combat/VFX	BloodGush	5763:24::Drops,5764:8::Puffs
+ReplicatedStorage/Combat/VFX	BloodBleed	5760:8::Drops
+ReplicatedStorage/Combat/VFX	BloodDrip	5757:4::Drops
+ReplicatedStorage/Combat/VFX	BloodSplatter	5775:6::Puffs,5777:14::Drops
+ReplicatedStorage/Combat/VFX	BloodSplatterWild	5771:8::Puffs,5773:18::Drops
+ReplicatedStorage/Combat/VFX	BloodStrand	14195:5::Strands
+ReplicatedStorage/Combat/VFX	BloodSplash	14198:1::Splash
+ReplicatedStorage/Combat/VFX	BloodBurst	5907:10::Cloud,5908:24::Drops,5909:8::Haze
+ReplicatedStorage/Combat/VFX	BloodPunch	14211:1::Splat,14212:1::SplatBig
+ReplicatedStorage/Combat/VFX	BloodSpatter	5990:1::Flat,5991:10::Drops
+ReplicatedStorage/Combat/VFX	BloodDisperse	5977:1::Bloom,5978:2::Cloud
+# the movement effects (the Advanced Movement System's MovementVisuals: DashSmoke, Cloud, AirsmokeVFX2,
+# JumpVFX, GlideVFX, LandVFX) - the traversal's (Traversal / CombatFX.Move)
+ReplicatedStorage/Combat/VFX	SlideDust	85351:3::Smoke
+ReplicatedStorage/Combat/VFX	DustCloud	85388:4::Cloud
+ReplicatedStorage/Combat/VFX	AirJump	85354:5::Ring1,85355:5::Ring2,85356:5::Ring3,85357:5::Ring4,85358:5::Ring5,85359:5::Ring6,85360:5::Ring7,85361:5::Ring8,85362:5::Ring9,85363:5::Ring10,85364:5::Ring11,85365:5::Ring12,85366:5::Ring13,85367:5::Ring14
+ReplicatedStorage/Combat/VFX	AirJumpLines	85450:3::Lines1,85451:3::Lines2,85452:3::Lines3,85454:2::Burst1,85455:2::Burst2,85456:2::Burst3,85457:4::Burst4,85458:1::Burst5,85459:14::Burst6,85460:5::Burst7
+ReplicatedStorage/Combat/VFX	LeapBurst	85391:2::Burst1,85392:2::Burst2,85393:3::Burst3,85394:2::Burst4,85395:2::Burst5,85396:4::Burst6,85397:3::Burst7,85398:1::Burst8,85399:14::Burst9,85400:5::Burst10,85401:2::Burst11
+ReplicatedStorage/Combat/VFX	LandDust	85370:1::Dust1,85371:1::Dust2,85372:1::Dust3,85373:4::Dust4,85374:4::Dust5,85375:1::Dust6,85376:1::Dust7,85377:6::Debris1,85378:3::Debris2,85379:5::Dust8

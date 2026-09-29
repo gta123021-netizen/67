@@ -1,0 +1,4 @@
+# new scripts: parentPath	Name	Class	src file
+ReplicatedStorage/Combat	BloodPools	ModuleScript	ReplicatedStorage__Combat__BloodPools.lua
+ReplicatedStorage/Combat	BodyState	ModuleScript	ReplicatedStorage__Combat__BodyState.lua
+ReplicatedStorage/Combat	Traversal	ModuleScript	ReplicatedStorage__Combat__Traversal.lua

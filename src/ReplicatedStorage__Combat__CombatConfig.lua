@@ -82,6 +82,26 @@ Config.Anim = {
 
 	-- getting up after a knockdown
 	GroundRecovery = { Id = id(86694634070675), Priority = "Action4" },
+
+	-- traversal (Traversal; the Advanced Movement System's own clips). Postures are locomotion
+	-- (Movement: they take the walk / idle's place); whole-body moves are Action - over the legs,
+	-- under every strike (Action2) and every hit reaction (Action3), so a blow always shows
+	CrouchIdle = { Id = id(91482458768598), Priority = "Movement", Looped = true }, -- pack: Crouch
+	CrouchWalk = { Id = id(76126320577271), Priority = "Movement", Looped = true }, -- pack: Crouch_Walk
+	CrawlIdle = { Id = id(117832002355912), Priority = "Movement", Looped = true }, -- pack: Crawl Idle
+	Crawl = { Id = id(98007385391523), Priority = "Movement", Looped = true }, -- pack: Crawling
+	SlideStart = { Id = id(133943546223504), Priority = "Action" }, -- pack: Slide_Start
+	SlideLoop = { Id = id(106655765537262), Priority = "Action", Looped = true }, -- pack: Slide_Looped
+	SlideCancel = { Id = id(89954865787153), Priority = "Action" }, -- pack: Slide_Cancel
+	-- the vault clips are one-handed: Vault_1 plants the LEFT hand on the obstacle (the right arm is
+	-- thrown up and never touches anything), Vault_2 is its mirror on the RIGHT hand
+	VaultLeftHand = { Id = id(96068488595877), Priority = "Action" }, -- pack: Vault_1
+	VaultRightHand = { Id = id(129189703481918), Priority = "Action" }, -- pack: Vault_2
+	DoubleJump = { Id = id(120922889321605), Priority = "Action" }, -- pack: DoubleJump
+	Leap = { Id = id(110328551431082), Priority = "Action" }, -- pack: Leap (push-off marker "Velocity")
+	WallRunLeft = { Id = id(127555168890059), Priority = "Action", Looped = true }, -- pack: wall on the left
+	WallRunRight = { Id = id(111523808196369), Priority = "Action", Looped = true },
+	WallClimb = { Id = id(180436334), Priority = "Action", Looped = true }, -- Roblox R6 climb (the pack's)
 }
 
 -- natural ground speed of the locomotion clips at playback speed 1 (pack: planted-foot speed)
@@ -100,6 +120,82 @@ Config.IdleDelay = 2 -- standing still this long before the combat idle comes in
 Config.JumpHeight = 7.2
 Config.BlockWalkSpeed = 4 -- shuffling with the guard up
 Config.ComboWalkSpeed = 8 -- between strikes of a live combo
+
+---------------------------------------------------------------------------
+-- traversal (Traversal): the ten moves taken from the Advanced Movement System - crouch, crawl,
+-- slide, slide cancel, vault, ledge vault, wall climb, wall run, double jump, leap - and nothing else
+-- of it. Speeds are this game's (walk 11, run 22, jump 7.2), not the pack's.
+--   Needs: the limbs each move is done with (read off the body: BodyState). Arms = both arms,
+--   Hand = one supporting hand (the vault clips are one-handed: the one for the hand the body still
+--   has is played), Legs = both legs. A move a body can't do isn't started; a limb lost mid-move ends
+--   it on the spot (the body keeps its momentum and falls or stands).
+---------------------------------------------------------------------------
+Config.Traversal = {
+	Needs = {
+		Crouch = { Legs = 2 },
+		Crawl = { Arms = 2 }, -- (the clip pulls the body along hand over hand; the legs trail)
+		Slide = { Legs = 2 }, -- (feet first on the legs and hip; the right hand only brushes the ground)
+		SlideCancel = { Legs = 2 },
+		Vault = { Hand = true, Legs = 2 },
+		LedgeVault = { Hand = true, Legs = 2 },
+		Climb = { Arms = 2, Legs = 2 },
+		WallRun = { Legs = 2 },
+		DoubleJump = { Legs = 2 },
+		Leap = { Legs = 2 },
+	},
+	-- postures
+	CrouchSpeed = 7, -- (the crouch walk clip at ~1.5x)
+	CrawlSpeed = 4, -- (the crawl clip at ~1.4x)
+	CrouchWalkNatural = 4.7, -- the clips' own ground speed at playback 1
+	CrawlNatural = 2.8,
+	CrouchCamera = -1.1, -- the camera sinks with the head (studs)
+	CrawlCamera = -2.2,
+	StandRoom = 5.2, -- clear space above the feet a body needs to stand up again
+	-- slide (the crouch key while running): from SlideFrom studs/s, launched at the run's speed x
+	-- SlideBoost (at least SlideSpeed), losing it over SlideTime to friction
+	SlideFrom = 16,
+	SlideSpeed = 30,
+	SlideBoost = 1.3,
+	SlideTime = 0.85,
+	SlideEnd = 7, -- ...down to this, then the body rises (or stays crouched with the key held)
+	SlideCooldown = 0.6,
+	-- slide cancel (jump out of a slide): the hop keeps the slide's speed (at least CancelSpeed)
+	CancelSpeed = 24,
+	CancelUp = 44, -- vertical launch (studs/s): a touch under a jump
+	-- double jump: once per time off the ground
+	DoubleJumpUp = 46, -- (apex ~5.4 studs over where it was thrown)
+	DoubleJumpSteer = 0.55, -- how far the air jump turns the body's drift toward the stick
+	AirJumpAfter = 0.14, -- seconds off the ground before the air jump is there (a double-tap isn't one)
+	-- leap: from the ground, pushed off on the clip's "Velocity" marker
+	LeapSpeed = 52,
+	LeapUp = 34,
+	LeapPush = 0.34, -- seconds the push lasts, easing out to the run's speed
+	LeapCooldown = 1.8,
+	-- vault: running into something between VaultLow and VaultHigh studs over the feet, no more than
+	-- VaultDepth deep (anything deeper is vaulted ONTO), within VaultReach
+	VaultLow = 1.4,
+	VaultHigh = 4.6,
+	VaultDepth = 4.5,
+	VaultReach = 3.2,
+	VaultTime = 0.42,
+	VaultClear = 0.5, -- the feet pass this high over the top
+	VaultCooldown = 0.35,
+	-- wall climb: jumping at (or running into) a wall taller than a vault, facing it, holding forward
+	ClimbSpeed = 13,
+	ClimbTime = 1.6, -- then the grip gives and the body slides off
+	ClimbReach = 2.2,
+	LedgeTime = 0.36,
+	-- wall run: in the air after a jump, going at least WallRunFrom along a wall beside the body
+	WallRunFrom = 17,
+	WallRunSpeed = 27,
+	WallRunTime = 1.35,
+	WallRunReach = 2.8, -- how far the wall may be from the root
+	WallRunGap = 1.25, -- the root is held this far off it
+	WallRunLift = 7, -- the run starts rising this fast, then sags (gravity x WallRunSag)
+	WallRunSag = 0.22,
+	-- a body landing from a traversal move at least this fast (studs/s down) lands hard
+	HardLanding = 55,
+}
 
 -- facing: a strike turns its attacker to the AIM (camera in shift lock, else the movement input,
 -- else where it already faces) - a quick critically damped turn (natural frequency rad/s, top
@@ -172,6 +268,12 @@ Config.Camera = {
 	GuardBreak = { Kick = 0.3, Up = 0.1, Roll = 1.4, Fov = 2.5, Time = 0.26 },
 	StompNear = { Kick = 0.22, Up = -0.6, Roll = 0.5, Fov = 1.2, Time = 0.24, Rumble = { 0.04, 0.45 } },
 	LinkDash = { Kick = -0.25, Up = 0, Roll = 0, Fov = -7, Time = 0.42 }, -- (the chase: the view widens, pulled back)
+	-- traversal
+	Leap = { Kick = -0.12, Up = 0.1, Roll = 0, Fov = -3.5, Time = 0.4 }, -- (the push-off: the view opens up)
+	DoubleJump = { Kick = -0.05, Up = 0.12, Roll = 0, Fov = -1.2, Time = 0.22 },
+	Land = { Kick = 0.08, Up = -0.35, Roll = 0.2, Fov = 0.8, Time = 0.2 },
+	-- a dismemberment near the camera: the view is thrown with the blow and pushed in on it
+	Dismember = { Kick = 0.3, Up = 0.15, Roll = 1.6, Fov = 3.5, Time = 0.34 },
 }
 
 ---------------------------------------------------------------------------
@@ -577,7 +679,9 @@ local function fx(name: string, w: number, scale: { number }, count: { number },
 end
 Config.Blood = {
 	Enabled = true,
-	Color = Color3.fromRGB(150, 8, 14), -- fresh (the droplets)
+	-- THE colour of all the blood - drops, streaks, the effects (tinted to it) and the pools: one dark
+	-- red from the moment it leaves the body until it has soaked away (it never dries or shines)
+	Color = Color3.fromRGB(58, 4, 8),
 	Drag = 2.0, -- air drag on an ordinary droplet (1/s); a small one has more, a big one less
 	MaxDrops = 96, -- droplets in the air at once (pooled; past it the oldest gives way)
 	View = 160, -- nothing is built farther than this from the camera
@@ -677,31 +781,72 @@ Config.Blood = {
 	-- out. Inherit: the share of the wound's own velocity its blood leaves with. Moving faster than
 	-- ShedSpeed the air strips drops off it (ShedRate a second per stud/s over)
 	Wound = { BpmHigh = 148, BpmLow = 68, Dribble = { 1.2, 4.5 }, OozeRate = 1.1, Inherit = 0.85, ShedSpeed = 9, ShedRate = 0.35 },
-	-- the liquid on the ground and the walls (BloodPools): a grid of Cell studs on every surface blood
-	-- reaches; a drop of size s pours Spot * s^3 studs² into it. A full cell runs over into its
-	-- neighbours (SpreadRate on the flat; RunRate down slopes and walls, where only WallFilm of a cell is
-	-- left behind as the run's trail). Life: seconds a pool lies there (from the last blood poured into
-	-- it), the last Fade of them soaking away from its edges in. Budgets: MaxCells pool cells, MaxSpecks
-	-- specks of spray, MaxGloss pieces of wet sheen (past MaxCells the oldest pool soaks away early);
-	-- Spare: the pieces kept for reuse once all of it has gone. (Low graphics or a phone: the budgets
-	-- - and MaxDrops - are cut to a half .. three quarters, CombatBlood)
+	-- the liquid on the ground and the walls (BloodPools), all in Color (its outer edge Rim). The ground -
+	-- floors, slopes, stairs, Terrain - is a height field of Cell studs; a drop of size s pours Spot * s^3
+	-- studs² of blood into it. It runs by its level (the ground's height + Depth for a full cell's blood,
+	-- less for less) at FlowRate: downhill, into dips, from a pool's deep middle out to its edge, until
+	-- the edge is a film of Retain of a cell (less on a slope). Over a ledge or into a crack it drips.
+	-- Materials: how each ground takes it (Absorb: the share drunk in a second; Spread: how freely it
+	-- runs). A wall's run leaves WallFilm of a cell as its trail and goes down at RunRate. Life: seconds
+	-- a pool lies there (from the last blood poured into it), the last Fade of them soaking away from its
+	-- edges in. Budgets: MaxCells pool cells, MaxSpecks specks of spray (past MaxCells the oldest pool
+	-- soaks away early); Spare: the pieces kept for reuse once all of it has gone. (Low graphics or a
+	-- phone: the budgets - and MaxDrops - are cut to a half .. three quarters, CombatBlood)
 	Pool = {
 		Cell = 0.5,
 		Spot = 34,
-		SpreadRate = 3.5,
-		RunRate = 9,
+		Depth = 0.07,
+		Retain = 0.34,
+		FlowRate = 5,
+		RunRate = 14,
 		WallFilm = 0.12,
 		Life = 32,
-		Fade = 2.6,
+		Fade = 3,
 		MaxCells = 400,
-		MaxSpecks = 90,
-		MaxGloss = 60,
+		MaxSpecks = 150,
 		Spare = 160, -- pieces kept for reuse once every pool has gone
-		Fresh = Color3.fromRGB(108, 1, 9),
-		Rim = Color3.fromRGB(70, 0, 6), -- the clotting edge
-		Gloss = Color3.fromRGB(122, 6, 14), -- the wet sheen (a touch lighter than Fresh)
-		Dried = Color3.fromRGB(58, 4, 8),
-		RimDried = Color3.fromRGB(32, 2, 4),
+		Materials = {
+			Default = { Absorb = 0.004, Spread = 1 },
+			-- soft ground drinks it in and holds it back
+			Grass = { Absorb = 0.03, Spread = 0.7 },
+			LeafyGrass = { Absorb = 0.035, Spread = 0.65 },
+			Sand = { Absorb = 0.045, Spread = 0.6 },
+			Ground = { Absorb = 0.03, Spread = 0.7 },
+			Mud = { Absorb = 0.02, Spread = 0.75 },
+			Snow = { Absorb = 0.04, Spread = 0.65 },
+			Fabric = { Absorb = 0.05, Spread = 0.5 },
+			Carpet = { Absorb = 0.05, Spread = 0.5 },
+			Cardboard = { Absorb = 0.04, Spread = 0.6 },
+			-- wood and stone a little
+			Wood = { Absorb = 0.012, Spread = 0.9 },
+			WoodPlanks = { Absorb = 0.012, Spread = 0.9 },
+			Brick = { Absorb = 0.01, Spread = 0.9 },
+			Cobblestone = { Absorb = 0.008, Spread = 0.85 },
+			Pebble = { Absorb = 0.01, Spread = 0.8 },
+			Concrete = { Absorb = 0.008, Spread = 0.95 },
+			Asphalt = { Absorb = 0.008, Spread = 0.95 },
+			Pavement = { Absorb = 0.006, Spread = 1 },
+			Rock = { Absorb = 0.006, Spread = 0.95 },
+			Slate = { Absorb = 0.005, Spread = 1 },
+			Sandstone = { Absorb = 0.012, Spread = 0.9 },
+			Limestone = { Absorb = 0.01, Spread = 0.9 },
+			Basalt = { Absorb = 0.004, Spread = 1 },
+			Salt = { Absorb = 0.02, Spread = 0.8 },
+			-- sealed and smooth: it lies there and runs freely
+			Plastic = { Absorb = 0, Spread = 1.15 },
+			SmoothPlastic = { Absorb = 0, Spread = 1.2 },
+			Metal = { Absorb = 0, Spread = 1.2 },
+			DiamondPlate = { Absorb = 0, Spread = 1.05 },
+			CorrodedMetal = { Absorb = 0.002, Spread = 1 },
+			Foil = { Absorb = 0, Spread = 1.2 },
+			Glass = { Absorb = 0, Spread = 1.3 },
+			Marble = { Absorb = 0, Spread = 1.25 },
+			Granite = { Absorb = 0.002, Spread = 1.1 },
+			Ice = { Absorb = 0, Spread = 1.35 },
+			Glacier = { Absorb = 0, Spread = 1.3 },
+			Neon = { Absorb = 0, Spread = 1.2 },
+		},
+		Rim = Color3.fromRGB(32, 2, 4), -- the clotting edge round the outside, a shade darker
 	},
 }
 

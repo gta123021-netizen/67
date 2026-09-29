@@ -22,6 +22,8 @@
 	                             blow, a touch of roll, a quick push-in, an optional low rumble - never
 	                             a continuous shake. SetCameraBase keeps the shift-lock shoulder offset
 	  Stomp(pos, attacker)       the Ground Smash (CombatShatter)
+	  Move(char, kind, info?)    a traversal move's effect (Traversal: slide dust, air jump, leap, landing)
+	  SetCameraBase / SetCameraDrop   the camera's resting offset (shift lock's shoulder / a crouch's sink)
 	  Dash(char, dir) / GroundDust(pos, scale) / GuardBreak(char, pos) / Damage(...)
 ]]
 
@@ -110,7 +112,6 @@ local function groundHit(pos: Vector3, up: number?, depth: number?): RaycastResu
 	end
 	return nil
 end
-FX.GroundHit = groundHit
 
 local function groundUnder(pos: Vector3): Vector3?
 	local hit = groundHit(pos)
@@ -171,9 +172,8 @@ function FX.Impact(pos: Vector3, tier: string?, dir: Vector3?)
 	elseif k == "Break" then
 		VFX.Play("HitFlashHeavy", cf, { Scale = 0.7 })
 		VFX.Play("BlockSparks", cf, { Scale = 1.1, Count = 1.3 })
-	elseif k == "Stomp" then
-		-- (the smash is its crack and its dust on the floor: no flash on the bodies it catches)
 	end
+	-- (a "Stomp": the smash is its crack and its dust on the floor - no flash on the bodies it catches)
 end
 
 -- the Ground Smash: the whole sequence lives in CombatShatter
@@ -192,6 +192,78 @@ local function shatter(): any
 		end
 	end
 	return Shatter
+end
+
+---------------------------------------------------------------------------
+-- traversal (Traversal): each move's own effect, from the Advanced Movement System's (the slide's
+-- dust, the air jump's ring, the leap's burst, the landing's dust - ReplicatedStorage.Combat.VFX),
+-- on any fighter: the mover's own screen plays it at once, everyone else's as the server passes the
+-- move on. Dust takes the colour of the ground it rises from; nothing is ever put on a limb (the
+-- effects sit at the feet / root, whatever the body has lost)
+---------------------------------------------------------------------------
+local DUST = Color3.fromRGB(205, 196, 180)
+local function dustFor(hit: RaycastResult?): ColorSequence
+	local c = if hit and hit.Instance:IsA("BasePart") then (hit.Instance :: BasePart).Color else Color3.fromRGB(120, 112, 98)
+	if hit and hit.Instance:IsA("Terrain") then
+		local ok, mc = pcall(function()
+			return (hit.Instance :: Terrain):GetMaterialColor(hit.Material)
+		end)
+		if ok and typeof(mc) == "Color3" then
+			c = mc
+		end
+	end
+	c = c:Lerp(DUST, 0.55)
+	return ColorSequence.new(c, c:Lerp(Color3.fromRGB(170, 164, 152), 0.3))
+end
+
+local sliding: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+function FX.Move(char: Model?, kind: string, info: any?)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (char and root and root:IsA("BasePart")) then
+		return
+	end
+	local o = info or {}
+	local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	local d = if typeof(o.D) == "Vector3" and o.D.Magnitude > 1e-3 then o.D else look
+	d = if d.Magnitude > 1e-3 then d.Unit else Vector3.new(0, 0, -1)
+	if kind == "Slide" then
+		-- dust kicked up off the floor along the whole slide, where the body is on this screen
+		local untilT = os.clock() + math.clamp(if type(o.T) == "number" then o.T else 0.8, 0.1, 1.5)
+		sliding[char] = untilT
+		local function puff()
+			if sliding[char] ~= untilT or not root.Parent or os.clock() > untilT then
+				return
+			end
+			local hit = groundHit(root.Position, 0.5, 4.5)
+			if hit then
+				VFX.Play("SlideDust", VFX.Along(hit.Position + hit.Normal * 0.2, hit.Normal), { Scale = 0.32, Life = 0.7, Color = dustFor(hit), Count = 0.6 })
+			end
+			task.delay(0.09, puff)
+		end
+		puff()
+	elseif kind == "SlideCancel" or kind == "Vault" then
+		local hit = groundHit(root.Position, 0.5, 5)
+		if hit then
+			VFX.Play("DustCloud", VFX.Along(hit.Position + hit.Normal * 0.15, hit.Normal), { Scale = 0.28, Life = 0.6, Color = dustFor(hit), Count = 0.7 })
+		end
+	elseif kind == "DoubleJump" then
+		-- the air jump: a ring pushed off beneath the feet
+		local feet = root.Position - Vector3.new(0, 2.9, 0)
+		VFX.Play("AirJump", VFX.Along(feet, Vector3.yAxis), { Scale = 0.3, Life = 0.8, Count = 0.6 })
+		VFX.Play("AirJumpLines", VFX.Along(root.Position, Vector3.yAxis), { Scale = 0.3, Life = 0.7, Count = 0.5 })
+	elseif kind == "Leap" then
+		VFX.Play("LeapBurst", VFX.Along(root.Position - d * 1.2, d), { Scale = 0.34, Life = 0.8, Count = 0.7 })
+		local hit = groundHit(root.Position, 0.5, 5)
+		if hit then
+			VFX.Play("DustCloud", VFX.Along(hit.Position + hit.Normal * 0.15, hit.Normal), { Scale = 0.3, Life = 0.6, Color = dustFor(hit), Count = 0.7 })
+		end
+	elseif kind == "Land" then
+		local hit = groundHit(root.Position, 0.5, 5)
+		if hit then
+			local hard = o.Hard == true
+			VFX.Play("LandDust", VFX.Along(hit.Position + hit.Normal * 0.1, hit.Normal), { Scale = if hard then 0.3 else 0.2, Life = if hard then 0.8 else 0.6, Color = dustFor(hit), Count = if hard then 0.8 else 0.5 })
+		end
+	end
 end
 
 -- the touchdown (everything after it: fracture, debris, shockwave, dust, settle, fade)
@@ -589,9 +661,20 @@ local camBase: CFrame? = nil
 local camSet: CFrame? = nil
 
 -- shift lock's over-the-shoulder offset (the impulses never touch it: they move the view itself)
+-- the camera's resting offset: the shift lock's shoulder (SetCameraBase, sideways) and a crouch or
+-- crawl sinking with the head (SetCameraDrop, down) - kept apart, applied together
+local camBaseOffset: { [Humanoid]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
+local camDrop: { [Humanoid]: number } = setmetatable({}, { __mode = "k" }) :: any
 function FX.SetCameraBase(hum: Humanoid?, offset: Vector3)
 	if hum then
-		hum.CameraOffset = offset
+		camBaseOffset[hum] = offset
+		hum.CameraOffset = offset + Vector3.new(0, camDrop[hum] or 0, 0)
+	end
+end
+function FX.SetCameraDrop(hum: Humanoid?, drop: number)
+	if hum and (camDrop[hum] or 0) ~= drop then
+		camDrop[hum] = drop
+		hum.CameraOffset = (camBaseOffset[hum] or Vector3.zero) + Vector3.new(0, drop, 0)
 	end
 end
 

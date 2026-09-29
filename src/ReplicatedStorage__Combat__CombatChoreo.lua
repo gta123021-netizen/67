@@ -17,7 +17,7 @@
 	  Choreo.NextGap(chain)                          the closest the next strike may start from, and its
 	                                                natural step
 	  Choreo.NewCarry(def, dir, now, hitstop, chain) the momentum after a clean chain strike
-	  Choreo.CarrySpeed(carry, now, dt, along)        ...its speed this frame
+	  Choreo.CarrySpeed(carry, now, along)            ...its speed this frame
 	  Choreo.Velocity(state, now, dt, along)          the two summed (one drive carries both, so a new
 	                                                strike's step never cuts off the last one's carry)
 ]]
@@ -161,7 +161,7 @@ function Choreo.NewCarry(def: any, dir: Vector3, now: number, hitstop: number, c
 	}
 end
 
-function Choreo.CarrySpeed(c: Carry?, now: number, dt: number, along: number?): number
+function Choreo.CarrySpeed(c: Carry?, now: number, along: number?): number
 	if not c then
 		return 0
 	end
@@ -188,7 +188,7 @@ function Choreo.Velocity(state: any, now: number, dt: number, aheadOf: (Vector3)
 	end
 	local c = state.Carry
 	if c then
-		v += c.Dir * Choreo.CarrySpeed(c, now, dt, aheadOf(c.Dir))
+		v += c.Dir * Choreo.CarrySpeed(c, now, aheadOf(c.Dir))
 	end
 	return v
 end

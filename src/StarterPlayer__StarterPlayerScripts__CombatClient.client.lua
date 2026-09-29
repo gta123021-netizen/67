@@ -12,6 +12,14 @@
 	  Sprint      Shift (hold) / gamepad L3 (toggle)              also: keep moving and you break into a run
 	  Shift lock  Left Ctrl (toggle)   camera over the shoulder, you face where you aim
 	  Forward dash + M1 = dash strike, jump + M1 = Ground Smash (never out of a live combo)
+	Traversal (Traversal - the body's limbs decide what it can do):
+	  Crouch      C / gamepad R3 / touch CROUCH (tap)   toggles; running, it is the SLIDE
+	  Crawl       X / gamepad D-pad down / touch CROUCH (hold)
+	  Leap        R / gamepad RB / touch LEAP
+	  Jump        in the air: the DOUBLE JUMP; in a slide: the SLIDE CANCEL; on a wall: let go
+	  vault, wall climb, ledge vault, wall run: by themselves - run at a low wall, jump at a tall one
+	  (holding forward), jump along one beside you
+	  Leap / double jump / slide cancel + M1 = the Ground Smash, like a jump
 
 	Timing comes from CombatConfig (measured from the animation pack); the server repeats the same
 	timing and has the final word (Ack corrections, Hit events, the CombatState attribute).
@@ -60,6 +68,8 @@ local Paths = require(CombatFolder:WaitForChild("CombatPaths"))
 local Choreo = require(CombatFolder:WaitForChild("CombatChoreo"))
 local HitDetect = require(CombatFolder:WaitForChild("HitDetect"))
 local Gore = require(CombatFolder:WaitForChild("CombatGore"))
+local Blood = require(CombatFolder:WaitForChild("CombatBlood"))
+local Traversal = require(CombatFolder:WaitForChild("Traversal"))
 local Request = CombatFolder:WaitForChild("CombatRequest") :: RemoteEvent
 local Event = CombatFolder:WaitForChild("CombatEvent") :: RemoteEvent
 
@@ -87,7 +97,10 @@ local REACTIONS = { "HitLeft", "HitRight" }
 local COMBO = Config.Combo
 local FACE = Config.Facing
 
-local DEFAULT_KEYS = { Dash = Enum.KeyCode.Q, Block = Enum.KeyCode.F, Sprint = Enum.KeyCode.LeftShift, ShiftLock = Enum.KeyCode.LeftControl }
+local DEFAULT_KEYS = {
+	Dash = Enum.KeyCode.Q, Block = Enum.KeyCode.F, Sprint = Enum.KeyCode.LeftShift, ShiftLock = Enum.KeyCode.LeftControl,
+	Crouch = Enum.KeyCode.C, Crawl = Enum.KeyCode.X, Leap = Enum.KeyCode.R,
+}
 local function keyFor(action: string): Enum.KeyCode
 	local k = Theme and Theme.Keys and Theme.Keys[action]
 	return if typeof(k) == "EnumItem" then k else DEFAULT_KEYS[action]
@@ -207,7 +220,8 @@ end
 
 -- free turning (AutoRotate) follows the state; the value it had is restored, so shift lock keeps working
 local function updateTurn()
-	local turn = States.Allows(ctx.State, "Turn")
+	-- (a traversal move carrying the body faces it where it goes: no free turning under it)
+	local turn = States.Allows(ctx.State, "Turn") and not (ctx.T and ctx.T:HoldsFacing())
 	if turn == ctx.TurnFree or externallyLocked() then
 		return
 	end
@@ -1410,6 +1424,15 @@ function tryAttack(kind: string)
 		end
 		return
 	end
+	-- out of a traversal move: hands on a wall or a vault throw nothing; a posture stands, a slide or a
+	-- wall run lets go (keeping its speed - off a wall, a strike in the air is the Ground Smash)
+	if ctx.T.Mode or ctx.T.Posture then
+		if not ctx.T:Allows("Attack") then
+			return
+		end
+		ctx.T:Yield("Attack")
+		s = ctx.State
+	end
 	if s == "Dashing" then
 		if kind == "Light" then
 			if ctx.DashDir == "Forward" and t - ctx.DashStart <= Config.Dash.Forward.AttackTo and t >= ctx.DashAttackUntil and Config.CanUse(stage, "DashAttack") then
@@ -1592,6 +1615,12 @@ function tryDash()
 	if inputBlocked() then
 		return
 	end
+	if ctx.T.Mode or ctx.T.Posture then
+		if not ctx.T:Allows("Dash") then
+			return
+		end
+		ctx.T:Yield("Dash")
+	end
 	local t = now()
 	-- a landed smash breathes: its victim is seen flying before the chase - a dash pressed in its
 	-- recovery waits for the recovery's end (then goes at once, every time)
@@ -1727,6 +1756,12 @@ local function tryBlock(pressed: boolean?)
 	end
 	if inputBlocked() or (ctx.State ~= "Idle" and ctx.State ~= "ComboWindow") or now() < ctx.BlockRetryAt or now() < ctx.ReblockAt or armless() then
 		return
+	end
+	if ctx.T.Mode or ctx.T.Posture then
+		if not ctx.T:Allows("Block") then
+			return
+		end
+		ctx.T:Yield("Block")
 	end
 	ctx.Seq += 1
 	ctx.BlockSeq = ctx.Seq
@@ -1928,6 +1963,21 @@ local debugAck: (data: any) -> () = function() end
 local ctxDescents: { [Model]: any } = setmetatable({}, { __mode = "k" }) :: any
 
 Event.OnClientEvent:Connect(function(kind: string, data: any)
+	if kind == "Move" then
+		-- another fighter's traversal move (its body and clips come with its own replication; its
+		-- effects come from here). Denied: the server refused one of mine
+		if type(data) ~= "table" or type(data.K) ~= "string" then
+			return
+		end
+		if data.Denied == true then
+			if ctx and ctx.T then
+				ctx.T:Denied(data.K)
+			end
+		elseif typeof(data.C) == "Instance" and data.C:IsA("Model") and (not ctx or data.C ~= ctx.Char) then
+			FX.Move(data.C, data.K, data)
+		end
+		return
+	end
 	if kind == "Hit" then
 		if type(data) ~= "table" then
 			return
@@ -2224,6 +2274,13 @@ local function updateLocomotion(dt: number)
 
 	queuedStomp(t)
 
+	-- the traversal (its moves start and run from here: the state above is this frame's)
+	local trav = ctx.T
+	trav:Step(dt)
+	local owns = trav:OwnsPose()
+	local posture = trav.Posture
+	s = ctx.State
+
 	-- a combo whose window closed is over (the counter and the lock go with it)
 	if ctx.Chain.Slot > 0 and not Rules.Live(ctx.Chain, t) and s ~= "Attacking" then
 		endChain()
@@ -2280,7 +2337,16 @@ local function updateLocomotion(dt: number)
 	-- string - instead of dropping to the relaxed idle and only raising the guard 2 s later)
 	local fresh = t - (ctx.CombatAt or -math.huge) < STANCE_AFTER
 	local stanceOk = (s == "Idle" or s == "ComboWindow" or s == "Attacking" or s == "Blocking") and not moving and not air and not climbing and speed < 0.8
-	if ctx.IdleTime >= Config.IdleDelay or (fresh and stanceOk) then
+	if (owns or posture) and ac:IsPlaying("CombatIdle") then
+		-- (a crouch, a crawl or a move has the body: the fighting stance waits)
+		ac:Stop("CombatIdle", 0.2)
+		local ni = ac:Track("NeutralIdle")
+		if ni then
+			ni:AdjustWeight(1, 0.2)
+		end
+	elseif owns or posture then
+		ctx.IdleTime = 0
+	elseif ctx.IdleTime >= Config.IdleDelay or (fresh and stanceOk) then
 		if not ac:IsPlaying("CombatIdle") then
 			local fade = if fresh then 0.25 else 0.6
 			ac:Play("CombatIdle", { Fade = fade })
@@ -2297,8 +2363,8 @@ local function updateLocomotion(dt: number)
 		end
 	end
 
-	-- walk <-> run blend by real ground speed; playback matches the stride
-	if moving then
+	-- walk <-> run blend by real ground speed; playback matches the stride (a posture walks its own clip)
+	if moving and not owns and not posture then
 		local band = Config.RunBlend
 		local r = math.clamp((speed - band[1]) / (band[2] - band[1]), 0, 1)
 		local walk = ac:Track("Walk")
@@ -2323,8 +2389,10 @@ local function updateLocomotion(dt: number)
 		ac:StopMany(LOCO, 0.2)
 	end
 
-	-- air and ladders
-	if climbing then
+	-- air and ladders (a traversal move in the air is its own clip: the fall and jump wait under it)
+	if owns then
+		ac:StopMany({ "Fall", "Jump", "Climb" }, 0.1)
+	elseif climbing then
 		local tr = ac:Play("Climb", { Fade = 0.1 })
 		if tr then
 			tr:AdjustSpeed(math.clamp(v.Y / 8, -1.5, 1.5))
@@ -2333,7 +2401,7 @@ local function updateLocomotion(dt: number)
 		ac:Stop("Climb", 0.15)
 	end
 	local stomping = s == "Attacking" and ctx.Attack ~= nil and ctx.Attack.Name == "Downslam"
-	if hs == Enum.HumanoidStateType.Freefall and t - ctx.FreefallAt > 0.2 and not stomping and s ~= "Attacking" then
+	if not owns and hs == Enum.HumanoidStateType.Freefall and t - ctx.FreefallAt > 0.2 and not stomping and s ~= "Attacking" then
 		if not ac:IsPlaying("Fall") then
 			ac:Play("Fall", { Fade = 0.2 })
 		end
@@ -2356,14 +2424,14 @@ local function updateLocomotion(dt: number)
 		ctx.MovingFor = 0
 		ctx.SprintToggle = false
 	end
+	local travSpeed = if canMove then trav:WalkSpeed() else nil
 	local target = if not canMove then 0
+		elseif travSpeed then travSpeed
 		elseif s == "Blocking" then Config.BlockWalkSpeed
 		elseif s == "ComboWindow" then Config.ComboWalkSpeed
 		elseif run then Config.RunSpeed
 		else Config.WalkSpeed
-	if not canMove then
-		ctx.Speed = 0
-	elseif target > ctx.Speed and run then
+	if canMove and not travSpeed and target > ctx.Speed and run then
 		ctx.Speed = math.min(target, math.max(ctx.Speed, Config.WalkSpeed) + (Config.RunSpeed - Config.WalkSpeed) / Config.RunRamp * dt)
 	else
 		ctx.Speed = target
@@ -2375,10 +2443,12 @@ local function updateLocomotion(dt: number)
 	end
 	-- no jumping out of a live combo: the chain's window is for its next strike (a jump there was the
 	-- way to reset a string into a Ground Smash)
-	local jump = if s == "Idle" then Config.JumpHeight else 0
+	local travJump = trav:JumpHeight()
+	local jump = if travJump then travJump elseif s == "Idle" then Config.JumpHeight else 0
 	if hum.JumpHeight ~= jump then
 		hum.JumpHeight = jump
 	end
+	FX.SetCameraDrop(hum, trav.CameraDrop)
 	updateTurn()
 end
 
@@ -2398,6 +2468,10 @@ local function teardown()
 	pcall(function()
 		Motion.Stop(ctx.Root)
 	end)
+	if ctx.T then
+		ctx.T:Destroy()
+		FX.SetCameraDrop(ctx.Hum, 0)
+	end
 	ctx.AC:Destroy()
 	ctx = nil
 	Counter.Drop()
@@ -2467,6 +2541,54 @@ local function setup(char: Model)
 		SavedAutoRotate = true,
 	}
 	ctx = c
+	c.T = Traversal.new(c, {
+		-- the body is its own: free in the fight (Idle), nothing owning the screen or the character
+		CanAct = function(): boolean
+			return ctx == c and c.Alive and c.State == "Idle" and not inputBlocked() and not c.Char:FindFirstChildOfClass("Tool")
+		end,
+		Running = function(): boolean
+			return c.SprintHeld or c.SprintToggle or c.MovingFor >= Config.AutoRunAfter
+		end,
+		CrouchHeld = function(): boolean
+			return UserInputService:IsKeyDown(keyFor("Crouch")) or UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonR3) or c.TouchCrouchHeld == true
+		end,
+		Ignore = charList,
+		Fighters = bodiesSeen,
+		Jumped = function()
+			c.LastJumpAt = now()
+			c.IdleTime = 0
+		end,
+		LastJump = function(): number
+			return c.LastJumpAt
+		end,
+		Sent = function(kind: string, info: any?)
+			local d = info and info.D
+			Request:FireServer("Move", { K = kind, D = if typeof(d) == "Vector3" then d else nil, T = info and info.T, H = info and info.H, S = info and info.S })
+		end,
+		Fx = function(kind: string, info: any?)
+			FX.Move(c.Char, kind, info)
+			local cam = workspace.CurrentCamera
+			if kind == "Leap" then
+				FX.Camera(c.Hum, "Leap", cam and cam.CFrame.LookVector, 1)
+			elseif kind == "DoubleJump" then
+				FX.Camera(c.Hum, "DoubleJump", nil, 1)
+			elseif kind == "Land" and info then
+				local k = math.clamp(((info.Speed or 0) - 20) / 60, 0.2, 1)
+				FX.Camera(c.Hum, "Land", nil, k)
+				-- a fresh wound hitting the ground hard: the landing jolts blood out of it
+				local bleed = Gore.Bleeding(c.Char)
+				if info.Hard and bleed > 0.1 then
+					Blood.Splash(c.Root.Position - Vector3.new(0, 2.6, 0), math.min(0.8, bleed * k))
+				end
+			end
+		end,
+		Smear = function(dt: number, strength: number)
+			local bleed = Gore.Bleeding(c.Char)
+			if bleed > 0 then
+				Blood.Drag(c.Char, dt, bleed * strength)
+			end
+		end,
+	})
 	for _, w in pairs(seen) do
 		w.StunChain = nil -- (a new body: no chain of it has stunned anyone)
 	end
@@ -2494,6 +2616,7 @@ local function setup(char: Model)
 			return
 		end
 		if s == "Dead" then
+			c.T:Cancel("Dead")
 			cancelActions()
 			endChain()
 			setLocal(s)
@@ -2505,6 +2628,8 @@ local function setup(char: Model)
 			c.AC:Stop("Block", 0.12)
 			setLocal("Idle")
 		elseif (s == "Stunned" or s == "GuardBroken") and c.State ~= s and c.State ~= "Ragdolled" then
+			-- (struck off a wall, out of a slide, up out of a crouch: the blow has the body)
+			c.T:Cancel(s)
 			cancelActions()
 			endChain()
 			setLocal(s, 2)
@@ -2517,6 +2642,7 @@ local function setup(char: Model)
 			return
 		end
 		if char:GetAttribute("Ragdolled") == true then
+			c.T:Cancel("Ragdolled")
 			cancelActions()
 			endChain()
 			c.AC:StopMany(REACTIONS, 0.05)
@@ -2542,6 +2668,7 @@ local function setup(char: Model)
 
 	table.insert(c.Conns, hum.Died:Connect(function()
 		if ctx == c then
+			c.T:Cancel("Dead")
 			cancelActions()
 			endChain()
 			setLocal("Dead")
@@ -2551,6 +2678,10 @@ local function setup(char: Model)
 	table.insert(c.Conns, char:GetAttributeChangedSignal("GoreStage"):Connect(function()
 		if ctx == c and armless() then
 			dropGuardLocal()
+		end
+		-- (a limb gone mid-move: the traversal looks at the body again this very moment, not next frame)
+		if ctx == c and c.Alive then
+			c.T:Step(0)
 		end
 	end))
 
@@ -2620,7 +2751,7 @@ RunService:BindToRenderStep("OverkillShiftLock", Enum.RenderPriority.Camera.Valu
 		if cam and root.Parent then
 			FX.SetCameraBase(ctx.Hum, root.CFrame:VectorToObjectSpace(flat(cam.CFrame.RightVector) * LOCK_OFFSET.X))
 		end
-		if States.Allows(ctx.State, "Turn") and not ctx.Align then
+		if States.Allows(ctx.State, "Turn") and not ctx.Align and not ctx.T:HoldsFacing() then
 			ctx.Hum.AutoRotate = false
 			if cam and root.Parent then
 				-- a big gap (the camera turned while the body couldn't) closes in a quick smooth turn,
@@ -2652,6 +2783,13 @@ RunService:BindToRenderStep("OverkillShiftLock", Enum.RenderPriority.Camera.Valu
 		end
 	end
 end)
+
+-- a traversal press (the body and the fight decide if anything happens: Traversal.Press)
+local function travPress(action: string)
+	if ctx and ctx.T and not inputBlocked() then
+		ctx.T:Press(action)
+	end
+end
 
 local function m1Down(source: string?, input: InputObject?)
 	if not ctx then
@@ -2710,6 +2848,14 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 			ctx.SprintHeld = true
 		elseif kc == keyFor("ShiftLock") then
 			toggleShiftLock()
+		elseif kc == keyFor("Crouch") then
+			travPress("Crouch")
+		elseif kc == keyFor("Crawl") then
+			travPress("Crawl")
+		elseif kc == keyFor("Leap") then
+			travPress("Leap")
+		elseif kc == Enum.KeyCode.Space then
+			travPress("Jump")
 		end
 	elseif ut == Enum.UserInputType.MouseButton1 then
 		if not processed then
@@ -2741,7 +2887,30 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 			tryDash()
 		elseif kc == Enum.KeyCode.ButtonL3 then
 			ctx.SprintToggle = not ctx.SprintToggle
+		elseif not processed then
+			if kc == Enum.KeyCode.ButtonR3 then
+				travPress("Crouch")
+			elseif kc == Enum.KeyCode.DPadDown then
+				travPress("Crawl")
+			elseif kc == Enum.KeyCode.ButtonR1 then
+				travPress("Leap")
+			elseif kc == Enum.KeyCode.ButtonA then
+				travPress("Jump")
+			end
 		end
+	end
+end)
+
+-- the touch jump button: its presses come as jump requests (several while it is held - one counts)
+local touchJumpAt = 0
+UserInputService.JumpRequest:Connect(function()
+	if UserInputService:GetLastInputType() ~= Enum.UserInputType.Touch then
+		return
+	end
+	local t = now()
+	if t - touchJumpAt > 0.28 then
+		touchJumpAt = t
+		travPress("Jump")
 	end
 end)
 
@@ -2851,6 +3020,26 @@ if touch then
 				if ctx then
 					tryDash()
 				end
+			end,
+			-- CROUCH: a tap crouches (running: slides), a hold crawls
+			CrouchDown = function()
+				if ctx then
+					ctx.TouchCrouchHeld = true
+				end
+			end,
+			CrouchUp = function(held: number)
+				if ctx then
+					ctx.TouchCrouchHeld = false
+					if held < 0.4 then
+						travPress("Crouch")
+					end
+				end
+			end,
+			CrouchHold = function()
+				travPress("Crawl")
+			end,
+			Leap = function()
+				travPress("Leap")
 			end,
 		})
 	end)

@@ -1,9 +1,11 @@
 # Overkill
 
-- `Overkill_overhaul_v75.rbxl` - **the latest place. Open this one in Roblox Studio.**
+- `Overkill_overhaul_v76.rbxl` - **the latest place. Open this one in Roblox Studio.**
+- `Overkill_overhaul_v75.rbxl` - the build before it (v76 was built from v75 with the Advanced Movement
+  System imported into its Workspace).
 - `Overkill_overhaul_v74.rbxl` - the build v75 was made from.
 - `Overkill_premium_polish_v30.rbxlx` .. `v33.rbxlx` - older builds.
-- `src/` - every script in v75, extracted as plain Luau (file name = its path in the game tree;
+- `src/` - every script in v76, extracted as plain Luau (file name = its path in the game tree;
   `src/_manifest.tsv` lists each file's class and path).
 - `tools/rbxtool` - reads and writes binary places. Build it with
   `cargo build --release --manifest-path tools/rbxtool/Cargo.toml`, then:
@@ -11,37 +13,169 @@
   ```
   rbxtool dump  <place.rbxl> <dir>              # every script into <dir>
   rbxtool tree  <place.rbxl> <out.txt> [full]   # the whole game tree (full: with properties)
-  rbxtool build <in.rbxl> src <out.rbxl> [--adds f] [--graft f] [--set f]
+  rbxtool kfs   <place.rbxl> <out.lua>          # every KeyframeSequence (poses, markers) as a Lua table
+  rbxtool build <in.rbxl> src <out.rbxl> [--adds f] [--graft f] [--set f] [--move f] [--delete f]
   ```
 
   `build` writes `src/` back into a place (only the scripts that changed) and checks the result
-  reads back exactly what `src/` holds. v75 was built with:
+  reads back exactly what `src/` holds. v76 was built from the v75 place with the movement pack in it:
 
   ```
-  rbxtool build Overkill_overhaul_v74.rbxl src Overkill_overhaul_v75.rbxl \
-      --adds tools/v75_adds.tsv --graft tools/v75_graft.tsv --set tools/v75_set.tsv
+  rbxtool build Overkill_overhaul_v75_movement.rbxl src Overkill_overhaul_v76.rbxl \
+      --adds tools/v76_adds.tsv --graft tools/v76_graft.tsv --move tools/v76_move.tsv --delete tools/v76_delete.tsv
   ```
 
-  (`--adds`: new scripts; `--graft`: effects copied out of the place's own VFX packs into
-  `ReplicatedStorage.Combat.VFX`; `--set`: property changes, e.g. switching scripts off.)
+  (`--adds`: new scripts; `--graft`: effects copied out of the place's own packs into
+  `ReplicatedStorage.Combat.VFX`; `--move`: instances re-parented; `--delete`: instances removed; the
+  lists name instances by their line in `rbxtool tree` of the input place.)
 - `tools/tests` - the combat's client and server modules run outside Studio on a small stand-in for
-  the engine (`rbxmock.lua`). Build the runner with
-  `cargo build --release --manifest-path tools/luau/Cargo.toml`, then:
+  the engine (`rbxmock.lua`: a floor, walls, a ledge, platforms with a crack, Terrain hills, a pond).
+  Build the runner with `cargo build --release --manifest-path tools/luau/Cargo.toml`, then:
 
   ```
-  tools/luau/target/release/luaurun tools/tests/blood_test.lua .       # every blood profile, wounds, walls, budgets, cleanup
+  tools/luau/target/release/luaurun tools/tests/traversal_test.lua .   # the ten moves x eight body states, limbs lost mid-move, the fight, exploits
+  tools/luau/target/release/luaurun tools/tests/blood_test.lua .       # every blood profile, spray vs pools, walls, water, wounds, budgets, cleanup
+  tools/luau/target/release/luaurun tools/tests/fluid_test.lua .       # the liquid on Terrain: hollows, slopes, cliffs, cracks, ledges, water, grass
   tools/luau/target/release/luaurun tools/tests/gore_test.lua .        # arms torn off, head burst, bleeding, drips
   tools/luau/target/release/luaurun tools/tests/server_test.lua .      # CombatService: a full string between two NPCs
   tools/luau/target/release/luaurun tools/tests/pool_shape_test.lua .  # prints the pools as text
   tools/luau/target/release/luaucheck src/*.lua                        # every script compiles
   ```
 
-  They check that the code runs (no errors, budgets kept, everything cleaned up) - not how it looks.
-- `tools/build_place.py` - the old tool for the `.rbxlx` builds.
+  They check that the code runs and does what it should (no errors, the right moves allowed and
+  refused, budgets kept, everything cleaned up) - not how it looks.
 
-## What changed in v75
+## What changed in v76
 
-### Blood: one system instead of loose effects
+### Movement: ten moves from the Advanced Movement System, rebuilt inside the fight
+
+Only these ten were taken from the pack - **crouch, crawl, slide, slide cancel, vault, ledge vault,
+wall climb, wall run, double jump, leap** - and rebuilt inside the game's own systems
+(`ReplicatedStorage.Combat.Traversal`). The fight's client drives it every frame, its animation
+controller plays the clips (the pack's own animations, by id: `Config.Anim`), the fight's mover
+carries the slide and the leap. Nothing else of the pack is in the game: its sprint, dash,
+wall jump, sitting, spinning/gliding, swinging, ziplines, hard-landing roll, footstep sounds, camera
+module fork, input scripts, hotbar, mobile buttons, freecam, bone physics and networking library were
+all deleted with it (see below), so no key, button, touch control or leftover script can reach them.
+
+| move | how | needs |
+| --- | --- | --- |
+| crouch | C (gamepad R3, touch CROUCH tap) - toggles | both legs |
+| slide | the crouch key while running | both legs |
+| slide cancel | jump in a slide: a hop that keeps the slide's speed | both legs |
+| crawl | X (gamepad D-pad down, touch CROUCH hold) - toggles | both arms (the clip pulls the body hand over hand) |
+| leap | R (gamepad RB, touch LEAP), from the ground | both legs |
+| double jump | jump in the air, once each time off the ground | both legs |
+| vault | by itself: run at something hip to chest high - over it, or onto it if it's deep | one hand on it + both legs |
+| wall climb | by itself: jump at (or run into) a wall taller than a vault, holding forward | both arms + both legs |
+| ledge vault | at the top of a climb: over the edge onto it | one hand + both legs |
+| wall run | by itself: in the air after a jump, going fast along a wall beside you | both legs |
+
+The keys were picked after going through every existing control: Ctrl (the pack's slide) is shift
+lock, F (the pack's leap) is block, E is interact - the new keys C, X and R were free, and all three can
+be rebound in Settings > Keybinds (a new MOVEMENT section). Leap, double jump and slide cancel + M1 is
+the Ground Smash, like a jump.
+
+**The body decides.** What a move needs was taken from the clips themselves - each one's keyframes were
+run through the R6 rig to see where the hands and feet really go: the two vault clips each plant ONE
+hand on the obstacle (Vault_1 the left, Vault_2 the right), the crawl pulls with both hands, the climb
+uses all four limbs, the slide rides on the legs and hip (the right hand only brushes the ground).
+`BodyState` reads what a body still has straight off the dismemberment's own record (the gore stage the
+server keeps and the limb parts it hides) - one read a frame, no copy of it anywhere. So:
+
+- a move a body can't do isn't started - no invisible hand ever grips a ledge or a wall, a legless
+  body never jumps twice or leaps; a one-armed fighter vaults on the hand it still has (the clip for
+  that hand), a fighter with no arms can't vault, climb or crawl at all
+- a limb lost mid-move ends it on the spot, in the same frame the gore stage changes: off the wall
+  with the speed it had (never left floating or stuck to it), out of the vault into a fall, the slide
+  let go, the crawl stood up out of - its clip faded out, nothing left running
+- no chain of inputs gets round it (crouch -> slide -> cancel, wall run -> jump, crouch -> crawl): every
+  press and every frame asks the body again. The server checks every move against the body it knows
+  and refuses one that doesn't fit (the client then ends it)
+
+**The fight decides.** A move starts only while the fighter is free. A blow, stun, guard break,
+knockdown or death ends every move at once and the fight takes the body; a strike, dash or guard from a
+crouch or crawl stands up first, out of a slide or a wall run lets go (keeping the speed); on a wall or
+mid-vault the hands are busy - no strike, dash or guard. The camera sinks with the head in a crouch or
+crawl (and always comes back up); the leap and landings kick it through the combat camera, so nothing
+- FOV, offset, tilt - is ever left changed. Crouching and crawling keep the standing collision box (an
+R6 body can't be shrunk safely), so nothing ever gets wedged; a crouch or crawl only stands up where
+there's room.
+
+The effects are the pack's (copied into `ReplicatedStorage.Combat.VFX`: SlideDust, DustCloud, AirJump,
+AirJumpLines, LeapBurst, LandDust), played at the feet and the root - never on a limb - with the dust
+tinted to the ground it rises from; everyone sees them through the server. Like the combat, the moves
+make no sound.
+
+### Blood: spray that sprays, pools that pool, and it all moves with the body
+
+The amount of blood is the same as v75's. What changed is how it looks and behaves:
+
+- **Spray vs pools.** Small drops are spray: where they strike - floor, walls, anything solid, never a
+  fighter - they leave spatter shaped like real bloodstains: as wide as the drop spreads (wider the
+  faster it came), stretched along its travel to 1 / sin of the angle it came in at, with a thin tail
+  thrown on past it when it came in low. Spray only joins a pool it lands in. Only real volume - heavy
+  drops, a wound's steady bleeding - pools on the floor or runs down a wall. In the air, spray flies as
+  thin streaks, not beads.
+- **A severed limb bleeds like one.** Each heartbeat's spurt is a coherent stream of small drops along
+  the jet (the same blood as before, in more, smaller drops), and the jet follows the wound's
+  orientation every frame - a body flipping over a vault or thrown through the air swings its jet with
+  it. Every wound's blood leaves with the wound's own measured motion (its run, spin, tumble and the
+  clip swinging the stump), so blood from a leaping, wall-running or vaulting body keeps its momentum
+  and falls away from it naturally, never hanging in the air or glued to the body.
+- **Moves and blood.** A bleeding body that crawls, slides or is thrown along the ground drags one
+  continuous streak of blood with it (poured into the same liquid - never a row of stamps); a bleeding
+  body landing hard from a move jolts a little blood out.
+- **No more bubbles.** The lighter circles in the pools are gone: one constant dark red (it never dries
+  to another shade), no wet sheen, and every pool piece is a flat disc, so pieces that overlap read as
+  one smooth surface with only the darker rim round the outside.
+- **The world.** The ground is a height field that follows floors, stairs and Terrain: blood runs
+  downhill, gathers in dips, seeps through cracks, pours off ledges, trickles down cliffs, soaks into
+  grass/sand/dirt/fabric, stays on plastic/metal/glass; falling into water it clouds in it. It reacts
+  as it lands - the liquid now runs at 30 Hz and a splash spreads in 0.13 s.
+- **Dismemberment moments.** A limb torn off near you throws the camera with the blow and pushes in on
+  it (the head burst already did).
+
+### The lag: 7.6 MB of showcase assets gone
+
+The asset packs parked under the map in the Workspace (VFX showcases, wing rigs, weapon meshes) kept
+**4,194 particle emitters running all the time** - one pack alone asked for ~236 million particles a
+second - plus 739 beams, 39 lights and ~16,000 parts, much of it inside the 1,024-stud streaming range.
+Nothing in the game used them at runtime. The effects the game plays had already been copied out
+(`ReplicatedStorage.Combat.VFX`); the packs are deleted. The place went from 7.6 MB to about 2 MB;
+the Workspace now holds the map and nothing else (86 emitters - the fountain and the crater).
+
+The movement pack's own map and its **7 enabled neutral SpawnLocations** (players could spawn in it,
+1,000 studs underground) are deleted with it, and so is its server script, which errored on every
+server start. The rigs holding the ten moves' clips are kept in `ServerStorage.MovementAnimations`
+(their sources, to re-publish them from if ever needed - see below); the rigs and clips of the moves
+the game doesn't have (dashes, sitting, zipline, swing, spin, wall jumps, its run / walk / idle set)
+are deleted.
+
+### Deleted: unused code
+
+- the movement pack: every script, UI, effect and its map (only its clips and the effects above are
+  used, copied into the game's own places)
+- the 32 demo scripts of the Workspace showcase packs and a pack's READ_ME script (with the packs)
+- `Kit.bevel` (an empty, invisible frame - 17 calls), `Shatter.Preview` (Studio-only), `Blood.Burst`,
+  `Pools.Clear`, and exports nothing read (`Gore.Bodies`, `FX.GroundHit`, `States.Rules`,
+  `States.Control`, `HD.RawPaths`, `HD.SurfacePoint`, `HD.SegmentBox`, `Motion.BRAKE`,
+  `Ragdoll.Joints`, `Theme.HUD_GROUP_GAP`); unused locals and parameters; an empty branch and a
+  duplicated one
+- `tools/build_place.py` (the old `.rbxlx` tool)
+
+### If a movement clip doesn't play
+
+The traversal clips are the movement pack's own animation ids (`Config.Anim`: CrouchIdle ...
+WallRunRight). Roblox only plays an animation in a game its owner may use it in; if one doesn't play
+in your game, publish it from its rig in `ServerStorage.MovementAnimations` (Animation Editor ->
+Publish) and put the new id in `Config.Anim`.
+
+## Older builds
+
+### What changed in v75
+
+#### Blood: one system instead of loose effects
 
 **Every kind of blow bleeds its own way.** The blood of a blow comes from its profile
 (`Config.Blood.Profiles`): the straights, the hook, the uppercut, the dash strike, the Ground Smash,
@@ -102,7 +236,7 @@ blow). Nothing is built out of the camera's reach.
 Tuning lives in `Config.Blood` (profiles, `Wound` for the heartbeat, `Pool` for the ground) and
 `Config.Gore` (`BleedTime`, `DripTime`, `DripFrom`, `DripRate`).
 
-### The place's own blood effects
+#### The place's own blood effects
 
 No new effects were made. 13 effects were copied out of the blood packs already in the Workspace
 into `ReplicatedStorage.Combat.VFX` (their emitters untouched, switched off, with emit counts):
@@ -126,13 +260,13 @@ into `ReplicatedStorage.Combat.VFX` (their emitters untouched, switched off, wit
 and takes more options (speed, spread, lifetime, gravity, velocity inheritance, delay, sprites
 facing the camera).
 
-### Health and regen
+#### Health and regen
 
 The health bar over a player now shows the health their regen reserve will still give back: a
 faint teal stretch past the fill. It is dim while the fight is on, clearer as the regen delay runs
 out, and breathes with the heart while it heals, the fill growing into it.
 
-### Combat and animation
+#### Combat and animation
 
 - A hit reaction no longer runs out and snaps back to the stance in the middle of a stun when a
   second blow lands without restarting it (players and NPCs). A reaction clip that is started again
@@ -143,15 +277,13 @@ out, and breathes with the heart while it heals, the fill growing into it.
   fades out. Their strike clips fade out at the end instead of popping back to the idle pose.
 - A body knocked down again and again no longer collects dead connections.
 
-### Optimization
+#### Optimization
 
 The 32 demo scripts inside the VFX showcase packs in the Workspace are switched off. They ran on the
 live server forever: Hollow Purple's two scripts created about 26 parts a second (20 of them loose
 physics debris), and the "Grow", spin and shield scripts rewrote parts' orientation and transparency
 every frame - all of it replicated to every player. The packs themselves are untouched and still in
-the Workspace to browse (the list is `tools/v75_set.tsv`).
-
-## Older builds
+the Workspace to browse (the list was `tools/v75_set.tsv`; v76 deletes the packs).
 
 (v34 - v74 were made outside this repository; v74 is the place v75 was built from.)
 

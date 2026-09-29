@@ -24,7 +24,7 @@ local EFFECTS = {
 	BloodGush = { "Drops", "Puffs" }, BloodBleed = { "Drops" }, BloodDrip = { "Drops" },
 	BloodSplatter = { "Puffs", "Drops" }, BloodSplatterWild = { "Puffs", "Drops" }, BloodStrand = { "Strands" },
 	BloodSplash = { "Splash" }, BloodBurst = { "Cloud", "Drops", "Haze" }, BloodPunch = { "Splat", "SplatBig" },
-	BloodSpatter = { "Flat", "Drops" },
+	BloodSpatter = { "Flat", "Drops" }, BloodDisperse = { "Bloom", "Cloud" },
 }
 for name, emitters in pairs(EFFECTS) do
 	local a = Instance.new("Attachment")
@@ -75,10 +75,78 @@ Blood.Spray(torso.Position, Vector3.new(0, 0, -1), "Body", dummy, 1)
 Blood.Spray(torso.Position, Vector3.new(0, 0, -1), "NoSuchProfile", nil, nil)
 M.run(3)
 local st = Pools.Stats()
-print(string.format("   cells %d sheets %d specks %d parts %d gloss %d  emitted %d  rays %d", st.Cells, st.Sheets, st.Specks, st.Parts, st.Gloss, M.Emitted or 0, M.Rays))
+print(string.format("   cells %d walls %d specks %d parts %d  emitted %d  rays %d", st.Cells, st.Walls, st.Specks, st.Parts, M.Emitted or 0, M.Rays))
 check(st.Cells > 20, "blood pooled on the floor")
 check(st.Cells <= Config.Blood.Pool.MaxCells, "within the cell budget")
 check((M.Emitted or 0) > 0, "the place's effects played")
+check((M.Warnings or 0) == 0, "no warnings")
+
+---------------------------------------------------------------------------
+print("-- spray against a wall sticks as spatter; only real volume runs or pools")
+-- (the specks on the wall's face, x = 10: the floor's are recycled onto it once the budget is full,
+-- so the total alone says nothing)
+local function wallSpecks(): number
+	local n = 0
+	for _, c in ipairs(workspace.CombatBlood:GetChildren()) do
+		if c:IsA("BasePart") and math.abs(c.CFrame.Position.X - 10) < 0.2 and c.CFrame.Position.Y > 0.2 then
+			n += 1
+		end
+	end
+	return n
+end
+local specks0 = wallSpecks()
+local walls0 = Pools.Stats().Walls
+-- (a fine speck is mist: it carries a couple of studs, so this is spray from right beside the wall)
+for _ = 1, 24 do
+	Blood.Launch(Vector3.new(7.5, 3, math.random() * 4 - 2), Vector3.new(26, math.random() * 4 - 2, 0), 0.045, "Fine")
+end
+M.run(0.6)
+local st1 = Pools.Stats()
+check(wallSpecks() > specks0 + 6, "fine spray on the wall leaves spatter (" .. (wallSpecks() - specks0) .. " specks)")
+check(st1.Specks <= Config.Blood.Pool.MaxSpecks, "...within the speck budget")
+check(st1.Walls == walls0, "...and no running blood from spray alone")
+for _ = 1, 10 do
+	Blood.Launch(Vector3.new(6, 3, math.random() * 2 - 1), Vector3.new(24, 1, 0), 0.14, "Blob")
+end
+M.run(0.6)
+check(Pools.Stats().Walls > walls0, "heavy drops on the wall run down it")
+-- spray on the floor: spatter, not pool cells (unless it lands in a pool)
+local cells0 = Pools.Stats().Cells
+for _ = 1, 20 do
+	Blood.Launch(Vector3.new(-3 + math.random(), 2, -12 + math.random()), Vector3.new(0, -14, -9), 0.045, "Fine")
+end
+M.run(0.8)
+check(Pools.Stats().Cells <= cells0 + 1, "spray on bare floor is spatter, not a pool")
+-- a body dragging itself along leaves one streak
+local dragBody = M.r6("Dragger", Vector3.new(-8, 0.9, -18))
+Blood.Ignore(dragBody)
+for _ = 1, 120 do
+	for _, p in ipairs(dragBody:GetChildren()) do
+		if p:IsA("BasePart") then
+			p.CFrame = p.CFrame + Vector3.new(0, 0, 0.05)
+		end
+	end
+	dragBody.Torso.CFrame = CFrame.new(dragBody.Torso.Position.X, 0.55, dragBody.Torso.Position.Z) * CFrame.Angles(-math.pi / 2, 0, 0)
+	dragBody.Torso.AssemblyLinearVelocity = Vector3.new(0, 0, 3)
+	Blood.Drag(dragBody, 1 / 60, 1)
+	M.step(1 / 60)
+end
+M.run(0.4)
+check(Pools.Stats().Cells > cells0 + 3, "a bleeding body dragged along the floor leaves a streak")
+dragBody:Destroy()
+
+---------------------------------------------------------------------------
+print("-- blood into the pond clouds in the water; fast drops throw off tiny ones")
+local disp0 = (M.EmitsBy or {})["BloodDisperse/Cloud"] or 0
+for _ = 1, 12 do
+	Blood.Launch(Vector3.new(-7, 3, 16), Vector3.new(0, -8, 0), 0.12, "Blob")
+	M.run(0.4)
+end
+check(((M.EmitsBy or {})["BloodDisperse/Cloud"] or 0) > disp0, "the water took the blood in (BloodDisperse)")
+for _ = 1, 20 do
+	Blood.Launch(Vector3.new(4, 2, -4), Vector3.new(18, -14, 0), 0.13, "Drop")
+end
+M.run(2)
 check((M.Warnings or 0) == 0, "no warnings")
 
 ---------------------------------------------------------------------------
@@ -160,10 +228,9 @@ for _ = 1, 40 do
 end
 M.run(3)
 local st3 = Pools.Stats()
-print(string.format("   cells %d sheets %d specks %d parts %d gloss %d", st3.Cells, st3.Sheets, st3.Specks, st3.Parts, st3.Gloss))
+print(string.format("   cells %d walls %d specks %d parts %d", st3.Cells, st3.Walls, st3.Specks, st3.Parts))
 check(st3.Cells <= Config.Blood.Pool.MaxCells, "cells stay within MaxCells")
 check(st3.Specks <= Config.Blood.Pool.MaxSpecks, "specks stay within MaxSpecks")
-check(st3.Gloss <= Config.Blood.Pool.MaxGloss, "sheen within MaxGloss")
 local drops = 0
 for _, c in ipairs(workspace.CombatBlood:GetChildren()) do
 	if c.Name == "BloodDrop" then
@@ -173,11 +240,25 @@ end
 check(drops <= Config.Blood.MaxDrops, "droplets within MaxDrops (" .. drops .. ")")
 
 ---------------------------------------------------------------------------
+print("-- one colour: every drop and pool piece in view is Config.Blood.Color (the edge Config.Blood.Pool.Rim)")
+local off = 0
+for _, c in ipairs(workspace.CombatBlood:GetChildren()) do
+	if c:IsA("BasePart") and c.CFrame.Position.Y > -1000 then
+		local col = c.Color
+		if not (col == Config.Blood.Color or col == Config.Blood.Pool.Rim) then
+			off += 1
+		end
+		if c.Reflectance ~= 0 then
+			off += 1
+		end
+	end
+end
+check(off == 0, "no other shade, no shine (" .. off .. " off)")
 print("-- everything soaks away and the steppers stop")
 h.Stop()
 M.run(Config.Blood.Pool.Life + Config.Blood.Pool.Fade + 30, 1 / 20)
 local st4 = Pools.Stats()
-print(string.format("   cells %d sheets %d specks %d  heartbeat conns %d  pending tasks %d", st4.Cells, st4.Sheets, st4.Specks, M.heartbeatConns(), M.pendingTasks()))
+print(string.format("   cells %d walls %d specks %d  heartbeat conns %d  pending tasks %d", st4.Cells, st4.Walls, st4.Specks, M.heartbeatConns(), M.pendingTasks()))
 check(st4.Cells == 0, "every pool soaked away")
 check(st4.Specks == 0, "every speck gone")
 check(M.heartbeatConns() == 0, "no Heartbeat connection left running")

@@ -297,7 +297,6 @@ return function(ctx: any)
 		Kit.gradient(wash, tint, deep, 90, 0.45, 1)
 		local vignette = new("Frame", { Name = "Vignette", BackgroundColor3 = C.Night, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0.45, 0), ZIndex = 5, Parent = skin })
 		Kit.gradient(vignette, C.Night, C.Night, 90, 1, 0.3)
-		Kit.bevel(plate, 24, 4, 6)
 
 		local AV = math.floor(w * 0.58)
 		local avGlow = Kit.image({
@@ -534,7 +533,6 @@ return function(ctx: any)
 		Gradient = { Kit.lighten(C.Green, 0.08), C.GreenDeep },
 	})
 	acceptedPlate.Visible = false
-	Kit.bevel(acceptedPlate, 26, 4, 21)
 	local acceptedScale = Kit.fx(acceptedPlate)
 	local acceptedRow = new("Frame", { Name = "Row", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 22, Parent = acceptedPlate })
 	Kit.list(acceptedRow, Enum.FillDirection.Horizontal, 10, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
@@ -569,7 +567,6 @@ return function(ctx: any)
 		Gradient = { Kit.lighten(C.Gold, 0.1), C.GoldDeep },
 	})
 	countPlate.Visible = false
-	Kit.bevel(countPlate, 28, 4, 21)
 	local countScale = Kit.fx(countPlate)
 	local countRow = new("Frame", { Name = "Row", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 22, Parent = countPlate })
 	Kit.list(countRow, Enum.FillDirection.Horizontal, 16, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
@@ -607,7 +604,6 @@ return function(ctx: any)
 		ZIndex = 20,
 		Gradient = { C.Navy700, C.Night },
 	})
-	Kit.bevel(readyPlate, 22, 4, 20)
 	local readyScale = Kit.fx(readyPlate)
 	local readyNum = Kit.text({
 		Name = "Count",
@@ -836,7 +832,6 @@ return function(ctx: any)
 	Kit.stripes(cancelSkin, C.Rim, 0.955, 50)
 	local cancelWash = new("Frame", { Name = "Wash", BackgroundColor3 = C.Red, Size = UDim2.new(1, 0, 0.6, 0), ZIndex = 50, Parent = cancelSkin })
 	Kit.gradient(cancelWash, C.Red, C.RedDeep, 90, 0.72, 1)
-	Kit.bevel(cancelPlate, 28, 7, 51)
 	-- the shared close tile (not clickable here), with a tight burst behind it that stays clear of the text
 	local cancelRays = Kit.rays(cancelPlate, C.Red, 156, 0.5, 51)
 	cancelRays.Position = UDim2.new(0.5, 0, 0, 0)

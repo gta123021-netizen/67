@@ -1,0 +1,4 @@
+# Moved (L<line> = tree line of the input place \t new parent \t new name)
+# the Advanced Movement System's animation rigs (KeyframeSequences): the source of the traversal clips, kept
+# beside the combat pack's (ServerStorage.BattlegroundAnimPack) to re-publish them from if ever needed
+L71907	ServerStorage	MovementAnimations

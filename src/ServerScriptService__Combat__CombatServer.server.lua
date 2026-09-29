@@ -11,6 +11,10 @@
 	  "Hit"   { Seq, V, T0, T1, AP, AL, VP, VL, VS } strike Seq met body V on this client's screen on
 	                                   that frame (CombatService.ClaimHit verifies it before it lands)
 	  "Whiff" { Seq }                 strike Seq's active frames ended on this screen touching nobody
+	  "Move"  { K, D?, T?, H?, S? }   a traversal move this client started (Traversal): checked against
+	                                   the body the server knows (BodyState) and the fighter's state, then
+	                                   passed on to every other client for its effects - or refused
+	                                   ("Move" { K, Denied }), and the client ends it
 	The server answers the sender with CombatEvent("Ack", { Seq, Kind, Ok, Action, Slot, Chain }) so the
 	client can keep (or roll back) what it started playing. Requests are rate limited and type-checked;
 	damage, stun, knockback, cooldowns and timing are never taken from the client, and a claimed hit
@@ -26,6 +30,7 @@ local Config = require(CombatFolder:WaitForChild("CombatConfig"))
 local Request = CombatFolder:WaitForChild("CombatRequest") :: RemoteEvent
 local Event = CombatFolder:WaitForChild("CombatEvent") :: RemoteEvent
 local Service = require(script.Parent:WaitForChild("CombatService"))
+local BodyState = require(CombatFolder:WaitForChild("BodyState"))
 
 ---------------------------------------------------------------------------
 -- players
@@ -86,6 +91,45 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 local DIRS = { Forward = true, Backward = true, Left = true, Right = true }
+
+-- the traversal moves a client may report (Config.Traversal.Needs), and Land (after any of them)
+local HELD = { Stunned = true, GuardBroken = true, Ragdolled = true, Dead = true }
+local MOVES = { Slide = true, SlideCancel = true, Vault = true, LedgeVault = true, Climb = true, WallRun = true, DoubleJump = true, Leap = true, Land = true }
+local function onMove(player: Player, char: Model, payload: any)
+	local kind = payload.K
+	if type(kind) ~= "string" or not MOVES[kind] then
+		return
+	end
+	local ent = Service.Get(char)
+	local ok = ent ~= nil
+	if ok and kind ~= "Land" then
+		-- the body the server knows has to be able to do it, and the fighter must not be held by the fight
+		-- (stunned, guard broken, down or dead). The server's state trails the client's by the round trip
+		-- (a combo window it has just closed, a dash it has just ended), so only those refuse it
+		local can = BodyState.Can(BodyState.Of(char), kind)
+		ok = can and not HELD[ent.State]
+	end
+	if not ok then
+		if kind ~= "Land" then
+			Event:FireClient(player, "Move", { K = kind, Denied = true })
+		end
+		return
+	end
+	local d = payload.D
+	local info = {
+		C = char,
+		K = kind,
+		D = if typeof(d) == "Vector3" and d == d and d.Magnitude < 1e4 then d else nil,
+		T = if type(payload.T) == "number" and payload.T == payload.T then math.clamp(payload.T, 0, 2) else nil,
+		S = if type(payload.S) == "number" and payload.S == payload.S then math.clamp(payload.S, -200, 200) else nil,
+		Hard = kind == "Land" and type(payload.S) == "number" and payload.S >= Config.Traversal.HardLanding,
+	}
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player then
+			Event:FireClient(other, "Move", info)
+		end
+	end
+end
 
 -- position reports, hit claims and whiffs (a few per strike) have their own, separate allowance
 local reportBuckets: { [Player]: { Tokens: number, At: number } } = {}
@@ -158,6 +202,8 @@ Request.OnServerEvent:Connect(function(player: Player, kind: any, payload: any)
 	elseif kind == "Block" then
 		local ok = Service.RequestBlock(char, payload.On == true)
 		Event:FireClient(player, "Ack", { Seq = seq, Kind = "Block", Ok = ok, Action = if payload.On == true then "On" else "Off" })
+	elseif kind == "Move" then
+		onMove(player, char, payload)
 	end
 end)
 

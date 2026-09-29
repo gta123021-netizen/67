@@ -39,8 +39,8 @@
 	        UpVector), Body (the model it bleeds from) }
 	  Blood.Trail(part, delay, time, strength)   drops shed from a moving part (a slide, a launch)
 	  Blood.Splash(pos, strength, normal?)       blood hitting a surface all at once (a limb landing)
+	  Blood.Drag(body, dt, bleed)                a bleeding body dragged along the ground (a streak)
 	  Blood.Effect(name, pos, dir, opts?)        one of the place's effects (CombatVFX.Play options)
-	  Blood.Burst(pos, dir, name, scale?, count?)   the same, the old way
 	  Blood.Launch(pos, vel, size, kind?)        one droplet ("Fine" | "Drop" | "Blob")
 	  Blood.Cone(dir, deg) / Blood.Ignore(body)
 
@@ -90,7 +90,10 @@ local DROP_LIFE = 2.4 -- a drop that has met nothing by then (off a cliff) is go
 local SUBSTEP = 1 / 30 -- (the longest chord one ray covers)
 local G = Vector3.new(0, -workspace.Gravity, 0)
 local PARK = CFrame.new(0, -5000, 0)
-local WET = B.Color
+-- ONE COLOUR. All the blood is the same dark red from the moment it leaves the body - the drops, their
+-- streaks, the place's effects (tinted to it) and the pools - never brighter, never drying
+local RED = B.Color
+local RED_SEQ = ColorSequence.new(RED)
 
 local function rand(a: number, b: number): number
 	return a + math.random() * (b - a)
@@ -239,8 +242,8 @@ local function newDrop(): Drop
 	p.CanTouch = false
 	p.CastShadow = false
 	p.Material = Enum.Material.SmoothPlastic
-	p.Reflectance = 0.15 -- (a wet shine)
-	p.Color = WET
+	p.Reflectance = 0
+	p.Color = RED
 	p.Size = Vector3.new(0.12, 0.12, 0.2)
 	p.CFrame = PARK
 	local m = Instance.new("SpecialMesh")
@@ -253,7 +256,7 @@ local function newDrop(): Drop
 	tr.FaceCamera = true
 	tr.Lifetime = 0.09
 	tr.MinLength = 0.02
-	tr.Color = ColorSequence.new(WET, B.Pool.Fresh)
+	tr.Color = RED_SEQ
 	tr.Transparency = STREAK_T
 	tr.WidthScale = STREAK_W
 	tr.LightInfluence = 1
@@ -329,7 +332,39 @@ local function landingSplash(hit: RaycastResult, d: Drop)
 	end
 	splashBudget -= 1
 	local sc = math.clamp(d.Size * 1.6 + speed * 0.008, 0.18, 0.42)
-	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = sc, Life = rand(0.7, 1) })
+	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = sc, Life = rand(0.7, 1), Color = RED_SEQ })
+end
+
+-- a fast drop smacking into something breaks up: the crown of its splash throws a few tiny ones back
+-- off the surface, on along the way it was going (while there is room in the air for them)
+local liveDrops = 0
+local function satellites(hit: RaycastResult, d: Drop)
+	local speed = d.Vel.Magnitude
+	if d.Size < 0.075 or speed < 11 or liveDrops > MAX_DROPS * 0.7 then
+		return
+	end
+	local n = hit.Normal
+	local along = d.Vel - n * d.Vel:Dot(n)
+	for _ = 1, math.random(0, math.min(3, math.floor(speed / 9))) do
+		local out = n * rand(1.5, 4.5) + along * rand(0.15, 0.4) + Vector3.new(rand(-1.5, 1.5), 0, rand(-1.5, 1.5))
+		Blood.Launch(hit.Position + n * 0.04, out, d.Size * rand(0.22, 0.38), "Fine")
+	end
+end
+
+-- blood falling into water clouds in it and spreads (the pack's spreading pool, lying on the water)
+local disperseAt = 0
+local disperseBudget = 0
+local function disperse(hit: RaycastResult, d: Drop)
+	local now = os.clock()
+	disperseBudget = math.min(3, disperseBudget + (now - disperseAt) * 3)
+	disperseAt = now
+	if d.Size < 0.06 or disperseBudget < 1 then
+		return
+	end
+	disperseBudget -= 1
+	VFX.Play("BloodDisperse", VFX.Along(hit.Position + Vector3.new(0, 0.03, 0), Vector3.yAxis), {
+		Scale = math.clamp(d.Size * 2.8 * d.Weight, 0.2, 0.75), Life = rand(1.6, 2.6), Color = RED_SEQ,
+	})
 end
 
 ---------------------------------------------------------------------------
@@ -352,6 +387,8 @@ type Wound = {
 	WobY: number,
 	DripAcc: number,
 	ShedAcc: number,
+	LastPos: Vector3?,
+	Vel: Vector3?, -- (the wound's own measured velocity: see woundVel)
 	Done: boolean,
 }
 type TrailTask = { Part: BasePart, T0: number, Delay: number, Time: number, Str: number, Acc: number }
@@ -368,10 +405,19 @@ local function wake()
 	end
 end
 
+-- (drops launched while the drops are being stepped - a splash's bounce, a trickle off a slope -
+-- wait until the step has moved its parts: one reused mid-step would be parked on top)
+local stepping = false
+local deferred: { { any } } = {}
+
 -- one droplet. kind: "Fine" (a speck of spray: small, fast, hangs in the air a moment), "Drop",
 -- "Blob" (a heavy one: falls straight through the air, pours a lot where it lands)
 function Blood.Launch(pos: Vector3, vel: Vector3, size: number, kind: string?)
 	if not B.Enabled or not inView(pos) then
+		return
+	end
+	if stepping then
+		table.insert(deferred, { pos, vel, size, kind })
 		return
 	end
 	local d = takeDrop()
@@ -422,13 +468,13 @@ function Blood.Effect(name: string, pos: Vector3, dir: Vector3, opts: any?): Att
 	if not inView(pos) then
 		return nil
 	end
+	if o.Color == nil then
+		o = table.clone(o)
+		o.Color = RED_SEQ
+	end
 	return VFX.Play(name, cf, o)
 end
 local effect = Blood.Effect
-
-function Blood.Burst(pos: Vector3, dir: Vector3, name: string, scale: number?, count: number?)
-	effect(name, pos, dir, { Scale = scale or 1, Count = count or 1 })
-end
 
 -- the wound's way out right now: the way it faces, the whip of the artery, sagging as it empties
 local function woundDir(w: Wound, pressure: number): Vector3
@@ -449,6 +495,21 @@ local function woundDir(w: Wound, pressure: number): Vector3
 	return (d + Vector3.new(0, -sag, 0)).Unit
 end
 
+-- how the wound itself is moving: measured off its own position frame to frame, so it is everything
+-- at once - the body's run, its spin, a ragdoll's tumble AND the clip swinging the stump or the neck
+-- (the physics velocity alone never sees what an animation does to a part). A jump in position (a
+-- teleport, a respawn) is never taken for speed
+local function woundVel(w: Wound, pos: Vector3, dt: number)
+	if w.LastPos and dt > 1e-4 then
+		local v = (pos - w.LastPos) / dt
+		if v.Magnitude > 120 then
+			v = Vector3.zero
+		end
+		w.Vel = if w.Vel then w.Vel:Lerp(v, 0.55) else v
+	end
+	w.LastPos = pos
+end
+
 local function woundPart(w: Wound): BasePart?
 	local p = w.Att.Parent
 	return if p and p:IsA("BasePart") then p else nil
@@ -459,15 +520,16 @@ local function gush(w: Wound, k: number)
 	local pos = w.Att.WorldPosition
 	local part = woundPart(w)
 	local dir = woundDir(w, 1)
-	local carry = pointVelocity(part, pos) * W.Inherit
+	local carry = (w.Vel or pointVelocity(part, pos)) * W.Inherit
 	local s = w.Str * k
 	effect(if math.random() < 0.6 then "BloodGush" else "BloodStream", pos, dir, {
 		Parent = part, Inherit = W.Inherit, Scale = 0.45 + 0.4 * s, Count = 0.35 + 0.5 * s, Speed = rand(0.8, 1.15), Spread = rand(0.6, 1),
 	})
-	for _ = 1, math.floor(3 + 7 * s + math.random() * 2) do
-		local dd = cone(dir, rand(12, 30))
-		local big = math.random() < 0.3
-		launch(pos + dd * 0.12, dd * rand(11, 21) * math.sqrt(s) + carry, if big then rand(0.14, 0.2) else rand(0.07, 0.13), if big then "Blob" else "Drop")
+	-- (the same blood as a burst of many smaller drops and a few heavy ones: a gush, not a volley)
+	for _ = 1, math.floor(5 + 12 * s + math.random() * 3) do
+		local dd = cone(dir, rand(8, 26))
+		local big = math.random() < 0.18
+		launch(pos + dd * 0.12, dd * rand(11, 21) * math.sqrt(s) + carry, if big then rand(0.13, 0.18) else rand(0.055, 0.11), if big then "Blob" else "Drop")
 	end
 end
 
@@ -479,7 +541,7 @@ local function spurt(w: Wound, pressure: number, now: number)
 		return
 	end
 	local dir = woundDir(w, pressure)
-	w.Pulse = { T0 = now, Len = 0.1 + 0.12 * math.min(k, 1.2), K = k, Peak = (6 + 16 * math.sqrt(pressure)) * math.sqrt(w.Str) * rand(0.85, 1.12), Total = math.floor(2 + 8 * k + math.random() * 2), Out = 0, Dir = dir }
+	w.Pulse = { T0 = now, Len = 0.1 + 0.12 * math.min(k, 1.2), K = k, P = pressure, Peak = (6 + 16 * math.sqrt(pressure)) * math.sqrt(w.Str) * rand(0.85, 1.12), Total = math.floor(4 + 15 * k + math.random() * 3), Out = 0, Dir = dir }
 	local pos = w.Att.WorldPosition
 	local part = woundPart(w)
 	if not inView(pos) then
@@ -510,14 +572,20 @@ local function pulseStep(w: Wound, now: number)
 		return
 	end
 	local pos = w.Att.WorldPosition
-	local carry = pointVelocity(woundPart(w), pos) * W.Inherit
+	local carry = (w.Vel or pointVelocity(woundPart(w), pos)) * W.Inherit
 	local env = math.sin(math.pi * math.clamp(u, 0, 1))
-	for _ = 1, math.min(want, 4) do
+	-- the jet leaves the wound the way the wound faces NOW: a body turning, flipping over a vault or
+	-- thrown through the air swings its jet with it mid-spurt (the beat's own whip stays in it)
+	local cur = woundDir(w, p.P or p.K)
+	local dir = (p.Dir * 0.3 + cur * 0.7)
+	dir = if dir.Magnitude > 1e-3 then dir.Unit else cur
+	-- a coherent stream: many small drops close together along the jet, a heavy one now and then
+	for _ = 1, math.min(want, 6) do
 		p.Out += 1
-		local dd = cone(p.Dir, rand(4, 11) + (1 - env) * 10)
-		local speed = p.Peak * (0.5 + 0.5 * env) * rand(0.88, 1.08)
-		local big = math.random() < 0.18
-		launch(pos + dd * 0.1, dd * speed + carry, if big then rand(0.13, 0.18) else rand(0.06, 0.12), if big then "Blob" else "Drop")
+		local dd = cone(dir, rand(2, 7) + (1 - env) * 9)
+		local speed = p.Peak * (0.5 + 0.5 * env) * rand(0.9, 1.06)
+		local big = math.random() < 0.12
+		launch(pos + dd * 0.1, dd * speed + carry, if big then rand(0.11, 0.15) else rand(0.05, 0.095), if big then "Blob" else "Drop")
 	end
 end
 
@@ -532,6 +600,7 @@ local function woundStep(w: Wound, dt: number, now: number, slow: number): boole
 		return false
 	end
 	local pos = att.WorldPosition
+	woundVel(w, pos, dt)
 	local seen = inView(pos)
 	-- the first gushes
 	for i = #w.Gushes, 1, -1 do
@@ -564,7 +633,7 @@ local function woundStep(w: Wound, dt: number, now: number, slow: number): boole
 			w.Squirt = nil
 			if seen then
 				local dir = woundDir(w, pressure * 0.7)
-				local carry = pointVelocity(woundPart(w), pos) * W.Inherit
+				local carry = (w.Vel or pointVelocity(woundPart(w), pos)) * W.Inherit
 				for _ = 1, math.random(1, 3) do
 					local dd = cone(dir, rand(5, 14))
 					launch(pos + dd * 0.08, dd * rand(5, 11) * (0.5 + pressure) + carry, rand(0.05, 0.09), "Drop")
@@ -578,7 +647,7 @@ local function woundStep(w: Wound, dt: number, now: number, slow: number): boole
 	if seen then
 		pulseStep(w, now)
 		local part = woundPart(w)
-		local carry = pointVelocity(part, pos)
+		local carry = w.Vel or pointVelocity(part, pos)
 		-- the dribble: blood running out of the wound and falling from it - pooling under a body that
 		-- stands still, a trail of drips behind one that moves
 		local rate
@@ -677,33 +746,51 @@ function step(dt: number)
 			table.remove(trails, i)
 		end
 	end
+	stepping = true
+	liveDrops = 0
 	for _, d in ipairs(drops) do
 		if d.Live then
 			any = true
+			liveDrops += 1
 			local hit = fly(d, h)
 			if hit or d.Age > DROP_LIFE then
 				d.Live = false
 				d.Trail.Enabled = false
 				if hit then
-					if Pools.Deposit(hit, d.Size, d.Vel, d.Weight) then
+					if hit.Material == Enum.Material.Water then
+						disperse(hit, d)
+					elseif Pools.Deposit(hit, d.Size, d.Vel, d.Weight) then
 						landingSplash(hit, d)
+						satellites(hit, d)
 					end
 				end
 				table.insert(moveParts, d.Part)
 				table.insert(moveCfs, PARK)
 			else
-				-- a bead stretched along its flight (a fast one is a long thin streak)
+				-- a bead stretched along its flight: a fast one is a long thin streak, and spray is thinner
+				-- and longer still - a spray reads as a spray of streaks, never a volley of pellets
 				local v = d.Vel
 				local speed = v.Magnitude
-				local len = 1 + math.min(speed, 45) * 0.045
-				d.Part.Size = Vector3.new(d.Size, d.Size, d.Size * len)
+				local spray = d.Size < 0.08
+				local thin = if spray then 0.7 else 1
+				local len = 1 + math.min(speed, 45) * (if spray then 0.08 else 0.045)
+				d.Part.Size = Vector3.new(d.Size * thin, d.Size * thin, d.Size * len)
 				table.insert(moveParts, d.Part)
 				table.insert(moveCfs, CFrame.lookAt(d.Pos, d.Pos + (if speed > 0.1 then v else Vector3.yAxis)))
 			end
 		end
 	end
+	stepping = false
 	if #moveParts > 0 then
 		workspace:BulkMoveTo(moveParts, moveCfs, Enum.BulkMoveMode.FireCFrameChanged)
+	end
+	if #deferred > 0 then
+		local list = deferred
+		deferred = {}
+		for _, a in ipairs(list) do
+			launch(a[1], a[2], a[3], a[4])
+		end
+		any = true
 	end
 	if not any and #wounds == 0 and #trails == 0 and #lates == 0 and stepConn then
 		stepConn:Disconnect()
@@ -784,6 +871,36 @@ function Blood.Trail(part: BasePart?, delay: number, time: number, strength: num
 	wake()
 end
 
+-- a bleeding body dragging itself along the ground (crawling, sliding): under its lowest point the
+-- blood smears into the ground's liquid the way it goes (bleed: 0..1+, how much fresh blood it is
+-- losing - CombatGore). A thin continuous streak, a little a frame (no stamps, no drops in the air)
+local SMEAR_AREA = 0.075 -- studs² a second at bleed 1
+function Blood.Drag(body: Model?, dt: number, bleed: number)
+	if not B.Enabled or not body or bleed <= 0.02 then
+		return
+	end
+	local torso = body:FindFirstChild("Torso") or body:FindFirstChild("HumanoidRootPart")
+	if not (torso and torso:IsA("BasePart")) or not inView(torso.Position) then
+		return
+	end
+	refreshFilter()
+	-- (the lowest of the torso's corners: the part of the body on the ground)
+	local cf, half = torso.CFrame, torso.Size * 0.5
+	local low = torso.Position
+	for _, c in ipairs({ Vector3.new(half.X, -half.Y, 0), Vector3.new(-half.X, -half.Y, 0), Vector3.new(0, -half.Y, half.Z), Vector3.new(0, -half.Y, -half.Z), Vector3.new(0, half.Y, 0) }) do
+		local p = cf:PointToWorldSpace(c)
+		if p.Y < low.Y then
+			low = p
+		end
+	end
+	-- (only a body really down on the ground drags blood: its lowest point within a stud of it)
+	local hit = castSolid(low + Vector3.new(0, 0.4, 0), Vector3.new(0, -1.6, 0))
+	if not hit then
+		return
+	end
+	Pools.Smear(hit, SMEAR_AREA * math.min(bleed, 1.5) * dt, torso.AssemblyLinearVelocity)
+end
+
 -- blood hitting a surface all at once under / at `pos` (a torn limb slapping down, a bleeding body
 -- falling): the packs' flat splash on the surface, a wet patch poured into the pool there, a few
 -- drops thrown up out of it
@@ -798,7 +915,7 @@ function Blood.Splash(pos: Vector3, strength: number, normal: Vector3?)
 		return
 	end
 	local s = math.clamp(strength, 0.1, 2)
-	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = 0.3 + 0.3 * s, Life = rand(0.8, 1.1) })
+	VFX.Play("BloodSplash", VFX.Along(hit.Position + hit.Normal * 0.06, hit.Normal), { Scale = 0.3 + 0.3 * s, Life = rand(0.8, 1.1), Color = RED_SEQ })
 	if math.random() < 0.7 then
 		effect("BloodSplatter", hit.Position + hit.Normal * 0.1, hit.Normal, { Scale = 0.25 + 0.2 * s, Count = 0.25 + 0.25 * s, Speed = 0.6, Life = 0.8 })
 	end

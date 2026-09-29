@@ -32,7 +32,6 @@ local JOINTS = {
 	{ Name = "Right Hip", Part0 = "Torso", Part1 = "Right Leg", Cone = 80, Twist = 30, Axis = Vector3.new(0, -1, 0), Friction = 0.08 },
 	{ Name = "Left Hip", Part0 = "Torso", Part1 = "Left Leg", Cone = 80, Twist = 30, Axis = Vector3.new(0, -1, 0), Friction = 0.08 },
 }
-Ragdoll.Joints = JOINTS
 
 local LIMBS = { "Right Arm", "Left Arm", "Right Leg", "Left Leg" }
 
