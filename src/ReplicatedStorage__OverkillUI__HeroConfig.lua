@@ -43,9 +43,9 @@ return {
 				},
 				{
 					Key = "2",
-					Name = "Genesis Nova",
-					Type = "CHARGE",
-					Desc = "Rise high into the sky, gather a colossal sphere overhead and hurl it down at your foe.",
+					Name = "Zenith Onslaught",
+					Type = "LAUNCHER",
+					Desc = "Knock your foe skyward, then chase them down with a point-blank, full-power Kamehameha.",
 				},
 				{
 					Key = "3",
@@ -55,9 +55,9 @@ return {
 				},
 				{
 					Key = "R",
-					Name = "Zenith Onslaught",
+					Name = "Genesis Nova",
 					Type = "ULTIMATE",
-					Desc = "A cinematic barrage of blinding strikes. Every hit lands, and they feel every one.",
+					Desc = "Soar into the sky, gather a colossal sphere of energy overhead and bring it crashing down.",
 				},
 			},
 		},

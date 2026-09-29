@@ -854,6 +854,7 @@ return function(ctx: any)
 		BEAM = { C.Blue, C.BlueDeep },
 		CHARGE = { C.Purple, C.PurpleDeep },
 		EVADE = { C.Teal, C.TealDeep },
+		LAUNCHER = { C.Pink, C.PinkDeep },
 		ULTIMATE = { C.Red, C.RedDeep },
 	}
 	local moveRows: { any } = {}

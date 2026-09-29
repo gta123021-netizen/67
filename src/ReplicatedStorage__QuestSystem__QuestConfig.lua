@@ -14,7 +14,8 @@ Config.QuestGiver = "Goki"                               -- who you talk to
 Config.PromptDistance = 20                               -- studs, from the podium centre
 Config.TitleHeight = 12                                  -- studs above the podium for the QUESTS sign
 Config.TitleSize = Vector2.new(17, 5)                    -- quieter QUESTS sign above the podium
-Config.CombatEnabled = false -- flip to true once your combat system reports combat stats (see QuestServer)
+Config.CombatEnabled = true -- the combat system (ServerScriptService.Combat) reports Kills, Hits, Damage, Blocks, KillStreak
+Config.UltimatesEnabled = false -- ultimate quests stay hidden until ultimates exist
 
 -- Places that count for "visit" / "spend time at" quests.
 -- Path = workspace path to a model; Folder = every child of that folder is its own spot.
@@ -30,21 +31,13 @@ Config.ZoneVisitCooldown = 45 -- seconds before re-entering the same spot counts
 ---------------------------------------------------------------------------
 Config.Style = {
 	Font = Enum.Font.FredokaOne,
-	SmallFont = Enum.Font.FredokaOne,
 	Text = Color3.fromRGB(255, 255, 255),
 	TextStroke = Color3.fromRGB(3, 5, 8),
 	Highlight = Color3.fromRGB(226, 231, 237),
 	Base = Color3.fromRGB(10, 13, 17),
-	Panel = Color3.fromRGB(13, 17, 22),
 	Edge = Color3.fromRGB(112, 123, 132),
 	Row = Color3.fromRGB(24, 29, 35),
-	RowHover = Color3.fromRGB(46, 53, 60),
 	Track = Color3.fromRGB(9, 12, 15),
-	Muted = Color3.fromRGB(135, 145, 154),
-	Good = Color3.fromRGB(203, 224, 214),
-	GoodLight = Color3.fromRGB(229, 239, 232),
-	Locked = Color3.fromRGB(47, 53, 60),
-	Danger = Color3.fromRGB(168, 81, 81),
 	Gold = Color3.fromRGB(207, 189, 150),
 	Xp = Color3.fromRGB(165, 192, 210),
 	Accent = Color3.fromRGB(235, 239, 242),
@@ -54,13 +47,6 @@ Config.Speakers = {
 	Goki = { Display = "GOKI", Role = "Daily training", Accent = Color3.fromRGB(238, 239, 233) },
 	Naroto = { Display = "NAROTO", Role = "Weekly missions", Accent = Color3.fromRGB(214, 224, 232) },
 	Gojen = { Display = "GOJEN", Role = "Monthly challenges", Accent = Color3.fromRGB(222, 216, 237) },
-}
-
-Config.Sounds = {
-	Blip = "rbxasset://sounds/electronicpingshort.wav",
-	Select = "rbxasset://sounds/clickfast.wav",
-	Hover = "rbxasset://sounds/clickfast.wav",
-	Claim = "rbxasset://sounds/electronicpingshort.wav",
 }
 
 ---------------------------------------------------------------------------
@@ -222,17 +208,11 @@ end
 function Config.GetPool(tierName: string)
 	local out = {}
 	for _, q in ipairs(Config.Quests[tierName]) do
-		if Config.CombatEnabled or not q.Combat then
+		if (Config.CombatEnabled or not q.Combat) and (q.Stat ~= "Ultimates" or Config.UltimatesEnabled) then
 			table.insert(out, q)
 		end
 	end
 	return out
-end
-
-function Config.TierAccent(tierName: string): Color3
-	local tier = Config.Tiers[tierName]
-	local sp = tier and Config.Speakers[tier.Speaker]
-	return (sp and sp.Accent) or Config.Style.Accent
 end
 
 ---------------------------------------------------------------------------

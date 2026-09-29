@@ -6,6 +6,8 @@
 
 	Tool attributes you can set:
 	  amount  (number)  -> shows "x3" on the slot
+
+	(The Ground Smash - jump + M1 - is part of the basic moveset: it has no slot of its own.)
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -236,7 +238,9 @@ return function(ctx: any)
 		Name = "EquippedName",
 		Parent = ctx.Root,
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -164),
+		-- (over the equipped slot's key cap: a slot rises 10 and scales 1.08 when equipped, its cap
+		-- standing 16 over it - 164 put the name on the cap)
+		Position = UDim2.new(0.5, 0, 1, -178),
 		Size = UDim2.fromOffset(0, 44),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Radius = UDim.new(1, 0),
@@ -476,6 +480,11 @@ return function(ctx: any)
 		if tool.Parent == character then
 			humanoid:UnequipTools()
 		elseif tool.Enabled then
+			-- (a tool is held in the right hand: with that arm lost in a fight, nothing is held)
+			local stage = character and character:GetAttribute("GoreStage")
+			if type(stage) == "number" and stage >= 1 then
+				return
+			end
 			humanoid:EquipTool(tool)
 		end
 	end

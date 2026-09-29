@@ -636,7 +636,7 @@ task.spawn(function()
 		warn("[Quests] could not find the crater heroes at", table.concat(Config.HeroesPath, "."))
 		return
 	end
-	local giver = heroes:WaitForChild(Config.QuestGiver, 10)
+	heroes:WaitForChild(Config.QuestGiver, 10)
 	-- podium centre = middle of the three heroes, feet level
 	local sum, n, low = Vector3.zero, 0, math.huge
 	for _, m in ipairs(heroes:GetChildren()) do

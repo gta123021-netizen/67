@@ -131,7 +131,6 @@ return function(ctx: any)
 		local inset = math.max(3, math.floor(size * 0.07))
 		local ringPaint = { Kit.lighten(ring, 0.12), Kit.darken(ring, 0.3), 90 }
 		local holder: GuiObject
-		local ringGrad: UIGradient?
 		local gap = if slot then slot.Gap else 0
 		if slot then
 			holder = Kit.slot({ Parent = parent :: GuiObject, Side = slot.Side, Width = slot.Width or (size + gap * 2), Height = slot.Height or (size + gap * 2), Name = "Avatar", ZIndex = z })
@@ -203,21 +202,14 @@ return function(ctx: any)
 				table.insert(list, spec)
 			end
 		end
-		local _, grads = Kit.edgeStrokes(holder, UDim.new(1, 0), list, z + 2)
-		ringGrad = grads[1]
+		Kit.edgeStrokes(holder, UDim.new(1, 0), list, z + 2)
 		if not slot then
 			-- a free disc: the ink outline half outside its edge as well, like every other outline,
 			-- over the rings (it covers their outer edge whole)
 			Kit.stroke(holder, math.max(2.5, size * 0.045), C.Ink, 0, true)
 			Kit.outlineOnTop(holder, z + 3)
 		end
-		local api = { Frame = holder }
-		function api.SetRing(c: Color3)
-			if ringGrad then
-				ringGrad.Color = ColorSequence.new(Kit.lighten(c, 0.12), Kit.darken(c, 0.3))
-			end
-		end
-		return api
+		return { Frame = holder }
 	end
 
 	-- rounded mode badge: "1V1", "2V2", "FFA" in the mode colour. slot: as for Q.Avatar (the

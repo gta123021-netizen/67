@@ -1,0 +1,1 @@
+-- (empty on purpose: it replaces Roblox's own regen. A player heals only from its regen reserve: CombatService, Config.Regen)

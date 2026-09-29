@@ -3,6 +3,10 @@
 	The bottom-right stack: the "searching" card while you're in a queue, party invites you've
 	received, and the queue-lock chip after a dodged ready check. Cards slide in from the right edge
 	and the stack steps aside while a window or the quest dialogue is open.
+
+	Like the HUD column, every card here has the HUD's one outline (Theme.Hud.Outline, centred on the
+	card's own edge, drawn over everything in it - no offset drop shadow, so it is the same on all
+	four sides) and the stack spaces them Theme.Hud.GroupGap apart.
 ]]
 
 local Players = game:GetService("Players")
@@ -40,7 +44,7 @@ return function(ctx: any)
 		ZIndex = 20,
 		Parent = ctx.Hud,
 	})
-	Kit.list(column, Enum.FillDirection.Vertical, 14, Enum.HorizontalAlignment.Right, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
+	Kit.list(column, Enum.FillDirection.Vertical, Theme.Hud.GroupGap, Enum.HorizontalAlignment.Right, if isTouch then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom)
 
 	-- on phones the stack reads top-down, so the queue card goes first
 	local ORDER_QUEUE = if isTouch then 1 else 100
@@ -95,24 +99,15 @@ return function(ctx: any)
 		end)
 	end
 
-	-- the shared card body: drop shadow, navy plate, clipped skin with stripes and a coloured band
+	-- the shared card body: navy plate, clipped skin with stripes and a coloured band, and the HUD's
+	-- outline on top of it all (the same on every side)
 	local function cardBody(card: Frame, height: number, color: Color3, deep: Color3, z: number)
-		local shadow = new("Frame", {
-			Name = "Shadow",
-			BackgroundColor3 = C.Ink,
-			BackgroundTransparency = 0.5,
-			Position = UDim2.fromOffset(0, 10),
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = z,
-			Parent = card,
-		})
-		Kit.corner(shadow, 30)
 		local plate = Kit.plate({
 			Name = "Plate",
 			Parent = card,
 			Size = UDim2.fromScale(1, 1),
 			Radius = 30,
-			Stroke = 7.5, -- the clipped skin covers the inner half
+			Stroke = Theme.Hud.Outline,
 			ZIndex = z,
 			Gradient = { C.Navy700, C.Navy900 },
 		})
@@ -156,8 +151,9 @@ return function(ctx: any)
 			Parent = skin,
 		})
 		Kit.gradient(vignette, C.Night, C.Night, 90, 1, 0.35)
-		Kit.bevel(plate, 26, 4, z + 1)
 		local sheen = Kit.addShine(plate, 30)
+		-- the outline over the skin, the band and the sheen (they would cover its inner half)
+		Kit.outlineOnTop(plate, z + 6)
 		local api = { Plate = plate, Skin = skin, Sheen = sheen }
 		function api.SetColor(c: Color3, d: Color3)
 			bandGrad.Color = ColorSequence.new(c, d)
@@ -195,6 +191,7 @@ return function(ctx: any)
 	-- badge with a soft glow and a comet ring running around it
 	local BADGE = 84
 	local bc = Vector2.new(20 + BADGE / 2, 20 + BADGE / 2)
+	-- (in the clipped skin: the glow lights the card, never the stack's gap round it)
 	local glow = Kit.image({
 		Name = "BadgeGlow",
 		Image = Theme.Icon.Glow,
@@ -203,8 +200,8 @@ return function(ctx: any)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromOffset(bc.X, bc.Y),
 		Size = UDim2.fromOffset(176, 176),
-		ZIndex = 21,
-		Parent = plate,
+		ZIndex = 21, -- over the stripes and the band inside the skin
+		Parent = body.Skin,
 	})
 	table.insert(qLoops, TweenService:Create(glow, TweenInfo.new(1.1, Enum.EasingStyle.Sine, LOOP, -1, true), { ImageTransparency = 0.78, Size = UDim2.fromOffset(150, 150) }))
 	local ring = new("Frame", {
@@ -306,7 +303,7 @@ return function(ctx: any)
 		Parent = statusRow,
 	})
 	-- PRIORITY tag riding the top edge (you were put back in after someone dodged)
-	local priority = Q.Chip(plate, "PRIORITY", C.Gold, C.GoldDeep, 32, 26)
+	local priority = Q.Chip(plate, "PRIORITY", C.Gold, C.GoldDeep, 32, 30) -- rides over the card's outline
 	priority.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
 	priority.Frame.Position = UDim2.fromOffset(W / 2 + 10, -4)
 	priority.Frame.Rotation = -3
@@ -378,6 +375,7 @@ return function(ctx: any)
 		Stroke = 2.8,
 		Parent = plate,
 	})
+	local SEG_ROW_W, SEG_GAP = W - 44, 6
 	local segRow = new("Frame", {
 		Name = "Segments",
 		BackgroundTransparency = 1,
@@ -386,7 +384,9 @@ return function(ctx: any)
 		ZIndex = 22,
 		Parent = plate,
 	})
-	Kit.list(segRow, Enum.FillDirection.Horizontal, 6, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
+	-- every segment the same whole width and every gap the same (a row of scale-sized segments is
+	-- rounded segment by segment and its gaps come out a pixel apart); the row is centred
+	Kit.list(segRow, Enum.FillDirection.Horizontal, SEG_GAP, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
 	local segs: { any } = {}
 	local segLoops: { Tween } = {}
 
@@ -403,7 +403,7 @@ return function(ctx: any)
 			local f = new("Frame", {
 				Name = "Seg" .. i,
 				BackgroundColor3 = Color3.new(1, 1, 1),
-				Size = UDim2.new(1 / n, -math.ceil(6 * (n - 1) / n), 1, 0),
+				Size = UDim2.new(0, math.floor((SEG_ROW_W - SEG_GAP * (n - 1)) / n), 1, 0),
 				LayoutOrder = i,
 				ZIndex = 22,
 				Parent = segRow,
@@ -684,7 +684,7 @@ return function(ctx: any)
 	---------------------------------------------------------------------------
 	-- queue lock chip (after declining / missing a ready check)
 	---------------------------------------------------------------------------
-	local LH = 64
+	local LH = 58 -- exactly the chip's height (the stack's gaps are between outlines)
 	local lockHolder, lockCard = slot("QueueLock", ORDER_LOCK, LH)
 	local lockPlate = Kit.plate({
 		Name = "Plate",
@@ -774,7 +774,7 @@ return function(ctx: any)
 		-- from the top; the gap shows the card's plate and the top of its teal band
 		local S = 84 + 40
 		local bandEnd = math.min(math.floor(IH * 0.56) / S, 0.99)
-		local av = Q.Avatar(p, from, 84, C.Teal, 22, {
+		Q.Avatar(p, from, 84, C.Teal, 22, {
 			Side = "TopLeft",
 			Gap = 20,
 			Width = S,

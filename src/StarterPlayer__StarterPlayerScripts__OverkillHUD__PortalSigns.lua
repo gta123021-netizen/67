@@ -1,9 +1,16 @@
 --[[
 	PortalSigns  (StarterPlayerScripts.OverkillHUD.PortalSigns)
-	Walk up to a portal and a card rises above the hotbar: the mode, how it plays, how many players
-	are searching, the expected wait, and whether you can walk in right now (party leader, party size,
-	queue lock, private duel). It stays out of the way while you're already searching that mode,
-	in a match, or while a window / the quest dialogue is open.
+	Walk up to a portal and a card rises over the dock (SHOP / STATS / BAG / PARTY / MENU), in the
+	bottom-left HUD column (ctx.Column: it is one of the column's groups, so it sits exactly
+	Theme.Hud.GroupGap from the dock below and the party frames above, and never overlaps them): the
+	mode, how it plays, how many players are searching, the expected wait, and whether you can walk
+	in right now (party leader, party size, queue lock, private duel). It stays out of the way while
+	you're already searching that mode, in a match, or while a window / the quest dialogue is open.
+
+	The card is drawn at the column's own width (no scaling of its outline): its plate and its one
+	ink outline - Theme.Hud.Outline, the dock's and the pills' weight, centred on the card's edge and
+	drawn over everything inside it - are the same on all four sides. Only its content (badge, text,
+	counts) is laid out at 720 wide and scaled to fit.
 ]]
 
 local Players = game:GetService("Players")
@@ -18,7 +25,11 @@ return function(ctx: any)
 	local player = Players.LocalPlayer
 
 	local RANGE = 17 -- studs from the doorway
-	local W, H = 720, 132
+	local HUD = Theme.Hud
+	local CARD_W, CARD_H = HUD.ColumnWidth, HUD.CardHeight -- the card, at the column's width
+	local W = 720 -- its content's layout width (scaled to fit)
+	local FIT = CARD_W / W
+	local H = CARD_H / FIT -- ...and height
 
 	---------------------------------------------------------------------------
 	-- doorways
@@ -74,31 +85,37 @@ return function(ctx: any)
 	---------------------------------------------------------------------------
 	-- the card
 	---------------------------------------------------------------------------
+	-- the column slot (hidden: out of the stack; showing, it opens to the card's height)
+	local column = ctx.Column
 	local holder = new("Frame", {
 		Name = "PortalCard",
 		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -238),
-		Size = UDim2.fromOffset(W, H),
+		Size = UDim2.fromOffset(CARD_W, CARD_H),
+		LayoutOrder = if ctx.ColumnOrder then ctx.ColumnOrder.Portal else 2,
 		Visible = false,
 		ZIndex = 15,
-		Parent = ctx.Hud,
+		Parent = column or ctx.Hud,
 	})
+	if not column then
+		-- (no HUD column: stand where the column's card would)
+		holder.AnchorPoint = Vector2.new(0, 1)
+		holder.Position = UDim2.new(0, HUD.Margin, 1, -(HUD.Bottom + HUD.PillHeight * 3 + HUD.GroupGap * 3 + HUD.TileHeight + HUD.GroupGap))
+	end
+	-- the card keeps its size while the slot opens and closes round it (it grows from the bottom)
 	local card = new("Frame", {
 		Name = "Card",
 		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(1, 1),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.fromScale(0.5, 1),
+		Size = UDim2.fromOffset(CARD_W, CARD_H),
 		ZIndex = 15,
 		Parent = holder,
 	})
 	local cardScale = Kit.fx(card)
-	local shadow = new("Frame", { Name = "Shadow", BackgroundColor3 = C.Ink, BackgroundTransparency = 0.5, Position = UDim2.fromOffset(0, 10), Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = card })
-	Kit.corner(shadow, 32)
-	local plate = Kit.plate({ Name = "Plate", Parent = card, Size = UDim2.fromScale(1, 1), Radius = 32, Stroke = 7.5, ZIndex = 15, Gradient = { C.Navy700, C.Navy900 } })
+	local RADIUS = HUD.CardRadius
+	local plate = Kit.plate({ Name = "Plate", Parent = card, Size = UDim2.fromScale(1, 1), Radius = RADIUS, Stroke = false, ZIndex = 15, Gradient = { C.Navy700, C.Navy900 } })
 	local skin = new("CanvasGroup", { Name = "Skin", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 15, Parent = plate })
-	Kit.corner(skin, 32)
+	Kit.corner(skin, RADIUS)
 	Kit.stripes(skin, C.Rim, 0.955, 15)
 	local wash = new("Frame", { Name = "Wash", BackgroundColor3 = Color3.new(1, 1, 1), Size = UDim2.new(0.7, 0, 1, 0), ZIndex = 15, Parent = skin })
 	local washGrad = new("UIGradient", {
@@ -107,23 +124,34 @@ return function(ctx: any)
 		Transparency = NumberSequence.new(0.62, 1),
 		Parent = wash,
 	})
-	Kit.bevel(plate, 28, 4, 16)
-	local sheen = Kit.addShine(plate, 32)
+	local sheen = Kit.addShine(plate, RADIUS)
+	-- the ONE outline: the HUD's weight, centred on the card's own edge, over everything in it
+	local outline = new("Frame", { Name = "Outline", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 30, Parent = card })
+	Kit.corner(outline, RADIUS)
+	Kit.stroke(outline, HUD.Outline, C.Ink, 0, true)
+	-- the content, laid out at 720 wide and scaled to the card
+	local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, Size = UDim2.fromScale(1 / FIT, 1 / FIT), ZIndex = 16, Parent = plate })
+	new("UIScale", { Name = "Fit", Scale = FIT, Parent = content })
 
+	-- the badge's glow lives in the clipped skin: it lights the card, never the gap round it
+	local function fit(v: number): number
+		return math.floor(v * FIT + 0.5)
+	end
 	local badgeGlow = Kit.image({
 		Name = "Glow",
 		Image = Theme.Icon.Glow,
 		ImageColor3 = C.Blue,
 		ImageTransparency = 0.45,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromOffset(20 + 46, 20 + 46),
-		Size = UDim2.fromOffset(180, 180),
-		ZIndex = 16,
-		Parent = plate,
+		Position = UDim2.fromOffset(fit(20 + 46), CARD_H / 2),
+		Size = UDim2.fromOffset(fit(180), fit(180)),
+		ZIndex = 16, -- over the stripes and the wash inside the skin
+		Parent = skin,
 	})
-	local glowLoop = TweenService:Create(badgeGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { ImageTransparency = 0.75, Size = UDim2.fromOffset(150, 150) })
-	local badge = Q.Badge(plate, "Duel", 92, 17)
-	badge.Frame.Position = UDim2.fromOffset(20, 20)
+	local glowLoop = TweenService:Create(badgeGlow, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { ImageTransparency = 0.75, Size = UDim2.fromOffset(fit(150), fit(150)) })
+	local badge = Q.Badge(content, "Duel", 92, 17)
+	badge.Frame.AnchorPoint = Vector2.new(0, 0.5)
+	badge.Frame.Position = UDim2.new(0, 20, 0.5, 0)
 
 	local RIGHT = 188
 	local title = Kit.text({
@@ -135,7 +163,7 @@ return function(ctx: any)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		ZIndex = 18,
 		Stroke = 3.8,
-		Parent = plate,
+		Parent = content,
 	})
 	local blurb = Kit.text({
 		Name = "Blurb",
@@ -149,9 +177,9 @@ return function(ctx: any)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		ZIndex = 18,
 		Stroke = 2.4,
-		Parent = plate,
+		Parent = content,
 	})
-	local hintRow = new("Frame", { Name = "Hint", BackgroundTransparency = 1, Position = UDim2.fromOffset(130, 84), Size = UDim2.new(1, -130 - RIGHT - 18, 0, 32), ZIndex = 18, Parent = plate })
+	local hintRow = new("Frame", { Name = "Hint", BackgroundTransparency = 1, Position = UDim2.fromOffset(130, 84), Size = UDim2.new(1, -130 - RIGHT - 18, 0, 32), ZIndex = 18, Parent = content })
 	Kit.list(hintRow, Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	local hint = Q.Chip(hintRow, "WALK IN TO QUEUE", C.Green, C.GreenDeep, 32, 18)
 	local hintScale = Kit.fx(hint.Frame)
@@ -181,7 +209,7 @@ return function(ctx: any)
 		Position = UDim2.new(1, -RIGHT, 0.5, 0),
 		Size = UDim2.fromOffset(3, H - 40),
 		ZIndex = 17,
-		Parent = plate,
+		Parent = content,
 	})
 	Kit.pill(divider)
 	local countText = Kit.text({
@@ -193,7 +221,7 @@ return function(ctx: any)
 		Size = UDim2.fromOffset(RIGHT - 20, 56),
 		ZIndex = 18,
 		Stroke = 5,
-		Parent = plate,
+		Parent = content,
 	})
 	local countScale = Kit.fx(countText)
 	Kit.text({
@@ -207,7 +235,7 @@ return function(ctx: any)
 		Size = UDim2.fromOffset(RIGHT - 20, 20),
 		ZIndex = 18,
 		Stroke = 2.2,
-		Parent = plate,
+		Parent = content,
 	})
 	local estText = Kit.text({
 		Name = "Estimate",
@@ -219,7 +247,7 @@ return function(ctx: any)
 		Size = UDim2.fromOffset(RIGHT - 20, 24),
 		ZIndex = 18,
 		Stroke = 2.6,
-		Parent = plate,
+		Parent = content,
 	})
 
 	---------------------------------------------------------------------------
@@ -319,13 +347,23 @@ return function(ctx: any)
 		fill(modeId)
 		if not visible then
 			visible = true
+			-- the column opens a slot the card's height (the party frames above glide up), then
+			-- the card pops into it
 			holder.Visible = true
-			card.Position = UDim2.new(0.5, 0, 0.5, 90)
-			cardScale.Scale = 0.85
-			tween(card, 0.45, { Position = UDim2.fromScale(0.5, 0.5) }, Enum.EasingStyle.Back)
-			tween(cardScale, 0.45, { Scale = 1 }, Enum.EasingStyle.Back)
-			task.delay(0.3, function()
-				Kit.playShine(sheen)
+			card.Visible = false
+			holder.Size = UDim2.fromOffset(CARD_W, 0)
+			tween(holder, 0.16, { Size = UDim2.fromOffset(CARD_W, CARD_H) }, Enum.EasingStyle.Quad).Completed:Connect(function(state)
+				if state ~= Enum.PlaybackState.Completed or not visible then
+					return
+				end
+				card.Visible = true
+				card.Position = UDim2.new(0.5, 0, 1, 16)
+				cardScale.Scale = 0.86
+				tween(card, 0.4, { Position = UDim2.fromScale(0.5, 1) }, Enum.EasingStyle.Back)
+				tween(cardScale, 0.4, { Scale = 1 }, Enum.EasingStyle.Back)
+				task.delay(0.25, function()
+					Kit.playShine(sheen)
+				end)
 			end)
 			glowLoop:Play()
 			arrowLoop:Play()
@@ -338,13 +376,21 @@ return function(ctx: any)
 			return
 		end
 		visible = false
-		tween(cardScale, 0.2, { Scale = 0.85 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		tween(card, 0.2, { Position = UDim2.new(0.5, 0, 0.5, 70) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In).Completed:Connect(function(state)
-			if state == Enum.PlaybackState.Completed and not visible then
-				holder.Visible = false
-				glowLoop:Pause()
-				arrowLoop:Pause()
+		tween(cardScale, 0.16, { Scale = 0.86 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(card, 0.16, { Position = UDim2.new(0.5, 0, 1, 16) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In).Completed:Connect(function(state)
+			if state ~= Enum.PlaybackState.Completed or visible then
+				return
 			end
+			card.Visible = false
+			-- then the slot closes (the groups above settle back down)
+			tween(holder, 0.16, { Size = UDim2.fromOffset(CARD_W, 0) }, Enum.EasingStyle.Quad).Completed:Connect(function(s2)
+				if s2 == Enum.PlaybackState.Completed and not visible then
+					holder.Visible = false
+					holder.Size = UDim2.fromOffset(CARD_W, CARD_H)
+					glowLoop:Pause()
+					arrowLoop:Pause()
+				end
+			end)
 		end)
 	end
 

@@ -1149,7 +1149,6 @@ function Kit.titlePlate(o: { [string]: any })
 	local R = o.Radius or 24
 	local gap = o.TileGap or 10 -- plate edge to the tile's edge (its outline's centre), left, top and bottom
 	local tile = H - gap * 2
-	local tileInk = (o.TileStroke or 3.5) * 1.35
 	local textSize = o.TextSize or 46
 	local z = o.ZIndex or 20
 	local left = gap + tile + (o.TextGap or 16) -- where the title starts

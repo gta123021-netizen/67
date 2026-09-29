@@ -1575,7 +1575,7 @@ local resetCard = Kit.plate({
 })
 -- the clock is centred in the card's left end (a frame with the card's own left, top and bottom edges)
 local resetSlot = Kit.slot({ Parent = resetCard, Side = "Left", Width = 92, ZIndex = 13 })
-local resetClock = Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetSlot })
+Kit.image({ Name = "Clock", Image = Theme.Icon.Clock, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(50, 50), ZIndex = 13, Parent = resetSlot })
 Kit.text({
 	Text = "NEW QUESTS IN",
 	TextSize = 15,
