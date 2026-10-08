@@ -34,7 +34,8 @@
 	  Runner, FX                server runner kind, FX module name
 	  Timeline                  (clip seconds) where the cast's moments fall - the clip's own marks
 	  Aim                       how the caster turns while casting (degrees, degrees a second)
-	  Beam                      (Runner "Beam") its reach, its width, its ticks
+	  Beam                      (Runner "Beam") its reach, its width, its ticks - the hitbox IS the body
+	                            the effects draw (the same Width, Grow and Range on both sides)
 ]]
 
 local AbilityConfig = {}
@@ -78,7 +79,7 @@ AbilityConfig.Abilities = {
 		Hero = "Goki",
 		Slot = "Ability1",
 		Type = "BEAM",
-		Desc = "Gather the tide's energy at your hip, then release it in a roaring azure wave that swells to a massive torrent: 6 hits as it pours through, then it bursts at its end.",
+		Desc = "Gather crackling azure energy at your hip, then release it as a roaring electric torrent that swells as it pours out: 6 hits as it tears through, then its end ball detonates.",
 		-- "Beam wake" by Lorc, game-icons.net, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/):
 		-- white on clear, tinted by the hotbar (see AbilityConfig.Credits)
 		Icon = "rbxassetid://89704136492700",
@@ -105,7 +106,8 @@ AbilityConfig.Abilities = {
 			-- every other mark here is the cast's own time (AbilityConfig.ClipTime / CastTime)
 			Slow = { From = 0.6, To = 1.72, Speed = 0.55 },
 			Sustain = 3, -- seconds the beam lasts
-			Collapse = 0.26, -- seconds it takes to die away
+			Drain = 0.24, -- its last moments: the beam drains into its end ball, which detonates as it ends
+			Collapse = 0.26, -- seconds a beam cut short takes to die away
 			Recover = 0.24, -- seconds from the end of the beam to control (the clip keeps fading out a moment
 			-- longer, so the first step / strike after it blends out of the pose instead of popping)
 			RecoverBlend = 0.4,
@@ -118,16 +120,25 @@ AbilityConfig.Abilities = {
 			PitchRate = 70,
 		},
 		Beam = {
-			Range = 150,
-			HitRadius = 4.8, -- bodies this close to its line are in it (its visible body)
-			StopRadius = 2.0, -- ...and this close (its core) stop it: its end sits on them
+			Range = 80, -- studs: in open air its end ball stops here
+			-- its 3D body (diameters, x Width x its Grow): the white-hot core 1.0, the cyan layer 1.9, the
+			-- azure body 2.9, the force-field shell 3.6 - its end ball 1.25 x the shell
+			Width = 1.6,
+			Shell = 3.6, -- (x Width) the force-field shell's diameter: its full width
+			HitRadius = 2.6, -- (x Grow) bodies this close to its line are in it: past the azure body's edge
+			-- (2.32), inside the shell's (2.88) - what you see touch you is what hits you. Where the beam
+			-- is drawn narrower (a floor or a wall close by, a short beam: BeamMath.RoomFactor /
+			-- ShortFactor) its hitbox is narrower with it
+			StopRadius = 2.0, -- (x sqrt Grow) ...and this close (its core) stop it: its end ball sits on them
+			HeadTime = 0.2, -- seconds its end ball takes to race out to the full Range (BeamReach)
+			FirstTick = 0.1, -- the first hit lands this long after the release (where the head has reached)
 			Tick = 0.5, -- seconds between ticks: 6 ticks over the Sustain (CombatConfig.Attacks.AzureTide), then the blast
 			TickAttack = "AzureTide",
 			BlastAttack = "AzureTideBlast",
-			BlastRadius = 9, -- (x its final size, Grow[2]: the blast is as big as the beam has become)
+			BlastRadius = 11, -- studs round its end: the blast's dome on every screen, and its hitbox
 			-- it starts small and swells to massive over its life (a width factor, eased): its hitbox
 			-- swells with it (AbilityConfig.BeamGrow)
-			Grow = { 0.55, 2.1 },
+			Grow = { 0.6, 2.0 },
 			-- where the beam leaves the hands in the release pose (the root's frame, measured from the
 			-- clip: the midpoint of the hands at 2.25 s, a little ahead of the palms)
 			Origin = Vector3.new(-0.1, -0.18, -2.95),
@@ -174,6 +185,33 @@ function AbilityConfig.BeamGrow(def: any, since: number): number
 	local k = math.clamp(since / def.Timeline.Sustain, 0, 1)
 	k = k * k * (3 - 2 * k)
 	return g[1] + (g[2] - g[1]) * k
+end
+-- how far the beam's head has raced out `since` seconds after it fired: fast off the hands, easing in
+-- as it lands (its end ball on every screen; the server's hits never reach past it)
+function AbilityConfig.BeamReach(def: any, since: number): number
+	local B = def.Beam
+	if not B then
+		return 0
+	end
+	local ht = B.HeadTime or 0
+	if since >= ht then
+		return B.Range
+	elseif since <= 0 then
+		return 0
+	end
+	local k = 1 - since / ht
+	return B.Range * (1 - k * k)
+end
+-- the beam's ticks: the index of the last one landed by `since` (0 = the first, -1 = none yet). The
+-- server hits on them; every screen pulses the beam and its end ball on them
+function AbilityConfig.BeamTick(def: any, since: number): number
+	local B = def.Beam
+	local first = B.FirstTick or 0
+	if since < first then
+		return -1
+	end
+	local last = math.floor((def.Timeline.Sustain - first - 1e-3) / B.Tick)
+	return math.min(math.floor((since - first) / B.Tick), last)
 end
 function AbilityConfig.ClipSpeed(TL: any, tau: number, pos: number): number
 	local s = TL.Slow

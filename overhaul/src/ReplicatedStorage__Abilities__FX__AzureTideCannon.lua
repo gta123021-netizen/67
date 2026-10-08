@@ -1,29 +1,44 @@
 --[[
 	AzureTideCannon  (ReplicatedStorage.Abilities.FX.AzureTideCannon)
 	What Azure Tide Cannon looks and sounds like - on every screen, for every caster. One continuous
-	event, every phase flowing into the next. Built only from the place's own effects (the packs in
-	Abilities.Assets.AzureTideCannon and their textures) - nothing drawn from scratch.
+	event, every phase flowing into the next, ELECTRIC from the first spark to the last crackle. Built
+	only from the place's own effects: the packs in Abilities.Assets.AzureTideCannon (their meshes,
+	emitters, textures and sounds - the lightning meshes are the VFX library's Lightning, Thunder and
+	ElectricShockwave packs) and plain Neon / ForceField geometry. Nothing from outside the place.
 
-	  GATHER    light wakes in the palms; energy is pulled in from all round (streaks, motes, wisps)
-	  FORM      a seed of light between the hands becomes a sphere and grows: a white-hot core in an
-	            azure body, plasma, a dark swirl giving it shape, crescents, a crisp rim, rays, a bloom,
-	            the pack's charge flow, the v80 swirl and force-field shells, sparks orbiting it
-	  SURGE     it becomes unstable: arcs crawl over it and snap off it, it pulses harder and faster
+	  GATHER    light wakes in the palms; lightning is drawn in from all round the hands - 3D arcs
+	            reaching in and snapping into the palms
+	  FORM      a seed of light between the hands becomes a sphere: a white-hot core in an azure body, a
+	            dark swirl giving it shape, a force-field skin, plasma and crescents inside it, the
+	            pack's azure flames licking off it, arcs jumping from both palms into it
+	  SURGE     it becomes unstable: lightning snaps off it, a crackling lightning cage closes round it,
+	            and at its largest it is a blue black hole with electric rings spinning round it
 	  COMPRESS  everything is sucked in and the sphere crushes down to its brightest
-	  THRUST    the hands drive it forward (a streak behind it)
-	  RELEASE   the sphere swells straight into the beam's root: the beam pours out of it, its head (the
-	            sphere hurled ahead) races to the end. The pack's release burst, the ground under the
-	            caster blasts, a flash
-	  BEAM      v80's beam, bigger: Beamy's layers, a white core, an azure body, two plasmas and wisps,
-	            a solid core and body from any side - every piece rounded, flaring out of the sphere and
-	            tapering into its end. It never sinks into the floor: it narrows only where the ground or
-	            a wall is closer than its edge (its flat ribbons are measured the way they face you)
-	  IMPACT    v80's: Beamy's impact, a glow, sparks, smoke; a burst on every hit
-	  BLAST     it collapses into its end: the place's implode-explosion pack crushes in and detonates,
-	            the FinalExplosion and the Explosion pack's smoke and dust round it, secondary bursts,
-	            a white-hot fireball, light and a flash of the view
-	Light and the screen are only ever borrowed: every light, tint and blur fades back to nothing.
-	Nothing outlives the cast but its own short-lived effects; everything is cleaned in one call.
+	  THRUST    the hands drive it forward
+	  RELEASE   the sphere swells into the beam's root and its head - the END BALL - is hurled out ahead
+	            of the beam; two electric shockwave rings burst off the hands (a mirrored pair), the
+	            ground under the caster blasts, a white-hot pop, a flash
+	  BEAM      fully 3D and continuous: a white-hot core inside cyan, azure and force-field sleeves,
+	            each one flaring smoothly out of the sphere and running whole into the end ball - no
+	            ribbons, no sprites along it, no seams. Lightning crawls all over it (the Lightning
+	            pack's mesh spun and flickered the way its pack drives it, and 3D arcs leaping along its
+	            skin), a surge rushes down it into the end ball with every hit, it grinds and tears the
+	            ground it passes over. It reaches Beam.Range and no further
+	  END BALL  the beam's head: a 3D ball of the same layers in a crackling lightning cage. It races out
+	            stretched like a comet, lands with a squash, pulses with every hit, and discharges
+	            lightning into whatever it touches - the floor, a wall, a body - throwing chips of that
+	            very surface
+	  BLAST     its last moments drain the beam into the end ball (a force-field shell crushes in on it,
+	            lightning pours in) and it detonates: a compact, symmetric blast exactly BlastRadius
+	            round (its hitbox) - a white-hot core, an energy dome and its skin, a ring of electric
+	            shockwaves (one level, a mirrored tilted pair), rays of 3D lightning evenly round along
+	            the ground and rising, a ring of rock spikes torn up round a crater, chunks thrown
+	            evenly all round that tumble, bounce and settle trailing dust, smoke and dust, and
+	            lightning crackling over the crater while its light cools from white to deep blue
+	There is no 2D line, ray or ribbon anywhere in it, and no stack of glow discs: every pack burst is
+	kept to its smoke, dust, flames and shards (packKeeps). Light and the screen are only ever borrowed:
+	every light, tint and blur fades back to nothing. Nothing outlives the cast but its own short-lived
+	effects; everything is cleaned in one call.
 
 	FX.Start(o) -> handle. o = {
 	  Caster   Model
@@ -68,6 +83,13 @@ local function asset(path: string): Instance?
 	end
 	return node
 end
+-- a mesh of the pack (Assets.AzureTideCannon.Meshes): SphereHD, Swirl, Rock, and the lightning -
+-- Sleeve (Lightning, a crackling bolt along its X), Strike (a lightning cluster), Spark (ThunderSpark),
+-- Thunder (a bolt up its Y), Shock (ElectricShockwave, a ring round its Y)
+local function template(name: string): BasePart?
+	local t = asset("Meshes/" .. name)
+	return if t and t:IsA("BasePart") then t else nil
+end
 
 ---------------------------------------------------------------------------
 -- palette
@@ -80,11 +102,12 @@ local C_LIGHT = rgb(90, 194, 255)
 local C_MID = rgb(36, 136, 255)
 local C_DEEP = rgb(16, 62, 214)
 local C_DUST = rgb(176, 194, 218)
--- (the sphere's extra shades: from a near-black navy through royal to a glacier cyan)
-local C_NAVY = rgb(8, 22, 92)
+-- (the sphere's extra shades: royal through a glacier cyan)
 local C_ROYAL = rgb(28, 84, 240)
 local C_AZURE = rgb(58, 168, 255)
 local C_CYAN = rgb(104, 228, 255)
+-- lightning: white with a breath of cyan
+local C_ARC = rgb(226, 248, 255)
 
 local function cs(a: Color3, b: Color3?, c: Color3?): ColorSequence
 	if c then
@@ -109,44 +132,25 @@ end
 local function tex(id: number): string
 	return "rbxassetid://" .. id
 end
+-- (math.clamp, but never an error when the room left is smaller than the least it may have)
+local function within(x: number, lo: number, hi: number): number
+	return math.max(lo, math.min(hi, x))
+end
 
 ---------------------------------------------------------------------------
--- the packs' textures (every one is in the place's VFX packs). Beam textures run along the beam with
--- the image's vertical axis.
+-- the packs' textures (every one is in the place's VFX packs)
 ---------------------------------------------------------------------------
-local BEAM_W = 1.6 -- (v80's beam, bigger by a good margin)
 local T = {
-	-- v80's own
-	Needle = tex(13520691450),
-	Needle2 = tex(18244509255),
-	Glow = tex(12159555294),
-	Glow2 = tex(243664672),
-	Flare = tex(9761807363),
-	Arc2 = tex(16009841559),
-	Wisp = tex(79598379412341),
-	Turbulent = tex(14962000553),
-	Turbulent2 = tex(135482100082072),
-	GlowBand = tex(5310883966),
-	CoreBand = tex(12781828706),
-	Smoke = tex(8527116276),
-	Dots = tex(14582794847),
-	-- the sphere (the layered ball)
-	CoreGlow = tex(12189101933), -- Light Explosion Aura/E4: big soft glow
-	SoftGlow = tex(251657030), -- soft round glow
+	Smoke = tex(8527116276), -- the Explosion pack's smoke
+	Dots = tex(14582794847), -- motes
 	PlasmaBall = tex(8214516993), -- VFX PACK V3: turbulent energy ball
 	Chaos = tex(17067057050), -- Big Impact1: chaotic electric sphere
-	Rim = tex(1084991215), -- Yona CircleHit: a sphere's glowing rim
-	RimRays = tex(11820076505), -- Ground Emit 1: rim of radial streaks
 	Swirl = tex(9309993091), -- Explosion Implode "CHARGE PART": swirl
 	Crescent = tex(16669803246), -- Big Windspin1: crescent
 	ArcBall = tex(16334776490), -- lightning_ball_sorta (4x4)
-	ArcRing = tex(12800314611), -- Lightning_Circular_01 (2x2)
 	ArcBurst = tex(17087448166), -- Auras Bottom: electric burst
-	Star = tex(1084970835), -- Light Explosion Core: four-point star
 	Spark = tex(120067432715909), -- spark (2x2)
-	BWisp = tex(79598379412341), -- beam1: soft streaks
-	BBolt = tex(14961582521), -- NewBeams: electric waveform
-	BLightning = tex(10517580193), -- AtLeft: branching lightning
+	Crackle = tex(11515478646), -- "A - ELECTRICITY 01" (4x4): a crackle of electricity
 }
 
 ---------------------------------------------------------------------------
@@ -164,23 +168,6 @@ local function emitter(parent: Instance, p: { [string]: any }): ParticleEmitter
 	end
 	e.Parent = parent
 	return e
-end
-
-local function beam(parent: Instance, a0: Attachment, a1: Attachment, p: { [string]: any }): Beam
-	local b = Instance.new("Beam")
-	b.Attachment0 = a0
-	b.Attachment1 = a1
-	b.FaceCamera = true
-	b.LightEmission = 1
-	b.LightInfluence = 0
-	b.Segments = 10
-	b.TextureMode = Enum.TextureMode.Wrap
-	b.Enabled = false
-	for k, v in pairs(p) do
-		(b :: any)[k] = v
-	end
-	b.Parent = parent
-	return b
 end
 
 local function att(parent: Instance, name: string): Attachment
@@ -215,9 +202,30 @@ local function with(a: { [string]: any }, b: { [string]: any }): { [string]: any
 	return out
 end
 
+-- a part's X axis along a frame's look (a Cylinder's length runs along its X)
+local ALONG = CFrame.Angles(0, math.rad(90), 0)
+local TAU = math.pi * 2
+
+-- two unit vectors square to `f` and to each other
+local function basis(f: Vector3): (Vector3, Vector3)
+	local u = f:Cross(if math.abs(f.Y) < 0.95 then Vector3.yAxis else Vector3.xAxis).Unit
+	return u, f:Cross(u).Unit
+end
+
+local function randomUnit(): Vector3
+	for _ = 1, 8 do
+		local v = Vector3.new(math.random() * 2 - 1, math.random() * 2 - 1, math.random() * 2 - 1)
+		local m = v.Magnitude
+		if m > 0.05 and m <= 1 then
+			return v / m
+		end
+	end
+	return Vector3.yAxis
+end
+
 ---------------------------------------------------------------------------
--- one animator for every short-lived piece of every cast (lights, fireballs, the screen): a single
--- RenderStepped connection that exists only while something is animating
+-- one animator for every short-lived piece of every cast (lights, fireballs, rings, the blast, the
+-- screen): a single RenderStepped connection that exists only while something is animating
 ---------------------------------------------------------------------------
 type Anim = { T0: number, Dur: number, Step: (number, number) -> (), Done: (() -> ())? }
 local live: { Anim } = {}
@@ -277,65 +285,244 @@ local function screenFlash(strength: number, length: number)
 	Debris:AddItem(blur, length + 1)
 end
 
--- a light that flares and fades away at a point (it removes itself)
-local function flashLight(at: Vector3, color: Color3, brightness: number, range: number, life: number, parent: Instance?)
+-- a light that flares and fades away at a point (it removes itself); `cool`: the colour it cools to
+local function flashLight(at: Vector3, color: Color3, brightness: number, range: number, life: number, parent: Instance?, cool: Color3?)
 	local p = U.Part({ CFrame = CFrame.new(at) })
 	p.Parent = parent or U.Holder()
 	local l = light(p, color)
 	animate(0, life, function(k)
 		l.Brightness = brightness * (1 - k) ^ 2
 		l.Range = range * (1 - 0.3 * k)
+		if cool then
+			l.Color = color:Lerp(cool, math.min(1, k * 1.6))
+		end
 	end, function()
 		p:Destroy()
 	end)
 	Debris:AddItem(p, life + 1)
 end
 
--- v80's fireball: a white-hot sphere in an azure one, swelling from d0 to d1 (diameters) and burning off.
--- On a floor (`floor`, `up`) it rests on it and rises as it swells - it never sinks into the ground
-local function fireball(at: Vector3, d0: number, d1: number, life: number, parent: Instance?, floor: Vector3?, up: Vector3?)
-	local tpl = asset("Meshes/SphereHD")
-	if not (tpl and tpl:IsA("BasePart")) then
+-- a 3D ball of light swelling from d0 to d1 (diameters) and burning off, its colour running c0 -> c1
+-- (white-hot cooling to blue): the place's SphereHD in Neon or ForceField. On a floor (`floor`, `up`)
+-- it rests on it and rises as it swells - it never sinks into the ground
+local function glowBall(at: Vector3, d0: number, d1: number, life: number, parent: Instance?, mat: Enum.Material, c0: Color3, c1: Color3, t0: number, floor: Vector3?, up: Vector3?)
+	local tpl = template("SphereHD")
+	if not tpl then
 		return
 	end
-	local inner = U.Solid(tpl, { Material = Enum.Material.Neon, Color = C_WHITE, Transparency = 0 })
-	local outer = U.Solid(tpl, { Material = Enum.Material.Neon, Color = C_MID, Transparency = 0.2 })
+	local p = U.Solid(tpl, { Material = mat, Color = c0, Transparency = t0 })
 	local function place(d: number)
 		local c = at
 		if floor and up then
 			local h = (at - floor):Dot(up)
 			c = at + up * math.max(0, d * 0.5 + 0.1 - h)
 		end
-		inner.Size = Vector3.one * math.max(0.05, d * 0.72)
-		outer.Size = Vector3.one * math.max(0.05, d)
-		inner.CFrame = CFrame.new(c)
-		outer.CFrame = CFrame.new(c)
+		p.Size = Vector3.one * math.max(0.05, d)
+		p.CFrame = CFrame.new(c)
 	end
 	place(d0)
-	inner.Parent = parent or U.Holder()
-	outer.Parent = parent or U.Holder()
-	animate(0, life, function(t)
-		local e = 1 - (1 - t) ^ 3
-		place(d0 + (d1 - d0) * e)
-		inner.Transparency = math.min(1, t * 1.6)
-		outer.Transparency = 0.2 + 0.8 * t ^ 0.7
-		outer.Color = C_MID:Lerp(C_LIGHT, t)
+	p.Parent = parent or U.Holder()
+	animate(0, life, function(k)
+		place(d0 + (d1 - d0) * (1 - (1 - k) ^ 3))
+		p.Transparency = t0 + (1 - t0) * k ^ 1.4
+		p.Color = c0:Lerp(c1, math.min(1, k * 1.5))
 	end, function()
-		inner:Destroy()
-		outer:Destroy()
+		p:Destroy()
 	end)
-	Debris:AddItem(inner, life + 1)
-	Debris:AddItem(outer, life + 1)
+	Debris:AddItem(p, life + 1)
+end
+
+-- v80's fireball: a white-hot sphere in an azure one, swelling from d0 to d1 (diameters), burning off
+local function fireball(at: Vector3, d0: number, d1: number, life: number, parent: Instance?, floor: Vector3?, up: Vector3?)
+	glowBall(at, d0 * 0.72, d1 * 0.72, life * 0.8, parent, Enum.Material.Neon, C_WHITE, C_HOT, 0, floor, up)
+	glowBall(at, d0, d1, life, parent, Enum.Material.Neon, C_MID, C_LIGHT, 0.2, floor, up)
+end
+
+-- an electric shockwave ring (the ElectricShockwave pack's mesh) lying across `up`: it swells from d0
+-- to d1 (across) and burns off, spun and flickered the way its own pack drives it
+local function shockRing(at: Vector3, up: Vector3, d0: number, d1: number, life: number, color: Color3, parent: Instance?, thick: number?)
+	local tpl = template("Shock")
+	if not tpl then
+		return
+	end
+	local p = U.Solid(tpl, { Material = Enum.Material.Neon, Color = color, Transparency = 1 })
+	p.Size = Vector3.one * 0.05
+	p.Parent = parent or U.Holder()
+	local base = U.Up(at, up)
+	local th = thick or 0.3
+	animate(0, life, function(k)
+		local d = d0 + (d1 - d0) * (1 - (1 - k) ^ 3)
+		p.Size = Vector3.new(d, math.max(0.05, d * th * (1 - 0.55 * k)), d)
+		p.CFrame = base * CFrame.Angles(0, math.random() * TAU, 0)
+		p.Transparency = math.min(1, k ^ 1.6 + (if math.random() < 0.16 then 0.4 else 0))
+		p.Color = color:Lerp(C_DEEP, k * 0.55)
+	end, function()
+		p:Destroy()
+	end)
+	Debris:AddItem(p, life + 1)
+end
+
+---------------------------------------------------------------------------
+-- 3D LIGHTNING: every arc is a jagged filament of thin Neon rods laid joint to joint (pooled, never
+-- re-made), re-struck several times a second while it lives and thinning as it dies. There is nothing
+-- flat in it: it reads as lightning from every side
+---------------------------------------------------------------------------
+type ArcSys = {
+	Add: (gen: (number) -> { Vector3 }, life: number, width: number, color: Color3?, restrike: number?) -> (),
+	Step: (now: number) -> (),
+	Count: () -> number,
+	Clear: () -> (),
+}
+local function arcSystem(parent: Instance, maxRods: number): ArcSys
+	local rods: { BasePart } = {}
+	local shown = 0
+	local list: { any } = {}
+	local function rod(i: number): BasePart
+		local p = rods[i]
+		if not p then
+			p = U.Part({ Name = "Arc", Shape = Enum.PartType.Cylinder, Material = Enum.Material.Neon, Color = C_ARC, Transparency = 1 })
+			p.Parent = parent
+			rods[i] = p
+		end
+		return p
+	end
+	local sys = {}
+	-- gen(k) -> its joints (k: 0..1 through its life); re-struck every `restrike` seconds
+	function sys.Add(gen: (number) -> { Vector3 }, life: number, width: number, color: Color3?, restrike: number?)
+		local ok, pts = pcall(gen, 0)
+		if not (ok and type(pts) == "table" and #pts >= 2) then
+			return
+		end
+		local t = os.clock()
+		local re = restrike or 0.04
+		table.insert(list, { Gen = gen, Pts = pts, Born = t, Life = math.max(life, 0.02), W = width, Color = color or C_ARC, Re = re, Next = t + re })
+	end
+	function sys.Step(now: number)
+		local parts: { BasePart } = {}
+		local cfs: { CFrame } = {}
+		local n = 0
+		for i = #list, 1, -1 do
+			local a = list[i]
+			local k = (now - a.Born) / a.Life
+			if k >= 1 then
+				table.remove(list, i)
+			else
+				if now >= a.Next then
+					a.Next = now + a.Re
+					local ok, pts = pcall(a.Gen, k)
+					if ok and type(pts) == "table" and #pts >= 2 then
+						a.Pts = pts
+					end
+				end
+				local w = a.W * (1 - 0.7 * k * k)
+				local tr = if k > 0.7 then (k - 0.7) * 3 else 0
+				local pts = a.Pts
+				for j = 1, #pts - 1 do
+					if n >= maxRods then
+						break
+					end
+					local p0, p1 = pts[j], pts[j + 1]
+					local d = p1 - p0
+					local len = d.Magnitude
+					if len > 1e-3 then
+						n += 1
+						local r = rod(n)
+						-- (a little longer than its stroke: the joints never show a gap)
+						r.Size = Vector3.new(len + w * 0.9, w, w)
+						r.Color = a.Color
+						r.Transparency = tr
+						parts[n] = r
+						cfs[n] = U.Look((p0 + p1) * 0.5, d) * ALONG
+					end
+				end
+			end
+		end
+		if n > 0 then
+			workspace:BulkMoveTo(parts, cfs, Enum.BulkMoveMode.FireCFrameChanged)
+		end
+		for j = n + 1, shown do
+			rods[j].Transparency = 1
+		end
+		shown = n
+	end
+	function sys.Count(): number
+		return #list
+	end
+	function sys.Clear()
+		table.clear(list)
+		for j = 1, shown do
+			rods[j].Transparency = 1
+		end
+		shown = 0
+	end
+	return sys :: any
+end
+
+-- a jagged 3D path from a to b in n strokes: every joint thrown off the line (most in the middle);
+-- `bow` bends the whole stroke that way
+local function jagged(a: Vector3, b: Vector3, n: number, jag: number, bow: Vector3?): { Vector3 }
+	local d = b - a
+	local len = d.Magnitude
+	if len < 1e-3 then
+		return { a, b + Vector3.new(0, 1e-2, 0) }
+	end
+	local u, v = basis(d / len)
+	local pts = { a }
+	for i = 1, n - 1 do
+		local t = i / n
+		local env = math.sin(t * math.pi)
+		local j = jag * len * (0.35 + 0.65 * env)
+		local p = a + d * t + (u * (math.random() * 2 - 1) + v * (math.random() * 2 - 1)) * j
+		if bow then
+			p += bow * env
+		end
+		pts[i + 1] = p
+	end
+	pts[n + 1] = b
+	return pts
+end
+
+---------------------------------------------------------------------------
+-- what of a pack's burst this ability keeps: its smoke, dust, flames and shards. Never a flat ring or
+-- disc, never a streak or line, never a bare glow disc (its 3D light is drawn in 3D), never anything
+-- wider than `maxSize`
+---------------------------------------------------------------------------
+local DROP_NAMES = { "glow", "flash", "flare", "ring", "circ", "line", "spike", "dash", "crack" }
+local FLASH_TEX = { "11037538087" } -- (the Explosion pack's "Impact3": a flash disc)
+local function packKeeps(e: ParticleEmitter, maxSize: number): boolean
+	if e.Orientation == Enum.ParticleOrientation.VelocityPerpendicular then
+		return false
+	end
+	if e.Orientation == Enum.ParticleOrientation.VelocityParallel and e.FlipbookLayout == Enum.ParticleFlipbookLayout.None then
+		return false
+	end
+	local nm = string.lower(e.Name)
+	for _, w in ipairs(DROP_NAMES) do
+		if string.find(nm, w, 1, true) then
+			return false
+		end
+	end
+	for _, id in ipairs(FLASH_TEX) do
+		if string.find(e.Texture, id, 1, true) then
+			return false
+		end
+	end
+	local most = 0
+	for _, kp in ipairs(e.Size.Keypoints) do
+		most = math.max(most, kp.Value)
+	end
+	return most <= maxSize
 end
 
 -- one of the place's effects, fired once at a frame (the pack's own counts and delays), gone when its
 -- particles are: `name` is a template in Abilities.Assets.AzureTideCannon (an Attachment, a Part or a
--- Model), `scale` sizes it (its spawn volume too), `count` multiplies what it emits.
+-- Model), `scale` sizes it (its spawn volume too), `count` multiplies what it emits, `maxSize` caps how
+-- wide any of its sprites may be (packKeeps).
 -- `surface`: cf's UpVector is the face of a floor or wall it stands on - then nothing it throws goes into
--- that surface (all of it flies up and out of it), nothing falls back through it, its flat (lying)
--- sprites are left out, and every sprite is drawn in front of the surface it would cut into, so no
+-- that surface (all of it flies up and out of it), nothing falls back through it, the packs' dark
+-- outline smoke is left out, and every sprite is drawn in front of the surface it would cut into, so no
 -- particle ever shows a hard edge where it meets the ground
-local function fire(name: string, cf: CFrame, scale: number, parent: Instance?, count: number?, tweak: ((ParticleEmitter) -> ())?, surface: boolean?): Instance?
+local function fire(name: string, cf: CFrame, scale: number, parent: Instance?, count: number?, tweak: ((ParticleEmitter) -> ())?, surface: boolean?, maxSize: number?): Instance?
 	local tpl = asset(name)
 	if not tpl then
 		return nil
@@ -381,31 +568,27 @@ local function fire(name: string, cf: CFrame, scale: number, parent: Instance?, 
 	else
 		return nil
 	end
+	local cap = maxSize or math.huge
 	local list = U.Emitters(root)
+	for _, e in ipairs(list) do
+		if not packKeeps(e, cap) or (surface and e.LightEmission < 0) then
+			e:Destroy()
+		end
+	end
 	if surface then
 		local cam = workspace.CurrentCamera
 		local dist = if cam then (cam.CFrame.Position - cf.Position).Magnitude else 40
 		local lift = math.clamp(dist - 4, 0, 4 + 16 * scale)
-		for _, e in ipairs(list) do
-			-- (flat ring sprites, the packs' dark-outline smoke - negative light emission - and giant
-			-- constant discs are left out: the blast stays clean, fluid light and smoke)
-			local least = math.huge
-			for _, kp in ipairs(e.Size.Keypoints) do
-				least = math.min(least, kp.Value)
+		for _, e in ipairs(U.Emitters(root)) do
+			e.ZOffset += lift
+			if e.Speed.Max > 0.5 then
+				e.EmissionDirection = Enum.NormalId.Top
+				local sx, sy = math.abs(e.SpreadAngle.X), math.abs(e.SpreadAngle.Y)
+				e.SpreadAngle = Vector2.new(math.min(if sx > 0 then sx else 75, 75), math.min(if sy > 0 then sy else 75, 75))
 			end
-			if e.Orientation == Enum.ParticleOrientation.VelocityPerpendicular or e.LightEmission < 0 or least > 40 then
-				e:Destroy()
-			else
-				e.ZOffset += lift
-				if e.Speed.Max > 0.5 then
-					e.EmissionDirection = Enum.NormalId.Top
-					local sx, sy = math.abs(e.SpreadAngle.X), math.abs(e.SpreadAngle.Y)
-					e.SpreadAngle = Vector2.new(math.min(if sx > 0 then sx else 75, 75), math.min(if sy > 0 then sy else 75, 75))
-				end
-				local acc = e.Acceleration
-				if acc.Y < 0 then
-					e.Acceleration = Vector3.new(acc.X, 0, acc.Z)
-				end
+			local acc = e.Acceleration
+			if acc.Y < 0 then
+				e.Acceleration = Vector3.new(acc.X, 0, acc.Z)
 			end
 		end
 	end
@@ -427,6 +610,8 @@ function FX.Start(o: any): any
 	local def = o.Def
 	local TL = def.Timeline
 	local B = def.Beam
+	local BW = B.Width or 1.6
+	local DRAIN = TL.Drain or 0.24
 	local maid = U.Maid()
 	local h: any = { Alive = true, Phase = "Charge" }
 	local seed = math.random() * 1000
@@ -435,6 +620,9 @@ function FX.Start(o: any): any
 	model.Name = "AzureTide_" .. caster.Name
 	model.Parent = U.Holder()
 	maid:Give(model)
+
+	-- every arc of this cast (the charge's, the beam's, its end ball's)
+	local arcs = arcSystem(model, 150)
 
 	local root = caster:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local function part(name: string): BasePart?
@@ -523,7 +711,7 @@ function FX.Start(o: any): any
 		if push.Magnitude > 0.7 then
 			push = push.Unit * 0.7
 		end
-		local room = if nearest < math.huge then math.clamp((nearest + push.Magnitude) / 1.45, math.min(0.3, r), r) else r
+		local room = if nearest < math.huge then within((nearest + push.Magnitude) / 1.45, math.min(0.3, r), r) else r
 		return at + push, room
 	end
 
@@ -534,10 +722,9 @@ function FX.Start(o: any): any
 	ball.Parent = model
 	local ballAtt = att(ball, "Center")
 	local ballLight = light(ball, rgb(55, 150, 255))
-	local meshes = asset("Meshes")
 	local function mesh(name: string, props: { [string]: any }): BasePart?
-		local tpl = meshes and meshes:FindFirstChild(name)
-		if not (tpl and tpl:IsA("BasePart")) then
+		local tpl = template(name)
+		if not tpl then
 			return nil
 		end
 		local p = U.Solid(tpl, props)
@@ -552,8 +739,11 @@ function FX.Start(o: any): any
 	local body = mesh("SphereHD", { Material = Enum.Material.Neon, Color = C_ROYAL })
 	local swirl = mesh("Swirl", { Material = Enum.Material.Neon, Color = C_DEEP })
 	local skin = mesh("SphereHD", { Material = Enum.Material.ForceField, Color = C_AZURE })
+	-- its crackling lightning cage (the Lightning pack's strike cluster, spun and flickered)
+	local cage = mesh("Strike", { Material = Enum.Material.Neon, Color = C_ICE })
 
-	-- the sphere's layers, inside out; each one sized by the sphere's radius every frame
+	-- the sphere's textured layers, inside out; each one sized by the sphere's radius every frame. Every
+	-- one sits INSIDE the 3D sphere (no halo past its skin: nothing reads as a stack of circles)
 	type SLayer = { E: ParticleEmitter, K0: number, K1: number, Z: number }
 	local sLayers: { SLayer } = {}
 	local function layerOn(parent: Attachment, k0: number, k1: number, z: number, p: { [string]: any }): ParticleEmitter
@@ -565,58 +755,27 @@ function FX.Start(o: any): any
 	local function sLayer(k0: number, k1: number, z: number, p: { [string]: any }): ParticleEmitter
 		return layerOn(ballAtt, k0, k1, z, p)
 	end
-	-- (a bright sky turns stacked additive light to white: only the heart and the electricity are fully
-	-- emissive; the body's layers are blended, so it reads as an azure sphere, not a white smear. Layers
-	-- are depth-ordered: the bloom at the back, a DARK swirl that gives the light its shape, then the
-	-- rim, the electricity and the hot core in front)
-	local sCore = sLayer(0.62, 0.72, 1, { Name = "Core", Texture = T.CoreGlow, Brightness = 0.7, Color = cs(C_HOT, C_CYAN), Transparency = ns(0, 0.55, 0.5, 0.65, 1, 1), Lifetime = nr(0.12, 0.16) })
-	local sPlasma = sLayer(1.45, 1.6, 0.9, { Name = "Plasma", Brightness = 0.85, Texture = T.PlasmaBall, Color = cs(C_AZURE, C_ROYAL, C_DEEP), Transparency = ns(0, 0.8, 0.3, 0.45, 1, 1), Lifetime = nr(0.18, 0.26), Rotation = nr(0, 360), RotSpeed = nr(-240, 240) })
-	local sChaos = sLayer(1.7, 1.9, 0.92, { Name = "Chaos", Texture = T.Chaos, Brightness = 0.6, Color = cs(C_CYAN, C_AZURE), Transparency = ns(0, 0.4, 1, 1), Lifetime = nr(0.08, 0.13), Rotation = nr(0, 360) })
-	local sSwirlA = sLayer(1.7, 1.85, 0.7, { Name = "SwirlA", Texture = T.Swirl, Color = cs(rgb(22, 64, 200), rgb(12, 36, 150)), LightEmission = 0.1, Transparency = ns(0, 1, 0.2, 0.35, 1, 1), Lifetime = nr(0.22, 0.3), Rotation = nr(0, 360), RotSpeed = nr(420, 700) })
-	local sSwirlB = sLayer(1.95, 1.75, 0.8, { Name = "SwirlB", LightEmission = 0.45, Texture = T.Swirl, Color = cs(C_AZURE, C_ROYAL, C_DEEP), Transparency = ns(0, 1, 0.25, 0.4, 1, 1), Lifetime = nr(0.25, 0.35), Rotation = nr(0, 360), RotSpeed = nr(-640, -380) })
-	local sCrescent = sLayer(2.1, 2.45, 0.75, { Name = "Crescents", Brightness = 0.85, Texture = T.Crescent, Color = cs(C_CYAN, C_AZURE, C_MID), Transparency = ns(0, 1, 0.25, 0.35, 1, 1), Lifetime = nr(0.16, 0.24), Rotation = nr(0, 360), RotSpeed = nr(620, 950) })
-	local sRim = sLayer(1.65, 1.65, 0.85, { Name = "Rim", Brightness = 0.85, Texture = T.Rim, Color = cs(C_ICE, C_AZURE), Transparency = ns(0, 0.35, 1, 0.9), Lifetime = nr(0.1, 0.14), Rotation = nr(0, 360) })
-	local sRays = sLayer(2.0, 2.35, 0.65, { Name = "Rays", Brightness = 0.7, Texture = T.RimRays, Color = cs(C_CYAN, C_MID, C_DEEP), Transparency = ns(0, 0.5, 1, 1), Lifetime = nr(0.12, 0.18), Rotation = nr(0, 360) })
-	local sBloom = sLayer(2.6, 2.9, 0.5, { Name = "Bloom", Texture = T.SoftGlow, Color = cs(C_ROYAL, C_DEEP), Transparency = ns(0, 0.8, 1, 1), Lifetime = nr(0.2) })
-	local sArcs = sLayer(1.85, 2.05, 0.95, with(book("4x4"), { Name = "Arcs", Texture = T.ArcBall, Brightness = 0.85, Color = cs(C_ICE, C_CYAN), Transparency = ns(0, 0.05, 1, 0.5), Lifetime = nr(0.12, 0.18), Rotation = nr(0, 360) }))
-	local sArcRing = sLayer(1.75, 1.95, 0.9, with(book("2x2"), { Name = "ArcRing", Texture = T.ArcRing, Color = cs(C_HOT, C_CYAN), Transparency = ns(0, 0.2, 1, 0.7), Lifetime = nr(0.1, 0.14), Rotation = nr(0, 360) }))
-	local sArcBurst = sLayer(1.9, 2.3, 0.9, { Name = "ArcBurst", Texture = T.ArcBurst, Color = cs(C_HOT, C_LIGHT), Transparency = ns(0, 0.45, 1, 1), Lifetime = nr(0.08, 0.12), Rotation = nr(0, 360) })
-	local sFlare = sLayer(1.6, 2.3, 1, { Name = "Flare", Texture = T.Star, Color = cs(C_WHITE, C_ICE), Transparency = ns(0, 0.35, 1, 1), Lifetime = nr(0.1, 0.14), Rotation = nr(0, 360) })
-	-- the place's charge flow (v80's), sized with the sphere
-	local charge: Instance? = nil
-	local chargeTpl = asset("Charge")
-	if chargeTpl then
-		charge = U.Clone(chargeTpl, ball, CFrame.new(), 1)
-		for _, e in ipairs(U.Emitters(charge :: Instance)) do
-			e.LockedToPart = true
-			-- (its sprites have black backgrounds: they stay fully emissive, the colour is kept deep)
-			e.Color = if e.Name == "Core1" then cs(C_CYAN, C_AZURE) else cs(C_AZURE, C_ROYAL)
-			e.LightEmission = 1
-			if e.Name == "Core1" then
-				e.Rate = 40
-			end
-		end
-	end
+	-- (a bright sky turns stacked additive light to white: only the electricity is fully emissive; the
+	-- body's layers are blended, so it reads as an azure sphere, not a white smear)
+	local sPlasma = sLayer(1.2, 1.35, 0.9, { Name = "Plasma", Brightness = 0.85, Texture = T.PlasmaBall, Color = cs(C_AZURE, C_ROYAL, C_DEEP), Transparency = ns(0, 0.8, 0.3, 0.45, 1, 1), Lifetime = nr(0.18, 0.26), Rotation = nr(0, 360), RotSpeed = nr(-240, 240) })
+	local sChaos = sLayer(1.3, 1.45, 0.92, { Name = "Chaos", Texture = T.Chaos, Brightness = 0.6, Color = cs(C_CYAN, C_AZURE), Transparency = ns(0, 0.4, 1, 1), Lifetime = nr(0.08, 0.13), Rotation = nr(0, 360) })
+	local sSwirlA = sLayer(1.35, 1.45, 0.7, { Name = "SwirlA", Texture = T.Swirl, Color = cs(rgb(22, 64, 200), rgb(12, 36, 150)), LightEmission = 0.1, Transparency = ns(0, 1, 0.2, 0.35, 1, 1), Lifetime = nr(0.22, 0.3), Rotation = nr(0, 360), RotSpeed = nr(420, 700) })
+	local sSwirlB = sLayer(1.5, 1.4, 0.8, { Name = "SwirlB", LightEmission = 0.45, Texture = T.Swirl, Color = cs(C_AZURE, C_ROYAL, C_DEEP), Transparency = ns(0, 1, 0.25, 0.4, 1, 1), Lifetime = nr(0.25, 0.35), Rotation = nr(0, 360), RotSpeed = nr(-640, -380) })
+	local sCrescent = sLayer(1.55, 1.8, 0.75, { Name = "Crescents", Brightness = 0.85, Texture = T.Crescent, Color = cs(C_CYAN, C_AZURE, C_MID), Transparency = ns(0, 1, 0.25, 0.35, 1, 1), Lifetime = nr(0.16, 0.24), Rotation = nr(0, 360), RotSpeed = nr(620, 950) })
+	local sArcs = sLayer(1.55, 1.75, 0.95, with(book("4x4"), { Name = "Arcs", Texture = T.ArcBall, Brightness = 0.85, Color = cs(C_ICE, C_CYAN), Transparency = ns(0, 0.05, 1, 0.5), Lifetime = nr(0.12, 0.18), Rotation = nr(0, 360) }))
+	local sArcBurst = sLayer(1.6, 1.95, 0.9, { Name = "ArcBurst", Texture = T.ArcBurst, Color = cs(C_HOT, C_LIGHT), Transparency = ns(0, 0.45, 1, 1), Lifetime = nr(0.08, 0.12), Rotation = nr(0, 360) })
 
-	-- AT ITS LARGEST IT IS A BLUE BLACK HOLE: a void at its heart that swallows the light, the photon
-	-- ring burning round its edge, a lensed glow, and an accretion disk of plasma spun flat round it
-	-- (bright inner streams, dark lanes, a soft outer glow), tilted toward the view behind the caster -
-	-- while everything round it spirals in. It collapses into white-hot light as it is crushed down
+	-- AT ITS LARGEST IT IS A BLUE BLACK HOLE: a void at its heart that swallows the light, and the
+	-- ElectricShockwave pack's rings spun flat round it - a crackling accretion ring, tilted toward the
+	-- view behind the caster - while lightning spirals into it. It collapses into white-hot light as it
+	-- is crushed down
 	local void = mesh("SphereHD", { Material = Enum.Material.Neon, Color = rgb(34, 110, 255) })
-	local diskAtt = att(ball, "Disk")
-	local onDisk = { Orientation = Enum.ParticleOrientation.VelocityPerpendicular, EmissionDirection = Enum.NormalId.Top, Speed = nr(0.01), Rotation = nr(0, 360) }
-	local dGlow = layerOn(diskAtt, 3.9, 4.2, 0.45, with(onDisk, { Name = "DiskGlow", Texture = T.SoftGlow, Color = cs(C_ROYAL, C_DEEP), Transparency = ns(0, 1, 0.3, 0.5, 1, 1), Lifetime = nr(0.3) }))
-	local dSwirl = layerOn(diskAtt, 2.7, 3.5, 0.75, with(onDisk, { Name = "DiskSwirl", Texture = T.Swirl, Color = cs(C_ICE, C_AZURE, C_ROYAL), Brightness = 0.85, Transparency = ns(0, 1, 0.2, 0.15, 0.7, 0.45, 1, 1), Lifetime = nr(0.32, 0.4), RotSpeed = nr(280, 420) }))
-	local dStreak = layerOn(diskAtt, 2.3, 3.1, 0.8, with(onDisk, { Name = "DiskStreaks", Texture = T.Crescent, Brightness = 0.85, Color = cs(C_CYAN, C_ROYAL), Transparency = ns(0, 1, 0.25, 0.2, 1, 1), Lifetime = nr(0.18, 0.26), RotSpeed = nr(620, 900) }))
-	local dDark = layerOn(diskAtt, 2.1, 2.7, 0.7, with(onDisk, { Name = "DiskLanes", Texture = T.Swirl, Color = cs(C_DEEP, rgb(12, 34, 150)), LightEmission = 0.15, Transparency = ns(0, 1, 0.3, 0.4, 1, 1), Lifetime = nr(0.3, 0.38), RotSpeed = nr(340, 480) }))
-	local sPhoton = sLayer(1.02, 1.06, 1.2, { Name = "PhotonRing", Texture = T.Rim, Color = cs(C_HOT, C_CYAN), Brightness = 1.1, Transparency = ns(0, 0.1, 1, 0.6), Lifetime = nr(0.08, 0.12), Rotation = nr(0, 360) })
-	-- (the void itself: a dark disc drawn over the bright heart, the photon ring burning on its edge)
-	local sVoid = sLayer(0.92, 0.96, 1.15, { Name = "Void", Texture = T.Glow2, Color = cs(rgb(46, 132, 255), rgb(28, 92, 240)), LightEmission = 0.35, Transparency = ns(0, 0.12, 1, 0.25), Lifetime = nr(0.1, 0.12) })
-	local sLens = sLayer(1.5, 2.6, 0.55, { Name = "Lensing", Texture = T.Rim, Color = cs(C_CYAN, C_ROYAL), Transparency = ns(0, 0.55, 1, 1), Lifetime = nr(0.3), Rotation = nr(0, 360) })
+	local ringA = mesh("Shock", { Material = Enum.Material.Neon, Color = C_CYAN })
+	local ringB = mesh("Shock", { Material = Enum.Material.Neon, Color = C_AZURE })
 
-	-- the place's own ball and charge packs layered in, recoloured in the sphere's blues: Big Ball-01's
-	-- flames (azure) and ash (navy - the dark that gives the light its shape) licking off its surface and
-	-- its specks drawn into it, Yona's charge core, wind and motes at its heart
+	-- the place's own ball pack layered in, recoloured in the sphere's blues: Big Ball-01's flames
+	-- (azure) and ash (navy - the dark that gives the light its shape) licking off its surface, its
+	-- specks drawn into it, motes at its heart
 	type PLayer = { E: ParticleEmitter, Size: NumberSequence, K: number, Speed: number, Rate: number, Phase: string, Z: number }
 	local pLayers: { PLayer } = {}
 	local ballPack = asset("BallPack")
@@ -640,42 +799,12 @@ function FX.Start(o: any): any
 	packLayer("Fire1", ball, 0.42, 1.6, 55, "grow", 0.88, with(onSphere, { Name = "PackFlames", Color = cs(C_AZURE, C_ROYAL, C_DEEP), LightEmission = 0.35, LightInfluence = 0, Drag = 2, Lifetime = nr(0.35, 0.5), Rotation = nr(0, 360), RotSpeed = nr(-120, 120) }))
 	packLayer("Ash1", ball, 0.4, 1.2, 26, "grow", 0.6, with(onSphere, { Name = "PackAsh", Color = cs(rgb(18, 54, 190), rgb(10, 30, 130)), LightEmission = 0.1, LightInfluence = 0, Transparency = ns(0, 0.15, 1, 1), Drag = 2, Lifetime = nr(0.35, 0.5), Rotation = nr(0, 360) }))
 	packLayer("FireSpecs1", ball, 0.32, -2.2, 50, "surge", 0.96, with(onSphere, { Name = "PackSpecks", Color = cs(C_HOT, C_CYAN), LightEmission = 0.8, LightInfluence = 0, Lifetime = nr(0.35, 0.45), SpreadAngle = Vector2.new(0, 0) }))
-	packLayer("Charge", ballAtt, 0.6, 0, 30, "form", 1.05, { Name = "PackCharge", Color = cs(C_CYAN, C_AZURE), LightEmission = 1, LightInfluence = 0 })
-	packLayer("Wind", ballAtt, 0.55, 0, 12, "gather", 0.5, { Name = "PackWind", Color = cs(C_AZURE, C_ROYAL), LightEmission = 1, LightInfluence = 0 })
 	packLayer("Main-Core-02", ballAtt, 1.6, 0.9, 40, "form", 0.97, { Name = "PackMotes", Color = cs(C_HOT, C_CYAN), LightEmission = 1, LightInfluence = 0 })
 
-	-- sparks riding round it (short comets, never a drawn circle)
-	local orbiters = {}
-	for i = 1, 2 do
-		local a = att(ball, "Orbit" .. i)
-		local e = emitter(a, { Name = "Orbit", Texture = T.Glow2, Color = cs(C_WHITE, C_ICE), Size = ns(0, 0.36, 1, 0), Transparency = ns(0, 0, 1, 0.5), Lifetime = nr(0.07), Rate = 60 })
-		orbiters[i] = { Att = a, E = e, Tilt = CFrame.Angles(math.rad(70 * i + 15), math.rad(57 * i), 0), Speed = 10 + i * 2.3, Phase = i * 2.1 }
-	end
-	-- twinkles over its surface
+	-- twinkles over its surface (sparks, not discs)
 	local twinkle = emitter(ball, with(book("2x2"), { Name = "Twinkle", Texture = T.Spark, Shape = Enum.ParticleEmitterShape.Sphere, ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface, Color = cs(C_WHITE, C_ICE), Transparency = ns(0, 0.1, 1, 1), Lifetime = nr(0.12, 0.2), Rotation = nr(0, 360), LockedToPart = true, ZOffset = 1 }))
-	-- the streak it leaves as the hands drive it forward
-	local trailA = att(ball, "TrailA")
-	local trailB = att(ball, "TrailB")
-	local thrustTrail = Instance.new("Trail")
-	thrustTrail.Attachment0 = trailA
-	thrustTrail.Attachment1 = trailB
-	thrustTrail.Texture = T.BWisp
-	thrustTrail.Color = cs(C_WHITE, C_LIGHT)
-	thrustTrail.LightEmission = 1
-	thrustTrail.LightInfluence = 0
-	thrustTrail.Transparency = ns(0, 0.1, 1, 1)
-	thrustTrail.Lifetime = 0.14
-	thrustTrail.FaceCamera = true
-	thrustTrail.Enabled = false
-	thrustTrail.Parent = ball
 
-	-- energy drawn in: streaks and motes fall into it from a shell round it, wisps curl in
-	local absorb = U.Part({ Name = "Absorb", Shape = Enum.PartType.Ball, Size = Vector3.one * 9 })
-	absorb.Parent = model
-	local inStreaks = emitter(absorb, { Name = "Streaks", Texture = T.Needle, Shape = Enum.ParticleEmitterShape.Sphere, ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface, ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward, Orientation = Enum.ParticleOrientation.VelocityParallel, Color = cs(C_HOT, C_LIGHT), Size = ns(0, 0.12, 0.3, 0.42, 1, 0.08), Squash = ns(0, 1.4, 1, 2.6), Transparency = ns(0, 1, 0.25, 0.05, 1, 0.3), Lifetime = nr(0.3), Speed = nr(15), LockedToPart = true })
-	local inMotes = emitter(absorb, { Name = "Motes", Texture = T.Glow2, Shape = Enum.ParticleEmitterShape.Sphere, ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface, ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward, Color = cs(C_ICE, C_LIGHT), Size = ns(0, 0.28, 1, 0.06), Transparency = ns(0, 1, 0.3, 0.1, 1, 0.5), Lifetime = nr(0.42), Speed = nr(10.7), LockedToPart = true })
-
-	-- the hands' own glow (v80's)
+	-- the hands crackle (the Electricity pack's crackle, small, in each palm)
 	local handFx: { ParticleEmitter } = {}
 	for _, name in ipairs({ "Right Arm", "Left Arm" }) do
 		local a = part(name)
@@ -685,8 +814,7 @@ function FX.Start(o: any): any
 			ha.Position = Vector3.new(0, -1, 0)
 			ha.Parent = a
 			maid:Give(ha)
-			table.insert(handFx, emitter(ha, { Name = "HandGlow", Texture = T.Glow, Color = cs(C_LIGHT), Size = ns(0, 0.9, 1, 1.3), Transparency = ns(0, 0.6, 1, 1), Lifetime = nr(0.15, 0.22), LockedToPart = true }))
-			table.insert(handFx, emitter(ha, { Name = "HandSparks", Texture = T.Needle2, Color = cs(C_ICE), Size = ns(0, 0.12, 1, 0), Transparency = ns(0, 0, 1, 0.6), Lifetime = nr(0.15, 0.3), Speed = nr(3, 7), SpreadAngle = Vector2.new(180, 180), Orientation = Enum.ParticleOrientation.VelocityParallel, Drag = 6 }))
+			table.insert(handFx, emitter(ha, with(book("4x4"), { Name = "HandCrackle", Texture = T.Crackle, Color = cs(C_ICE, C_CYAN), Brightness = 2, Size = ns(0, 0.9, 1, 1.25), Transparency = ns(0, 0.6, 0.3, 0.05, 1, 1), Lifetime = nr(0.2, 0.25), Rotation = nr(0, 360), LockedToPart = true, ZOffset = 0.4 })))
 		end
 	end
 
@@ -697,121 +825,87 @@ function FX.Start(o: any): any
 	local gMotes = emitter(groundPart, { Name = "Motes", Texture = T.Dots, Shape = Enum.ParticleEmitterShape.Disc, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume, EmissionDirection = Enum.NormalId.Right, Color = cs(rgb(150, 205, 255)), LightEmission = 0.6, Size = ns(0, 0.12, 1, 0.06), Transparency = ns(0, 0.2, 1, 1), Lifetime = nr(0.8, 1.3), Speed = nr(2, 5), Acceleration = Vector3.new(0, 2, 0), Drag = 1 })
 
 	-------------------------------------------------------------------
-	-- the beam (v80's, built now, switched on at the release)
+	-- the beam (built now, switched on at the release): FULLY 3D AND CONTINUOUS. Four nested layers
+	-- - a white-hot core, a cyan layer, the azure body and a force-field shell - each one a single rod
+	-- from its flare to the end ball, and a flare (a stretched sphere: a smooth teardrop) where it pours
+	-- out of the sphere. Each layer flares a little further out than the one inside it, so the beam
+	-- blooms out of the hands into its full width. Diameters x Width x its size now (Beam.Width)
 	-------------------------------------------------------------------
 	local origin = U.Part({ Name = "Origin" })
 	origin.Parent = model
-	local a0 = att(origin, "A0")
-	local neckPart = U.Part({ Name = "Neck" })
-	neckPart.Parent = model
-	local aN = att(neckPart, "AN")
-	local tipPart = U.Part({ Name = "Tip" })
-	tipPart.Parent = model
-	local aT = att(tipPart, "AT")
 	local tail = U.Part({ Name = "End" })
 	tail.Parent = model
-	local a1 = att(tail, "A1")
 	local surface = att(tail, "Surface")
 	local endLight = light(tail, C_LIGHT)
 	local muzzleLight = light(origin, C_ICE)
 
-	-- AN ANIME BEAM: a white-hot core in smooth, symmetrical bands of light - cyan, azure, royal, a deep
-	-- blue halo - every one a soft band (no streaks, no stray lines), round its solid 3D core. Every
-	-- layer is three pieces: it flares out of the sphere (neck), runs (main) and tapers into its end
-	-- (tip) - the bands are even along their length, so the joints never show. Edge: how much of a
-	-- layer's width is visibly opaque
-	type BLayer = { Neck: Beam, Main: Beam, Tip: Beam, W: number, Amp: number, Speed: number, Core: boolean, Edge: number, Z: number, Tr: number, Vis: number }
+	type BLayer = { Cyl: BasePart, Neck: BasePart?, K: number, Off: number, Tr: number, Color: Color3 }
 	local bLayers: { BLayer } = {}
-	local function layer(name: string, texture: string, w: number, color: ColorSequence, le: number, tr: number, tl: number, ts: number, z: number, amp: number, speed: number, isCore: boolean, edge: number)
-		local props = { Name = name, Texture = texture, Color = color, LightEmission = le, Transparency = ns(tr), TextureLength = tl, TextureSpeed = ts, ZOffset = z, Width0 = w, Width1 = w }
-		local function make(x0: Attachment, x1: Attachment, suffix: string): Beam
-			return beam(origin, x0, x1, with(props, { Name = name .. suffix, Segments = if suffix == "" then 20 else 10 }))
+	local function layer(name: string, k: number, off: number, tr: number, color: Color3, mat: Enum.Material)
+		local cyl = U.Part({ Name = name, Shape = Enum.PartType.Cylinder, Material = mat, Color = color, Transparency = 1 })
+		cyl.Parent = model
+		local neck = mesh("SphereHD", { Name = name .. "Flare", Material = mat, Color = color })
+		table.insert(bLayers, { Cyl = cyl, Neck = neck, K = k, Off = off, Tr = tr, Color = color })
+	end
+	layer("Core", 1.0, 0, 0, C_WHITE, Enum.Material.Neon)
+	layer("Inner", 1.9, 0.1, 0.25, C_CYAN, Enum.Material.Neon)
+	layer("Body", 2.9, 0.24, 0.55, C_AZURE, Enum.Material.Neon)
+	layer("Shell", 3.6, 0.4, 0.05, C_LIGHT, Enum.Material.ForceField)
+	local SHELL = B.Shell or 3.6
+
+	-- its lightning: the Lightning pack's bolt (Sleeve) laid along it in lengths, each spun about the
+	-- beam and flickered every few frames the way its own pack drives it - lightning wrapped all round
+	-- it, from every side
+	local MAX_SLEEVES = 8
+	local sleeves: { BasePart } = {}
+	for i = 1, MAX_SLEEVES do
+		local s = mesh("Sleeve", { Name = "Lightning" .. i, Material = Enum.Material.Neon, Color = C_ICE })
+		if s then
+			sleeves[i] = s
 		end
-		table.insert(bLayers, { Neck = make(a0, aN, "Neck"), Main = make(aN, aT, ""), Tip = make(aT, a1, "Tip"), W = w, Amp = amp, Speed = speed, Core = isCore, Edge = edge, Z = z, Tr = tr, Vis = -1 })
 	end
-	layer("Core", T.CoreBand, 1.7 * BEAM_W, cs(C_WHITE, C_HOT), 1, 0, 8, 3, 1, 0.02, 1, true, 0.9)
-	layer("Inner", T.GlowBand, 4.2 * BEAM_W, cs(C_CYAN, C_AZURE), 0.6, 0, 10, 2.5, 0.75, 0.03, 1.2, false, 0.65)
-	layer("Body", T.GlowBand, 7.4 * BEAM_W, cs(C_AZURE, C_ROYAL), 0.35, 0.05, 10, 2, 0.5, 0.04, 1.3, false, 0.6)
-	layer("Halo", T.GlowBand, 11 * BEAM_W, cs(C_ROYAL, C_DEEP), 0.3, 0.45, 12, 1.5, 0.2, 0.05, 0.9, false, 0.35)
-
-	-- THE BODY FROM ANY SIDE (v80's core and body rods): rounded at both ends (a rod and two balls)
-	local function solid(name: string, color: Color3, shape: Enum.PartType): Part
-		local p = U.Part({ Name = name, Shape = shape, Material = Enum.Material.Neon, Color = color, Transparency = 1 })
-		p.Parent = model
-		return p
+	local sleeveState: { { Spin: number, Tr: number, Color: Color3 } } = {}
+	for i = 1, MAX_SLEEVES do
+		sleeveState[i] = { Spin = math.random() * TAU, Tr = 1, Color = C_ICE }
 	end
-	local coreRod = solid("CoreRod", C_HOT, Enum.PartType.Cylinder)
-	local midRod = solid("MidRod", C_MID, Enum.PartType.Cylinder)
-	local midCaps = { solid("MidCapA", C_MID, Enum.PartType.Ball), solid("MidCapB", C_MID, Enum.PartType.Ball) }
-	local bodyRod = solid("BodyRod", C_DEEP, Enum.PartType.Cylinder)
-	local coreCaps = { solid("CoreCapA", C_HOT, Enum.PartType.Ball), solid("CoreCapB", C_HOT, Enum.PartType.Ball) }
-	local bodyCaps = { solid("BodyCapA", C_DEEP, Enum.PartType.Ball), solid("BodyCapB", C_DEEP, Enum.PartType.Ball) }
-	-- the energy streaming down its inside (v80's)
-	local flow = emitter(a0, { Name = "Flow", Texture = T.Glow, EmissionDirection = Enum.NormalId.Front, Color = cs(C_MID, C_DEEP), Size = ns(0, 5.5 * BEAM_W, 1, 4.6 * BEAM_W), Transparency = ns(0, 0.45, 0.85, 0.5, 1, 1), Lifetime = nr(0.2), Speed = nr(170), Rotation = nr(0, 360), LockedToPart = true })
-	local flowCore = emitter(a0, { Name = "FlowCore", Texture = T.Glow2, EmissionDirection = Enum.NormalId.Front, Color = cs(C_CYAN, C_AZURE), Size = ns(0, 2.6 * BEAM_W, 1, 2.2 * BEAM_W), Transparency = ns(0, 0.3, 0.85, 0.35, 1, 1), Lifetime = nr(0.2), Speed = nr(190), LockedToPart = true })
+	local nextSleeve = 0
 
-	-- the head: the sphere hurled out ahead of the beam until it lands (v80's stretched ball)
-	local head = mesh("Sphere", { Material = Enum.Material.Neon, Color = C_ICE })
+	-- the surge that rushes down it into the end ball with every hit
+	local pulse = mesh("SphereHD", { Name = "Surge", Material = Enum.Material.Neon, Color = C_ICE })
 
 	-- the lights along it (they light the world it passes)
 	local volume = U.Part({ Name = "Volume", Size = Vector3.new(4, 4, 1) })
 	volume.Parent = model
-	-- ITS VOLUME: big soft glows filling the beam along its whole length - they always face you, so it is
-	-- a massive column from every side (even looking straight down it), in its shades of blue
-	local fillPart = U.Part({ Name = "Fill", Size = Vector3.new(1, 1, 1) })
-	fillPart.Parent = model
-	local fillBox = { Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume, LockedToPart = true, EmissionDirection = Enum.NormalId.Front, Speed = nr(26, 34) }
-	local fillGlow = emitter(fillPart, with(fillBox, { Name = "FillGlow", Texture = T.Glow, Color = cs(C_AZURE, C_ROYAL), Transparency = ns(0, 1, 0.3, 0.55, 1, 1), Lifetime = nr(0.22, 0.3), Rotation = nr(0, 360) }))
-	local fillPlasma = emitter(fillPart, with(fillBox, { Name = "FillPlasma", Texture = T.PlasmaBall, Color = cs(C_MID, C_ROYAL, C_DEEP), Brightness = 0.8, Transparency = ns(0, 1, 0.3, 0.6, 1, 1), Lifetime = nr(0.2, 0.28), Rotation = nr(0, 360), RotSpeed = nr(-160, 160) }))
-	local fillCore = emitter(fillPart, with(fillBox, { Name = "FillCore", Texture = T.Glow2, Color = cs(C_HOT, C_CYAN), Transparency = ns(0, 1, 0.3, 0.35, 1, 1), Lifetime = nr(0.16, 0.22) }))
-	-- its energy sheath: a shimmering force field wrapped round the body - the beam is a solid column in
-	-- the world from every side, rounded at both ends like the rest
-	local sheath = U.Part({ Name = "Sheath", Shape = Enum.PartType.Cylinder, Material = Enum.Material.ForceField, Color = C_AZURE, Transparency = 1 })
-	sheath.Parent = model
-	local sheathCaps = {}
-	for k = 1, 2 do
-		local cap = U.Part({ Name = "SheathCap", Shape = Enum.PartType.Ball, Material = Enum.Material.ForceField, Color = C_AZURE, Transparency = 1 })
-		cap.Parent = model
-		sheathCaps[k] = cap
-	end
 	local volLights = {}
 	for i = 1, 3 do
 		local la = att(volume, "Light" .. i)
 		volLights[i] = { Att = la, Light = light(la, C_MID) }
 	end
 
-	-- the release's star and its bloom (v80's)
-	local releaseFlare = emitter(a0, { Name = "ReleaseFlare", Texture = T.Flare, Color = cs(C_WHITE, C_ICE), Size = ns(0, 2, 0.12, 19, 1, 0), Transparency = ns(0, 0, 0.6, 0.1, 1, 1), Lifetime = nr(0.34), Rotation = nr(0, 360), RotSpeed = nr(-60, 60), ZOffset = 3 })
-	local releaseGlow = emitter(a0, { Name = "ReleaseGlow", Texture = T.Glow, Color = cs(C_ICE, C_LIGHT), Size = ns(0, 4, 0.2, 22, 1, 26), Transparency = ns(0, 0.1, 1, 1), Lifetime = nr(0.4), ZOffset = 2.5 })
-
-	-- the muzzle (Beamy's start) and its forward streaks (v80's), sized with the beam
-	local function lit(a: Instance?)
-		if a then
-			for _, e in ipairs(U.Emitters(a)) do
-				e.LightEmission = math.max(e.LightEmission, 0.8)
-			end
+	-------------------------------------------------------------------
+	-- THE END BALL: the beam's head - the same layers as a ball, in a crackling lightning cage, with
+	-- three bolts of the Thunder pack discharging out of it (evenly round, slowly turning)
+	-------------------------------------------------------------------
+	local eCore = mesh("SphereHD", { Name = "EndCore", Material = Enum.Material.Neon, Color = C_WHITE })
+	local eBody = mesh("SphereHD", { Name = "EndBody", Material = Enum.Material.Neon, Color = C_AZURE })
+	local eSwirl = mesh("Swirl", { Name = "EndSwirl", Material = Enum.Material.Neon, Color = C_ROYAL })
+	local eSkin = mesh("SphereHD", { Name = "EndSkin", Material = Enum.Material.ForceField, Color = C_CYAN })
+	local eCageA = mesh("Strike", { Name = "EndCage", Material = Enum.Material.Neon, Color = C_ICE })
+	local eCageB = mesh("Spark", { Name = "EndSparks", Material = Enum.Material.Neon, Color = C_ARC })
+	-- (the drain: a force-field shell crushing in on it)
+	local eImplode = mesh("SphereHD", { Name = "Implode", Material = Enum.Material.ForceField, Color = C_ICE })
+	local thunders: { BasePart } = {}
+	for i = 1, 3 do
+		local t = mesh("Thunder", { Name = "Discharge" .. i, Material = Enum.Material.Neon, Color = C_ARC })
+		if t then
+			table.insert(thunders, t)
 		end
 	end
-	local muzzleTpl, streamTpl, impactTpl = asset("Muzzle"), asset("MuzzleStream"), asset("Impact")
-	local muzzle: Instance? = if muzzleTpl then U.Clone(muzzleTpl, origin, CFrame.new(), 0.34 * BEAM_W) else nil
-	local muzzleStream: Instance? = if streamTpl then U.Clone(streamTpl, origin, CFrame.new(), 0.5 * BEAM_W) else nil
-	lit(muzzle)
-	lit(muzzleStream)
-
-	-- the end (v80's): Beamy's impact, a glow and a flare, sparks and smoke off a surface, a splash back
-	local impact: Instance? = if impactTpl then U.Clone(impactTpl, tail, CFrame.new(), 0.5 * BEAM_W) else nil
-	lit(impact)
-	-- (the end sits on a surface: its sprites are drawn in front of it, never cut off by the ground)
-	if impact then
-		for _, e in ipairs(U.Emitters(impact)) do
-			e.ZOffset += 4
-		end
-	end
-	local endGlow = emitter(a1, { Name = "EndGlow", Texture = T.Glow, Color = cs(C_LIGHT), Size = ns(0, 7 * BEAM_W, 1, 8 * BEAM_W), Transparency = ns(0, 0.35, 1, 1), Lifetime = nr(0.1, 0.14), ZOffset = 5 })
-	local endFlare = emitter(a1, { Name = "EndFlare", Texture = T.Flare, Color = cs(C_WHITE, C_LIGHT), Size = ns(0, 5 * BEAM_W, 1, 7 * BEAM_W), Transparency = ns(0, 0.2, 1, 1), Lifetime = nr(0.08, 0.12), Rotation = nr(0, 360), ZOffset = 5.5 })
-	local endSparks = emitter(surface, { Name = "SurfaceSparks", Texture = T.Needle, EmissionDirection = Enum.NormalId.Top, Orientation = Enum.ParticleOrientation.VelocityParallel, Color = cs(C_WHITE, C_LIGHT), Size = ns(0, 0.5, 1, 0.05), Squash = ns(2.5), Transparency = ns(0, 0, 1, 0.6), Lifetime = nr(0.15, 0.32), Speed = nr(40, 90), SpreadAngle = Vector2.new(70, 70), Drag = 2, ZOffset = 3 })
+	local endAtt = att(tail, "Ball")
+	local eCrackle = emitter(endAtt, with(book("4x4"), { Name = "EndCrackle", Texture = T.Crackle, Color = cs(C_ARC, C_CYAN), Brightness = 3, Transparency = ns(0, 0.5, 0.25, 0, 1, 1), Lifetime = nr(0.2, 0.25), Rotation = nr(0, 360), Shape = Enum.ParticleEmitterShape.Sphere, ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface }))
+	-- its smoke off the surface it grinds into (the Explosion pack's smoke)
 	local endSmoke = emitter(surface, { Name = "Smoke", Texture = T.Smoke, EmissionDirection = Enum.NormalId.Top, Color = cs(rgb(150, 175, 205)), LightEmission = 0.1, LightInfluence = 0.8, Size = ns(0, 2.5, 1, 7), Transparency = ns(0, 0.6, 1, 1), Lifetime = nr(0.7, 1.1), Speed = nr(6, 12), SpreadAngle = Vector2.new(50, 50), Rotation = nr(0, 360), RotSpeed = nr(-30, 30), ZOffset = 3 })
-	local splash = emitter(a1, { Name = "Splash", Texture = T.Needle2, EmissionDirection = Enum.NormalId.Back, Orientation = Enum.ParticleOrientation.VelocityParallel, Color = cs(C_WHITE, C_LIGHT), Size = ns(0, 0.7, 1, 0.1), Squash = ns(2), Transparency = ns(0, 0, 1, 0.5), Lifetime = nr(0.12, 0.25), Speed = nr(35, 80), SpreadAngle = Vector2.new(70, 70), Drag = 3, ZOffset = 3.5 })
+	local endSparkle = emitter(surface, with(book("2x2"), { Name = "Sparkle", Texture = T.Spark, EmissionDirection = Enum.NormalId.Top, Color = cs(C_WHITE, C_ICE), Size = ns(0, 0.9, 1, 0.3), Transparency = ns(0, 0, 1, 0.6), Lifetime = nr(0.15, 0.3), Speed = nr(18, 34), SpreadAngle = Vector2.new(70, 70), Drag = 4, Rotation = nr(0, 360), ZOffset = 3 }))
 
 	-- the ground under its path, stirred wherever it is close (v80's dust)
 	local TRAIL = 8
@@ -823,16 +917,18 @@ function FX.Start(o: any): any
 		trailPts[i] = {
 			Att = ta,
 			Dust = emitter(ta, { Name = "TrailDust", Texture = T.Smoke, EmissionDirection = Enum.NormalId.Top, Color = cs(C_DUST), LightEmission = 0.05, LightInfluence = 0.9, Size = ns(0, 1.6, 1, 5.5), Transparency = ns(0, 0.55, 1, 1), Lifetime = nr(0.6, 1.1), Speed = nr(5, 12), SpreadAngle = Vector2.new(40, 40), Rotation = nr(0, 360), RotSpeed = nr(-40, 40), Drag = 1.5 }),
+			NextChunk = 0,
 		}
 	end
 
 	-- DEBRIS: where it grinds into the floor the floor itself is torn out - chunks of that very floor (its
 	-- material and colour, the place's own rock mesh in irregular sizes), thrown up and out under
-	-- gravity, tumbling, bouncing and rolling to rest, then sinking smoothly away. They never touch a
-	-- fighter (the Debris group) and there are never too many
+	-- gravity, tumbling (a trail of dust behind each), bouncing and rolling to rest, then sinking smoothly
+	-- away. They never touch a fighter (the Debris group) and there are never too many
+	local meshes = asset("Meshes")
 	local rockTpl = meshes and meshes:FindFirstChild("Rock")
 	local liveChunks = 0
-	local MAX_CHUNKS = 40
+	local MAX_CHUNKS = 48
 	local function floorLook(hit: RaycastResult?): (Color3, Enum.Material)
 		local inst = hit and hit.Instance
 		if inst and inst:IsA("Terrain") then
@@ -855,48 +951,58 @@ function FX.Start(o: any): any
 		local unit = base / math.max(base.X, base.Y, base.Z)
 		local shade = 0.04 + math.random() * 0.14
 		local turf = GRASSY[mat] == true
-		local body = U.Solid(rockTpl :: BasePart, {
+		local bodyP = U.Solid(rockTpl :: BasePart, {
 			Anchored = anchored, CanCollide = not anchored, CastShadow = true, Transparency = 0,
 			Material = if turf then Enum.Material.Ground else mat,
 			Color = (if turf then SOIL else col):Lerp(Color3.new(0, 0, 0), shade),
 		})
-		body.Size = if spike then Vector3.new(size * (0.4 + math.random() * 0.35), size * (1.6 + math.random() * 1.1), size * (0.4 + math.random() * 0.35))
+		bodyP.Size = if spike then Vector3.new(size * 0.55, size * 1.9, size * 0.55)
 			else unit * size * Vector3.new(0.8 + math.random() * 0.5, 0.5 + math.random() * 0.35, 0.8 + math.random() * 0.5)
-		body.CollisionGroup = "Debris"
-		local parts = { body }
+		bodyP.CollisionGroup = "Debris"
+		local parts = { bodyP }
 		if turf then
 			-- (its grass, still growing on top of it)
-			local top = U.Solid(rockTpl :: BasePart, { Anchored = false, CanCollide = false, Massless = true, CastShadow = true, Transparency = 0, Material = mat, Color = col:Lerp(Color3.new(0, 0, 0), shade * 0.5) })
-			top.Size = Vector3.new(body.Size.X * 1.05, body.Size.Y * 0.34, body.Size.Z * 1.05)
+			local top = U.Solid(rockTpl :: BasePart, { Anchored = anchored, CanCollide = false, Massless = true, CastShadow = true, Transparency = 0, Material = mat, Color = col:Lerp(Color3.new(0, 0, 0), shade * 0.5) })
+			top.Size = Vector3.new(bodyP.Size.X * 1.05, bodyP.Size.Y * (if spike then 0.18 else 0.34), bodyP.Size.Z * 1.05)
 			top.CollisionGroup = "Debris"
-			top.CFrame = body.CFrame * CFrame.new(0, body.Size.Y * 0.36, 0)
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = body
-			weld.Part1 = top
-			weld.Parent = top
-			top.Parent = body
+			top.CFrame = bodyP.CFrame * CFrame.new(0, bodyP.Size.Y * (if spike then 0.42 else 0.36), 0)
+			if not anchored then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = bodyP
+				weld.Part1 = top
+				weld.Parent = top
+			end
+			top.Parent = bodyP
 			table.insert(parts, top)
 		end
-		return body, parts
+		return bodyP, parts
 	end
-	local function chunk(at: Vector3, n: Vector3, hit: RaycastResult?, power: number, away: Vector3?)
-		if not (rockTpl and rockTpl:IsA("BasePart")) or liveChunks >= MAX_CHUNKS then
+	-- a chunk of the ground at `at` (face `n`) thrown with `power`, `away` along the surface
+	-- (`reserve`: chunks kept free for what comes after - the beam's grinding leaves room for the blast)
+	local function chunk(at: Vector3, n: Vector3, hit: RaycastResult?, power: number, away: Vector3?, up: number?, reserve: number?)
+		if not (rockTpl and rockTpl:IsA("BasePart")) or liveChunks >= MAX_CHUNKS - (reserve or 0) then
 			return
 		end
 		local col, mat = floorLook(hit)
-		local size = (0.25 + math.random() ^ 2.4 * 1.0) * power
+		local size = (0.3 + math.random() ^ 2.4 * 0.9) * power
 		local rock, parts = piece(col, mat, size, false)
 		rock.CFrame = CFrame.new(at + n * (size * 0.35)) * CFrame.Angles(math.random() * 6.28, math.random() * 6.28, math.random() * 6.28)
 		rock.Parent = U.Holder()
 		liveChunks += 1
 		-- thrown off the surface and out, the heavier ones lower and slower
-		local t = n:Cross(Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5))
-		t = if t.Magnitude > 1e-3 then t.Unit else n:Cross(Vector3.xAxis).Unit
+		local out = away or (n:Cross(randomUnit()))
+		out = if out.Magnitude > 1e-3 then out.Unit else basis(n)
 		local heft = 1 / (0.6 + size / power)
-		rock.AssemblyLinearVelocity = (n * (16 + math.random() * 24) + t * (5 + math.random() * 12) + (away or Vector3.zero) * (6 + math.random() * 10)) * power * heft
-		rock.AssemblyAngularVelocity = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 20
+		rock.AssemblyLinearVelocity = (n * (up or (16 + math.random() * 14)) + out * (9 + math.random() * 8)) * power * heft
+		rock.AssemblyAngularVelocity = randomUnit() * (8 + math.random() * 12)
+		-- a trail of dust while it flies
+		local dust = emitter(rock, { Name = "DebrisDust", Texture = T.Smoke, Color = cs(col:Lerp(C_DUST, 0.5)), LightEmission = 0, LightInfluence = 1, Size = ns(0, size * 0.7, 1, size * 2.2), Transparency = ns(0, 0.55, 1, 1), Lifetime = nr(0.35, 0.55), Rate = 18, Rotation = nr(0, 360), RotSpeed = nr(-60, 60), Speed = nr(0.5) })
+		dust.Enabled = true
+		task.delay(0.8 + math.random() * 0.3, function()
+			dust.Enabled = false
+		end)
 		-- it settles, then sinks away into the floor and is gone
-		local life = 2.6 + math.random() * 1.4
+		local life = 2.4 + math.random() * 1.2
 		local rest: CFrame? = nil
 		animate(life, 0.7, function(k)
 			if not rest then
@@ -914,7 +1020,52 @@ function FX.Start(o: any): any
 		end)
 		Debris:AddItem(rock, life + 2)
 	end
-
+	-- a rock spike torn up out of the ground at `at` (face `up`), leaning out along `out`: it bursts up
+	-- out of the floor, holds, and sinks back into it
+	local function spike(at: Vector3, up: Vector3, out: Vector3, height: number, hit: RaycastResult?, delay: number, holder: Instance)
+		if not (rockTpl and rockTpl:IsA("BasePart")) then
+			return
+		end
+		local col, mat = floorLook(hit)
+		local rock, parts = piece(col, mat, height / 1.9, true, true)
+		local lean = CFrame.fromAxisAngle(up:Cross(out).Magnitude > 1e-3 and up:Cross(out).Unit or Vector3.xAxis, math.rad(28 + math.random() * 8))
+		local frame = U.Up(at, up) * CFrame.Angles(0, math.random() * TAU, 0)
+		local tilt = (lean * (frame - frame.Position)) + at
+		local hidden = tilt * CFrame.new(0, -rock.Size.Y * 0.62, 0)
+		local shown = tilt * CFrame.new(0, rock.Size.Y * 0.22, 0)
+		rock.CFrame = hidden
+		for _, p in ipairs(parts) do
+			p.Transparency = 1
+		end
+		rock.Parent = holder
+		local top = parts[2]
+		local topRel = CFrame.new(0, rock.Size.Y * 0.42, 0)
+		local HOLD = 1.5
+		animate(delay, 0.14 + HOLD + 0.6, function(k)
+			local t = k * (0.14 + HOLD + 0.6)
+			local cf
+			if t < 0.14 then
+				-- (bursting up: it overshoots and settles)
+				local e = t / 0.14
+				cf = hidden:Lerp(shown, 1 - (1 - e) ^ 3 + 0.12 * math.sin(e * math.pi))
+				for _, p in ipairs(parts) do
+					p.Transparency = 0
+				end
+			elseif t < 0.14 + HOLD then
+				cf = shown
+			else
+				local e = (t - 0.14 - HOLD) / 0.6
+				cf = shown:Lerp(hidden, e * e)
+			end
+			rock.CFrame = cf
+			if top then
+				top.CFrame = cf * topRel
+			end
+		end, function()
+			rock:Destroy()
+		end)
+		Debris:AddItem(rock, delay + HOLD + 2)
+	end
 
 	-------------------------------------------------------------------
 	-- sound
@@ -974,21 +1125,28 @@ function FX.Start(o: any): any
 	local aim = o.Aim()
 	local firedAt: number? = nil
 	local endedAt: number? = nil
+	local cut = false -- (the beam was cut short: it dies away, no blast)
 	local fizzled = false
 	local visLen = 0
-	local roomN, roomT = 30, 30 -- (the room the flat layers have, the way they spread on this screen, at
-	-- the neck and at the tip end of the main run)
-	local roomAll = 30 -- (the room the solid core and body have, all round)
+	local roomAll = 30 -- (the room the beam has all round its line, eased)
+	local lift = 0 -- (how far the end ball is lifted off a floor it would sink into, eased)
 	local lastTau = 0
-	local nextTendril, nextArc, nextShake, nextFlare, nextPulse = 0, 0, 0, 0, 0
-	local tendrils: { any } = {}
-	local bolts: { any } = {}
+	local nextInflow, nextSnap, nextPalm, nextShake, nextPulse, nextSkin, nextDischarge, nextFeed = 0, 0, 0, 0, 0, 0, 0, 0
+	local palmSide = 1
 	local sphereR = 0
 	local fireR = 0.9 -- (the sphere's radius the moment it fired: the beam grows out of exactly that)
 	local lastSized = -1
-	local landedOnce = false
 	local lastHitPop = -1
+	local pulseFor = -1
+	local pulseBorn = 0
+	local thumpAt = -1 -- (os.clock of the last hit at its end: the end ball thumps)
+	local landAt = -1 -- (...of its landing: it squashes)
+	local landedOnce = false
+	local stretch = 1 -- (the end ball stretched like a comet while it races out)
+	local ballBase = 0 -- (the end ball's size, following the beam's)
 	local tint: ColorCorrectionEffect? = nil -- (the caster's own view, tinted as the charge peaks)
+	-- the beam as it is this frame (its arcs are re-struck against it)
+	local bs = { P0 = Vector3.zero, Dir = Vector3.zAxis, From = 0, Len = 0, R = 1, G = 1, Side = Vector3.xAxis, Up = Vector3.yAxis, Ball = Vector3.zero, BallR = 1, Live = false }
 
 	local function camera(profile: string, dir: Vector3?, scale: number?)
 		if o.Camera then
@@ -1032,52 +1190,68 @@ function FX.Start(o: any): any
 		if not cam then
 			return
 		end
-		if not tint or tint.Parent ~= cam then
-			if tint then
-				tint:Destroy()
+		local t = tint
+		if not t or t.Parent ~= cam then
+			if t then
+				t:Destroy()
 			end
-			tint = Instance.new("ColorCorrectionEffect")
-			tint.Name = "AzureTideCharge"
-			tint.Parent = cam
+			t = Instance.new("ColorCorrectionEffect")
+			t.Name = "AzureTideCharge"
+			t.Parent = cam
+			tint = t
 		end
-		local t = tint :: ColorCorrectionEffect
-		t.TintColor = Color3.new(1, 1, 1):Lerp(rgb(214, 234, 255), k)
-		t.Contrast = 0.1 * k
-		t.Saturation = 0.08 * k
-		t.Brightness = 0.025 * k
+		local cc = t :: ColorCorrectionEffect
+		cc.TintColor = Color3.new(1, 1, 1):Lerp(rgb(214, 234, 255), k)
+		cc.Contrast = 0.1 * k
+		cc.Saturation = 0.08 * k
+		cc.Brightness = 0.025 * k
 	end
 	maid:Give(function()
 		setTint(0)
 	end)
 
-	-- one wisp curling into the sphere
-	local function tendril(strength: number)
-		local a = Instance.new("Attachment")
-		local dir = Vector3.new(math.random() - 0.5, math.random() * 0.8 - 0.2, math.random() - 0.5)
-		dir = if dir.Magnitude > 1e-3 then dir.Unit else Vector3.xAxis
-		a.Position = dir * (3.4 + math.random() * 2.6)
-		a.Parent = ball
-		local b = beam(ball, a, ballAtt, {
-			Texture = T.BWisp, Color = cs(C_HOT, C_LIGHT), Width0 = 0.05, Width1 = 0.05, Enabled = true,
-			TextureLength = 3, TextureSpeed = 3.5, Transparency = ns(0, 1, 0.4, 0.2, 1, 0.05),
-			CurveSize0 = (math.random() - 0.5) * 4, CurveSize1 = (math.random() - 0.5) * 3, Segments = 10,
-		})
-		table.insert(tendrils, { Att = a, Beam = b, Born = os.clock(), Life = 0.3 + math.random() * 0.15, W = 0.4 + 0.6 * strength })
+	-------------------------------------------------------------------
+	-- lightning of the charge
+	-------------------------------------------------------------------
+	-- drawn in: a bolt reaching in from round the hands and snapping into the sphere (it is pulled in
+	-- as it lives)
+	local function inflow(strength: number)
+		local d = randomUnit()
+		if d.Y < -0.4 then
+			d = Vector3.new(d.X, -d.Y * 0.5, d.Z).Unit
+		end
+		local far = 3.6 + math.random() * 2.4
+		arcs.Add(function(k: number)
+			local c = ball.Position
+			local r = math.max(0.1, sphereR)
+			return jagged(c + d * (far * (1 - 0.55 * k) + r), c + d * r * 0.8, 6, 0.2)
+		end, 0.14 + math.random() * 0.08, 0.05 + 0.07 * strength, if math.random() < 0.5 then C_ARC else C_ICE, 0.035)
 	end
-	-- a bolt snapping off the sphere
-	local function bolt(r: number, big: boolean)
-		local a = Instance.new("Attachment")
-		local dir = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5)
-		dir = if dir.Magnitude > 1e-3 then dir.Unit else Vector3.yAxis
-		a.Position = dir * (r * (if big then 2 else 1.5) + 0.5 + math.random() * (if big then 2 else 1.2))
-		a.Parent = ball
-		local b = beam(ball, ballAtt, a, {
-			Texture = if math.random() < 0.5 then T.BLightning else T.BBolt, Color = cs(C_WHITE, C_ICE), Enabled = true,
-			Width0 = if big then 0.8 else 0.5, Width1 = 0.12, TextureLength = 3, TextureSpeed = 0,
-			Transparency = ns(0, 0, 1, 0.3), Segments = 6, ZOffset = 1.2,
-			CurveSize0 = (math.random() - 0.5) * 2.5, CurveSize1 = (math.random() - 0.5) * 2.5,
-		})
-		table.insert(bolts, { Att = a, Beam = b, Born = os.clock(), Life = 0.06 + math.random() * 0.06 })
+	-- off it: a bolt snapping off the unstable sphere (big ones fork)
+	local function snap(r: number, big: boolean)
+		local d = randomUnit()
+		local reach = r * (if big then 2.4 else 1.7) + 0.6 + math.random() * (if big then 2 else 1.1)
+		local bend = randomUnit() * reach * 0.25
+		arcs.Add(function(_k: number)
+			local c = ball.Position
+			return jagged(c + d * sphereR * 0.85, c + d * reach, 5, 0.26, bend)
+		end, 0.07 + math.random() * 0.07, if big then 0.13 else 0.08, C_ARC, 0.03)
+		if big then
+			local d2 = (d + randomUnit() * 0.8).Unit
+			arcs.Add(function(_k: number)
+				local c = ball.Position
+				return jagged(c + d * reach * 0.55, c + d2 * reach * 0.95, 4, 0.3)
+			end, 0.06 + math.random() * 0.05, 0.06, C_ICE, 0.03)
+		end
+	end
+	-- a palm feeding it: an arc from one hand into the sphere (the hands take turns - left, right)
+	local function palmArc(from: Vector3)
+		arcs.Add(function(_k: number)
+			local c = ball.Position
+			local toward = from - c
+			local d = if toward.Magnitude > 1e-3 then toward.Unit else Vector3.yAxis
+			return jagged(from, c + d * sphereR * 0.8, 4, 0.22)
+		end, 0.08 + math.random() * 0.05, 0.06, C_ARC, 0.03)
 	end
 
 	-------------------------------------------------------------------
@@ -1091,45 +1265,37 @@ function FX.Start(o: any): any
 		fireR = math.max(sphereR, 0.4)
 		visLen = 0
 		setTint(0)
-		for _, e in ipairs({ inStreaks, inMotes, twinkle }) do
-			e.Enabled = false
-		end
-		if charge then
-			U.Enable(charge, false)
-		end
-		thrustTrail.Enabled = false
-		if muzzle then
-			U.Enable(muzzle, true)
-		end
-		if muzzleStream then
-			U.Enable(muzzleStream, true)
-		end
-		-- the release's star and bloom start at the sphere's own size (v80's, bigger with the beam)
-		local k = math.clamp(fireR / 0.9, 0.7, 1.4) * BEAM_W * 0.85
-		releaseFlare.Size = ns(0, 2 * k, 0.12, 19 * k, 1, 0)
-		releaseGlow.Size = ns(0, fireR * 2.5, 0.2, 22 * k, 1, 26 * k)
-		releaseFlare:Emit(1)
-		releaseGlow:Emit(1)
+		twinkle.Enabled = false
 		local cf = U.Look(from, dir)
 		local holder = U.Holder()
-		-- the pack's release burst off the hands (Beam Release: smoke, streaks)
-		fire("Release", cf, 0.2 * BEAM_W, holder, nil, function(e)
-			if e.Name == "SmokeCirc" then
-				e:Destroy()
-			end
-		end)
+		-- the pack's release burst off the hands (Beam Release: its smoke, flames and ash)
+		fire("Release", cf, 0.2 * BW, holder, nil, nil, nil, 20)
+		-- a mirrored pair of electric shockwave rings bursting off the hands, round the beam
+		local s1, s2 = basis(dir)
+		local tilt = math.rad(18)
+		shockRing(from + dir * 0.6, (dir * math.cos(tilt) + s1 * math.sin(tilt)).Unit, fireR * 2, 9 * BW, 0.34, C_ICE, holder, 0.28)
+		shockRing(from + dir * 0.6, (dir * math.cos(tilt) - s1 * math.sin(tilt)).Unit, fireR * 2, 9 * BW, 0.34, C_CYAN, holder, 0.28)
+		-- lightning bursting off the hands all round the beam, evenly
+		for i = 0, 5 do
+			local ang = i * TAU / 6
+			local out = (s1 * math.cos(ang) + s2 * math.sin(ang))
+			local tip = (dir * 0.55 + out).Unit
+			arcs.Add(function(_k: number)
+				return jagged(from + out * fireR, from + tip * (3.4 + fireR * 2), 5, 0.24)
+			end, 0.16, 0.12, C_ARC, 0.035)
+		end
 		-- the ground under the caster takes the blast
 		if root then
 			local g = o.World(root.Position, Vector3.new(0, -8, 0))
 			if g then
-				fire("GroundBlast", U.Up(g.Position + g.Normal * 0.2, g.Normal), 0.3 * BEAM_W, holder, nil, function(e)
+				fire("GroundBlast", U.Up(g.Position + g.Normal * 0.2, g.Normal), 0.3 * BW, holder, nil, function(e)
 					e.ZOffset += 3
 				end)
 			end
 		end
 		-- a white-hot pop that starts exactly the sphere's size, the light and the view
-		fireball(from, fireR * 2, 9 * BEAM_W, 0.24, holder)
-		flashLight(from, C_ICE, 6, 32, 0.4)
+		fireball(from, fireR * 2, 5 * BW, 0.22, holder)
+		flashLight(from, C_ICE, 6, 32, 0.4, nil, C_MID)
 		flashFor(from, 0.7, 0.3)
 		once("Blast", origin)
 		once("BlastCrack", origin)
@@ -1154,10 +1320,11 @@ function FX.Start(o: any): any
 		end
 	end
 
-	-- THE BLAST: the beam's energy collapses into its end and detonates - the place's own explosions,
-	-- layered and timed into one
+	-- THE BLAST: the end ball detonates - compact (exactly BlastRadius round: its hitbox), symmetric
+	-- (everything round it evenly spaced, one random turn for the whole pattern), electric, and its
+	-- aftermath settles: chunks land, spikes sink, the smoke drifts, the crackle and the light die down
 	local blasted = false
-	local function blastAt(at: Vector3, dir: Vector3, n: Vector3?)
+	local function detonate(at: Vector3, dir: Vector3, n: Vector3?, ballD: number)
 		if blasted then
 			return
 		end
@@ -1167,88 +1334,142 @@ function FX.Start(o: any): any
 		holder.Parent = U.Holder()
 		Debris:AddItem(holder, 8)
 		-- its heart stands off the surface it hit (never half inside a wall, a floor or a ceiling)
-		local c = if n then at + n * 3.5 else at - dir * 1.5
+		local c = if n then at + n * 1.2 else at
 		-- how much room it has: a blast in a corridor is a corridor's blast, not one through the walls
 		local free, probes = 0, 0
 		for _, d in ipairs({ Vector3.xAxis, -Vector3.xAxis, Vector3.yAxis, -Vector3.yAxis, Vector3.zAxis, -Vector3.zAxis, Vector3.new(1, 1, 1).Unit, Vector3.new(-1, 1, -1).Unit, Vector3.new(1, 1, -1).Unit, Vector3.new(-1, 1, 1).Unit }) do
-			local hit = o.World(c, d * 22)
-			free += if hit then (hit.Position - c).Magnitude else 22
+			local hit = o.World(c, d * 16)
+			free += if hit then (hit.Position - c).Magnitude else 16
 			probes += 1
 		end
-		-- the blast's scale: as big as the beam has become (its final size), as much as the room allows
-		local gEnd = if AbilityConfig.BeamGrow then AbilityConfig.BeamGrow(def, TL.Sustain) else 1
-		local S = math.clamp((free / probes) / 14, 0.6, 1.3) * math.max(1, gEnd * 0.85)
-		local g = o.World(c + Vector3.new(0, 1, 0), Vector3.new(0, -14 * S - 3, 0))
+		local S = math.clamp((free / probes) / 12, 0.7, 1)
+		local R = B.BlastRadius * S
+		local g = o.World(c + Vector3.new(0, 1, 0), Vector3.new(0, -(R + 4), 0))
 		local gUp = if g then g.Normal else Vector3.yAxis
-		local gAt = if g then g.Position + g.Normal * 0.1 else c - Vector3.new(0, 2, 0)
-		-- (its heart stands high enough off the ground that nothing of it starts below it)
+		local gAt = if g then g.Position + g.Normal * 0.1 else c - Vector3.new(0, R * 0.4, 0)
+		-- (its heart stands a little off the ground: the dome rises out of it)
 		if g then
 			local hc = (c - gAt):Dot(gUp)
-			if hc < 3.5 * S then
-				c += gUp * (3.5 * S - hc)
+			if hc < 0.3 * R then
+				c += gUp * (0.3 * R - hc)
 			end
 		end
 		local heart = U.Up(c, gUp)
+		local t1, t2 = basis(gUp)
+		local turn = math.random() * TAU
+		local function round(i: number, count: number): Vector3
+			local a = turn + i * TAU / count
+			return t1 * math.cos(a) + t2 * math.sin(a)
+		end
+		local near = g ~= nil and (gAt - c).Magnitude < R
 
-		-- the place's implode-explosion: everything crushes into the end, then it detonates (the pack's
-		-- own timing - the detonation is 0.2 s in; everything else lands with it)
-		fire("Nova", heart, 0.5 * S, holder, nil, nil, true)
-		oneShot("BlastCrack", c, { PlaybackSpeed = 0.9 })
-		task.delay(0.2, function()
-			if not holder.Parent then
-				return
-			end
-			-- the FinalExplosion (azure) at its heart, the pack's small blast in it
-			fire("EndBlast", heart, 0.7 * S, holder, nil, nil, true)
-			fire("EndBlastSmall", heart, 1.1 * S, holder, nil, nil, true)
-			-- the Explosion pack's smoke, dust and wind on the ground under it (v80's blast, bigger)
-			fire("Blast", U.Up(gAt + gUp * 0.3, gUp) * CFrame.Angles(0, math.random() * math.pi * 2, 0), 0.75 * S, holder, 0.7, nil, true)
-			-- the ground under it torn out and thrown (chunks of that very ground)
-			if g and (gAt - c).Magnitude < 10 * S then
-				for i = 1, math.floor(14 * S + 0.5) do
-					local ang = (i / 14) * math.pi * 2 + math.random() * 0.5
-					local out = Vector3.new(math.cos(ang), 0, math.sin(ang))
-					local q = o.World(gAt + out * math.random() * 4 * S + gUp * 3, -gUp * 6)
-					chunk(if q then q.Position else gAt, gUp, q or g, 1.25 * S, out)
-				end
-			end
-			-- a white-hot heart swelling out of the end
-			fireball(c, 3 * S, 22 * S, 0.6, holder, if g then gAt else nil, if g then gUp else nil)
-			-- and the energy dome round it, slower and bigger
-			fireball(c, 6 * S, 34 * S, 1.25, holder, if g then gAt else nil, if g then gUp else nil)
-			flashLight(c + gUp * 3, C_ICE, 14, 70 * S, 2.2, holder)
-			flashFor(c, 0.9, 0.45)
-			oneShot("End", c)
-			oneShot("EndCrack", c)
-			oneShot("Blast", c, { PlaybackSpeed = 0.72 })
-			nearKick(c, 70, 1.2, "BeamBoomNear")
-			if o.Mine then
-				camera("BeamBoom", dir, 1)
-			end
-			-- secondary bursts round it, one after another (the pack's small blast)
-			for i = 1, 4 do
-				task.delay(0.05 + i * 0.08 + math.random() * 0.04, function()
-					if not holder.Parent then
-						return
-					end
-					local d = Vector3.new(math.random() - 0.5, math.random() * 0.8, math.random() - 0.5)
-					d = if d.Magnitude > 1e-3 then d.Unit else Vector3.yAxis
-					local at2 = c + d * (5 + math.random() * 5) * S
-					local up2 = gUp
-					local hit = o.World(c, at2 - c)
-					if hit then
-						at2 = hit.Position + hit.Normal * 1.5
-						up2 = hit.Normal
-					end
-					-- (never under the ground)
-					local floor2 = o.World(at2 + gUp * 2, -gUp * 4)
-					if floor2 then
-						at2 = floor2.Position + floor2.Normal * 1.5
-						up2 = floor2.Normal
-					end
-					fire("EndBlastSmall", U.Up(at2, up2), 0.55 * S, holder, 0.7, nil, true)
+		-- the white-hot core: from the end ball's own size to most of the dome, cooling white -> cyan
+		glowBall(c, ballD * 0.8, R * 1.15, 0.3, holder, Enum.Material.Neon, C_WHITE, C_CYAN, 0)
+		-- the energy dome and its force-field skin, cooling to deep blue as they burn off
+		glowBall(c, ballD, R * 2, 0.55, holder, Enum.Material.Neon, C_LIGHT, C_DEEP, 0.35)
+		glowBall(c, ballD * 1.1, R * 2.1, 0.5, holder, Enum.Material.ForceField, C_ICE, C_ROYAL, 0)
+		-- the electric shockwaves: one level with the ground, and a pair tilted mirror-wise across the
+		-- beam's line
+		shockRing(if near then gAt + gUp * 0.4 else c, gUp, R * 0.5, R * 2.5, 0.5, C_ICE, holder, 0.26)
+		local flat = dir - gUp * dir:Dot(gUp)
+		flat = if flat.Magnitude > 1e-3 then flat.Unit else t1
+		for _, sgn in ipairs({ 1, -1 }) do
+			local up2 = CFrame.fromAxisAngle(flat, sgn * math.rad(52)):VectorToWorldSpace(gUp)
+			shockRing(c, up2, R * 0.4, R * 2.1, 0.42, C_CYAN, holder, 0.24)
+		end
+		-- 3D lightning: eight rays evenly round along the ground, four rising between them - re-struck
+		-- as they live, then crackling over the crater while it cools
+		local zap = arcSystem(holder, 140)
+		local function groundAt(p: Vector3): Vector3
+			local q = o.World(p + gUp * 3, -gUp * 8)
+			return if q then q.Position + q.Normal * 0.15 else p
+		end
+		for i = 0, 7 do
+			local out = round(i, 8)
+			local tip = groundAt(gAt + out * R * (0.92 + 0.08 * (i % 2)))
+			zap.Add(function(_k: number)
+				return jagged(c + out * R * 0.15, tip, 7, 0.12)
+			end, 0.34, 0.24 * S, C_ARC, 0.04)
+		end
+		for i = 0, 3 do
+			local out = round(i + 0.5, 4)
+			local d = (out * math.cos(math.rad(48)) + gUp * math.sin(math.rad(48))).Unit
+			zap.Add(function(_k: number)
+				return jagged(c + d * R * 0.15, c + d * R * 0.95, 6, 0.14)
+			end, 0.26, 0.18 * S, C_ICE, 0.04)
+		end
+		-- the Thunder pack's bolts, six evenly round, thrown out of the heart
+		local thunderTpl = template("Thunder")
+		if thunderTpl then
+			for i = 0, 5 do
+				local out = round(i + 0.25, 6)
+				local d = (out * math.cos(math.rad(20)) + gUp * math.sin(math.rad(20))).Unit
+				local tb = U.Solid(thunderTpl, { Material = Enum.Material.Neon, Color = C_ARC, Transparency = 1 })
+				tb.Parent = holder
+				local len = R * 0.95
+				animate(0.02 * (i % 2), 0.3, function(k)
+					local l = len * (0.5 + 0.5 * (1 - (1 - k) ^ 3))
+					tb.Size = Vector3.new(l * 0.17, l, l * 0.2)
+					tb.CFrame = U.Up(c + d * (R * 0.12 + l * 0.5), d) * CFrame.Angles(0, math.random() * TAU, 0)
+					tb.Transparency = math.min(1, k ^ 2 + (if math.random() < 0.2 then 0.5 else 0))
+				end, function()
+					tb:Destroy()
 				end)
 			end
+		end
+		-- the packs' smoke and dust (the Explosion pack's, the FinalExplosion's small blast) - kept to
+		-- the dome's size
+		fire("EndBlastSmall", heart, 0.8 * S, holder, 0.8, nil, true, R * 1.6)
+		if g then
+			fire("Blast", U.Up(gAt + gUp * 0.3, gUp) * CFrame.Angles(0, turn, 0), 0.5 * S, holder, 0.7, nil, true, R * 1.8)
+		end
+		-- the ground torn up: a ring of rock spikes round the crater (tall and short in turn), and chunks
+		-- of that very ground thrown evenly all round, steep and low in turn
+		if g and near then
+			for i = 0, 9 do
+				local out = round(i, 10)
+				local p = gAt + out * R * (if i % 2 == 0 then 0.62 else 0.54)
+				local q = o.World(p + gUp * 3, -gUp * 7)
+				if q then
+					spike(q.Position, q.Normal, out, R * (if i % 2 == 0 then 0.42 else 0.3), q, 0.02 * (i % 2), holder)
+				end
+			end
+			for i = 0, 11 do
+				local out = round(i + 0.5, 12)
+				local q = o.World(gAt + out * R * 0.3 + gUp * 3, -gUp * 6)
+				chunk(if q then q.Position else gAt + out * R * 0.3, gUp, q or g, 1.3 * S, out, if i % 2 == 0 then 30 else 18)
+			end
+		end
+		-- the light: white-hot, cooling through cyan to a deep blue as it dies
+		flashLight(c + gUp * 2, C_WHITE, 14, R * 3.4, 1.9, holder, C_ROYAL)
+		flashFor(c, 0.9, 0.45)
+		oneShot("End", c)
+		oneShot("EndCrack", c)
+		oneShot("Blast", c, { PlaybackSpeed = 0.72 })
+		nearKick(c, 70, 1.2, "BeamBoomNear")
+		if o.Mine then
+			camera("BeamBoom", dir, 1)
+		end
+		-- the aftermath: lightning hopping over the crater floor, ever less often, while it cools
+		local nextHop = 0.25
+		local AFTER = 1.7
+		local t0 = os.clock()
+		animate(0, AFTER, function(k)
+			local now = os.clock()
+			zap.Step(now)
+			local t = now - t0
+			if t >= nextHop and k < 0.85 then
+				nextHop = t + 0.07 + 0.25 * k
+				local a = groundAt(gAt + round(math.random() * 12, 12) * R * (0.2 + math.random() * 0.6))
+				local v = randomUnit()
+				local b = groundAt(a + (v - gUp * v:Dot(gUp)) * R * 0.35)
+				local col = C_ARC:Lerp(C_LIGHT, k)
+				zap.Add(function(_k: number)
+					return jagged(a + gUp * 0.2, b + gUp * 0.2, 5, 0.22, gUp * R * 0.08)
+				end, 0.1 + math.random() * 0.06, 0.1 * (1 - 0.5 * k) * S + 0.04, col, 0.035)
+			end
+		end, function()
+			zap.Clear()
 		end)
 	end
 
@@ -1258,11 +1479,9 @@ function FX.Start(o: any): any
 		end
 		endedAt = os.clock()
 		h.Phase = "Collapse"
-		for _, e in ipairs({ splash, endSmoke, endSparks, fillGlow, fillPlasma, fillCore }) do
+		cut = why == "Interrupted"
+		for _, e in ipairs({ endSmoke, endSparkle, eCrackle }) do
 			e.Enabled = false
-		end
-		for _, a in pairs({ muzzle, muzzleStream, impact }) do
-			U.Enable(a, false)
 		end
 		for _, L in ipairs(sLayers) do
 			L.E.Enabled = false
@@ -1270,9 +1489,21 @@ function FX.Start(o: any): any
 		for _, P in ipairs(pLayers) do
 			P.E.Enabled = false
 		end
-		if why ~= "Interrupted" then
+		if not cut then
+			-- (the end ball, as it is this frame, detonates)
+			-- (an effect never holds the fight up: whatever ends the cast carries on if the blast fails)
 			local n = surface:GetAttribute("Normal")
-			blastAt(tail.Position, aim, if typeof(n) == "Vector3" then n else nil)
+			local ok, err = pcall(function()
+				if bs.Live then
+					detonate(bs.Ball, aim, if typeof(n) == "Vector3" then n else nil, bs.BallR * 2)
+				else
+					detonate(origin.Position + aim * math.max(visLen, 1), aim, nil, 2 * BW)
+				end
+			end)
+			if not ok then
+				warn("[AzureTide] blast:", err)
+			end
+			arcs.Clear()
 		end
 		once("Falloff", origin)
 		if o.Mine and o.Fov then
@@ -1294,25 +1525,25 @@ function FX.Start(o: any): any
 		for _, P in ipairs(pLayers) do
 			P.E.Enabled = false
 		end
-		for _, e in ipairs({ inStreaks, inMotes, twinkle, gDust, gMotes }) do
+		for _, e in ipairs({ twinkle, gDust, gMotes }) do
 			e.Enabled = false
 		end
 		for _, e in ipairs(handFx) do
 			e.Enabled = false
 		end
-		for _, ob in ipairs(orbiters) do
-			ob.E.Enabled = false
-		end
-		if charge then
-			U.Enable(charge, false)
-		end
-		thrustTrail.Enabled = false
 		if sphereR > 0.05 then
-			-- the gathered energy bursts apart
-			sPlasma:Emit(4)
+			-- the gathered energy bursts apart: a pop and its lightning scattering, evenly round
+			local c = ball.Position
+			fireball(c, sphereR * 2, sphereR * 4.5, 0.18)
+			for i = 0, 5 do
+				local d = Vector3.new(math.cos(i * TAU / 6), (i % 2 == 0) and 0.5 or -0.3, math.sin(i * TAU / 6)).Unit
+				local r = sphereR
+				arcs.Add(function(_k: number)
+					return jagged(c + d * r * 0.8, c + d * (r * 2.4 + 1.2), 5, 0.28)
+				end, 0.14, 0.09, C_ARC, 0.03)
+			end
+			sPlasma:Emit(3)
 			sArcs:Emit(3)
-			sArcBurst:Emit(1)
-			sFlare:Emit(1)
 			once("Fizzle", ball)
 		end
 		if rise then
@@ -1338,22 +1569,35 @@ function FX.Start(o: any): any
 		p.CFrame = cf
 		p.Transparency = transparency
 	end
+	local function setShape(p: BasePart?, size: Vector3, cf: CFrame, transparency: number)
+		if not p then
+			return
+		end
+		if size.X <= 0.02 or size.Y <= 0.02 or size.Z <= 0.02 or transparency >= 0.995 then
+			p.Transparency = 1
+			return
+		end
+		p.Size = size
+		p.CFrame = cf
+		p.Transparency = transparency
+	end
 	local function hideBeam()
 		for _, L in ipairs(bLayers) do
-			L.Neck.Enabled = false
-			L.Main.Enabled = false
-			L.Tip.Enabled = false
+			L.Cyl.Transparency = 1
+			if L.Neck then
+				L.Neck.Transparency = 1
+			end
 		end
-		for _, p in ipairs({ coreRod, midRod, bodyRod, coreCaps[1], coreCaps[2], midCaps[1], midCaps[2], bodyCaps[1], bodyCaps[2], sheath, sheathCaps[1], sheathCaps[2] }) do
+		for _, s in pairs(sleeves) do
+			s.Transparency = 1
+		end
+		for _, p in pairs({ eCore, eBody, eSwirl, eSkin, eCageA, eCageB, eImplode, pulse }) do
 			p.Transparency = 1
 		end
-		for _, p in pairs({ head, core, body, swirl, skin, void }) do
-			p.Transparency = 1
+		for _, t in ipairs(thunders) do
+			t.Transparency = 1
 		end
-		flow.Enabled = false
-		flowCore.Enabled = false
-		endGlow.Enabled = false
-		endFlare.Enabled = false
+		bs.Live = false
 	end
 
 	local function finish()
@@ -1363,6 +1607,10 @@ function FX.Start(o: any): any
 		h.Alive = false
 		RunService:UnbindFromRenderStep(h.Bind)
 		hideBeam()
+		arcs.Clear()
+		for _, p in pairs({ core, body, swirl, skin, void, cage, ringA, ringB }) do
+			p.Transparency = 1
+		end
 		setTint(0)
 		-- (nothing keeps glowing or emitting where it last was: what was emitted plays out)
 		for _, e in ipairs(U.Emitters(model)) do
@@ -1418,7 +1666,7 @@ function FX.Start(o: any): any
 
 		---------------------------------------------------------------
 		-- the sphere's size: a seed, born, grown, unstable, crushed, driven out - then it swells
-		-- straight into the beam's root
+		-- straight into the beam's root, and it empties into the beam as the beam drains away
 		---------------------------------------------------------------
 		local wake = U.Clamp01((tau - 0.04) / 0.25)
 		local gather = U.Clamp01((tau - TL.Gather) / (TL.Compress - TL.Gather))
@@ -1446,19 +1694,26 @@ function FX.Start(o: any): any
 			end
 		end
 		local since0 = if firedAt then now - firedAt else 0
+		local since = since0
+		if type(frozen) == "number" and frozen >= TL.Fire then
+			since = math.min(frozen - TL.Fire, TL.Sustain - 0.01)
+		end
+		-- the beam's last moments: it drains into its end ball
+		local drain = if firedAt and not cut then U.Clamp01((since - (TL.Sustain - DRAIN)) / DRAIN) else 0
 		if firedAt then
 			-- the beam's root: from exactly the size it fired at, it swells into the root the beam pours
 			-- out of, and settles
-			local bulb = 0.95 * BEAM_W
-			local k = U.EaseOut(U.Clamp01(since0 / 0.16))
-			r = (fireR + (bulb * 1.15 - fireR) * k) * (1 - 0.13 * U.Ramp(0, 1, (since0 - 0.16) / 0.4))
+			local bulb = 0.95 * BW
+			local k = U.EaseOut(U.Clamp01(since / 0.16))
+			r = (fireR + (bulb * 1.15 - fireR) * k) * (1 - 0.13 * U.Ramp(0, 1, (since - 0.16) / 0.4))
 			r *= 1 + 0.06 * U.Noise(now * 11, seed + 3)
+			r *= 1 - drain
 		end
 		if fizzled then
 			local k = U.Clamp01((now - (endedAt or now)) / 0.16)
 			r = sphereR * (1 + 0.7 * k) * (1 - k)
 		elseif endedAt and firedAt then
-			local k = U.Clamp01((now - endedAt) / TL.Collapse)
+			local k = U.Clamp01((now - endedAt) / (TL.Collapse * 0.6))
 			r *= (1 - k) ^ 2
 		end
 		sphereR = r
@@ -1486,12 +1741,11 @@ function FX.Start(o: any): any
 				end
 			end
 			target, rv = roomFor(target, r)
-			zRoom = math.clamp(least - 0.1, math.min(0.15, rv * 0.8), math.max(0.15, rv * 0.8))
+			zRoom = within(least - 0.1, math.min(0.15, rv * 0.8), math.max(0.15, rv * 0.8))
 		end
 		local ballPos = target
 		ball.CFrame = U.Look(ballPos, aim)
 		ball.Size = Vector3.one * math.max(0.2, rv * 1.9)
-		absorb.CFrame = ball.CFrame
 		-- the layers follow its size
 		if math.abs(rv - lastSized) > math.max(0.002, rv * 0.004) then
 			lastSized = rv
@@ -1506,15 +1760,6 @@ function FX.Start(o: any): any
 				end
 				P.E.Size = NumberSequence.new(kps)
 				P.E.Speed = nr(P.Speed * rv)
-			end
-			if charge then
-				for _, e in ipairs(U.Emitters(charge)) do
-					if e.Name ~= "Core1" then
-						e.Size = ns(0, rv * 2.6, 1, rv * 1)
-					else
-						e.Size = ns(rv * 0.9)
-					end
-				end
 			end
 		end
 		for _, L in ipairs(sLayers) do
@@ -1533,20 +1778,24 @@ function FX.Start(o: any): any
 		setSolid(core, math.min(rv * (0.6 + 0.35 * white) * (1 - 0.92 * bh), palmRoom * 2), ball.CFrame * spin, if r > 0.04 then 0.02 else 1)
 		setSolid(body, math.min(rv * 1.4, palmRoom * 2), ball.CFrame * spin:Inverse(), if r > 0.04 then 0.22 - 0.12 * white + 0.5 * bh else 1)
 		setSolid(void, math.min(rv * 0.95 * bh, palmRoom * 2), ball.CFrame, if bh > 0.02 then 0 else 1)
-		-- the disk's tilt: flat round the sphere, leaning toward the view behind the caster, precessing
-		local dn = (Vector3.yAxis * 0.85 - aim * 0.5 + Vector3.new(math.sin(now * 0.9), 0, math.cos(now * 0.7)) * 0.08).Unit
-		local dr = dn:Cross(aim)
-		dr = if dr.Magnitude > 1e-3 then dr.Unit else Vector3.xAxis
-		diskAtt.WorldCFrame = CFrame.fromMatrix(ballPos, dr, dn)
 		setSolid(swirl, math.min(rv * 1.55, palmRoom * 2 + 0.2), ball.CFrame * spin:Inverse(), 1 - (0.38 + 0.12 * surge) * formed)
 		setSolid(skin, math.min(rv * 1.9, palmRoom * 2 + 0.35), ball.CFrame * spin, 1 - 0.7 * formed)
-		-- the streak behind it as the hands drive it out
-		trailA.Position = Vector3.new(0, rv * 0.6, 0)
-		trailB.Position = Vector3.new(0, -rv * 0.6, 0)
-		thrustTrail.Enabled = drive > 0 and not firedAt and not fizzled
-		for _, ob in ipairs(orbiters) do
-			local ang = now * ob.Speed + ob.Phase
-			ob.Att.Position = (ob.Tilt * CFrame.new(math.cos(ang) * rv * 1.4, 0, math.sin(ang) * rv * 1.4)).Position
+		-- its lightning cage: closing round it as it surges (and crackling round the beam's root)
+		local caged = if firedAt then (if endedAt then 0 else 0.7 * (1 - drain)) elseif fizzled then 0 else U.Clamp01((surge - 0.15) / 0.5)
+		if cage then
+			local on = caged > 0.02 and r > 0.05 and math.random() > 0.15
+			setSolid(cage, rv * (2.1 + 0.25 * math.random()), CFrame.new(ballPos) * CFrame.Angles(math.random() * TAU, math.random() * TAU, math.random() * TAU), if on then 1 - caged * (0.55 + 0.45 * math.random()) else 1)
+		end
+		-- the black hole's accretion rings: flat round it, leaning toward the view behind the caster,
+		-- precessing - spun and flickered like their pack
+		local dn = (Vector3.yAxis * 0.85 - aim * 0.5 + Vector3.new(math.sin(now * 0.9), 0, math.cos(now * 0.7)) * 0.08).Unit
+		local ringCf = U.Up(ballPos, dn)
+		for i, ring in ipairs({ ringA, ringB }) do
+			if ring then
+				local d = rv * (if i == 1 then 4.2 else 3.3) * (0.85 + 0.15 * bh)
+				local on = bh > 0.03 and math.random() > 0.12
+				setShape(ring, Vector3.new(d, d * 0.24, d), ringCf * CFrame.Angles(0, math.random() * TAU, 0), if on then 1 - bh * (0.6 + 0.4 * math.random()) else 1)
+			end
 		end
 
 		---------------------------------------------------------------
@@ -1557,9 +1806,7 @@ function FX.Start(o: any): any
 		local on = alive and r > 0.03
 		if alive then
 			local inten = if firedAt then 1 else math.clamp(0.25 + 0.45 * grow + 0.3 * surge + 0.3 * white, 0, 1.3)
-			local formedRate = if firedAt then 1 else formed
-			sCore.Enabled = on
-			sCore.Rate = 6 + 8 * math.max(wake, formedRate)
+			local formedRate = if firedAt then 1 - drain else formed
 			sPlasma.Enabled = on
 			sPlasma.Rate = 2 + 14 * formedRate * (0.5 + 0.5 * inten)
 			sChaos.Enabled = on and (surge > 0 or firedAt ~= nil)
@@ -1570,124 +1817,62 @@ function FX.Start(o: any): any
 			sSwirlB.Rate = (3 + 4 * inten) * formedRate
 			sCrescent.Enabled = on and grow > 0
 			sCrescent.Rate = 10 * grow * (0.4 + 0.6 * surge) * (if firedAt then 0.5 else 1)
-			sRim.Enabled = on
-			sRim.Rate = 2 + 8 * formedRate
-			sRays.Enabled = on and (surge > 0 or firedAt ~= nil)
-			sRays.Rate = 14 * surge + (if firedAt then 6 else 0)
-			sBloom.Enabled = on
-			sBloom.Rate = 2 + 3 * math.max(wake, formedRate)
 			sArcs.Enabled = on and (surge > 0 or firedAt ~= nil)
 			sArcs.Rate = 16 * surge + (if firedAt then 8 else 0)
-			sArcRing.Enabled = on and surge > 0 and charging
-			sArcRing.Rate = 8 * surge
 			sArcBurst.Enabled = false
-			sFlare.Enabled = false
-			-- the black hole: the bright heart goes dark, the rims burn, the disk spins up
-			sCore.Rate *= 1 - 0.9 * bh
+			-- the black hole: the bright heart goes dark, the swirl spins up
 			sPlasma.Rate *= 1 - 0.75 * bh
 			sChaos.Rate *= 1 - 0.8 * bh
 			sSwirlA.Rate += 10 * bh
-			sRim.Rate += 10 * bh
-			for _, e in ipairs({ dGlow, dSwirl, dStreak, dDark, sPhoton, sLens, sVoid }) do
-				e.Enabled = on and bh > 0.01
-			end
-			sVoid.Rate = 45 * bh
-			dGlow.Rate = 8 * bh
-			dSwirl.Rate = 18 * bh
-			dStreak.Rate = 22 * bh
-			dDark.Rate = 10 * bh
-			sPhoton.Rate = 30 * bh
-			sLens.Rate = 8 * bh
 			twinkle.Enabled = on and charging
 			twinkle.Rate = (3 + 16 * surge) * formed
-			if charge then
-				U.Enable(charge, on and charging and tau >= TL.Sphere)
-			end
-			for _, ob in ipairs(orbiters) do
-				ob.E.Enabled = on and charging and grow > 0.25
-			end
 			for _, P in ipairs(pLayers) do
-				local m = if P.Phase == "grow" then (if firedAt then 1 else grow)
-					elseif P.Phase == "surge" then (if firedAt then 0.4 else surge)
+				local m = if P.Phase == "grow" then (if firedAt then 1 - drain else grow)
+					elseif P.Phase == "surge" then (if firedAt then 0.4 * (1 - drain) else surge)
 					elseif P.Phase == "gather" then (if firedAt then 0 else gather * (1 - crush))
 					else formedRate
 				P.E.Enabled = on and m > 0.01
 				P.E.Rate = P.Rate * m
 				P.E.ZOffset = zRoom * P.Z
 			end
-			-- its heartbeat: a soft swell of light, quicker and harder as it surges
-			if charging and on and tau >= TL.Sphere and now >= nextPulse then
-				nextPulse = now + U.Ramp(0.42, 0.12, surge)
-				sBloom:Emit(1)
-				sCore:Emit(1)
-				if surge > 0.15 then
-					sRays:Emit(1)
-				end
-			end
-			-- flares and bursts snap off it in the last moments
-			if charging and on and surge > 0.45 and now >= nextFlare then
-				nextFlare = now + U.Ramp(0.45, 0.2, surge) * (0.7 + math.random() * 0.6)
-				sFlare:Emit(1)
-				if math.random() < 0.35 then
-					sArcBurst:Emit(1)
-				end
+			-- bursts snap off it in the last moments
+			if charging and on and surge > 0.45 and now >= nextPulse then
+				nextPulse = now + U.Ramp(0.45, 0.2, surge) * (0.7 + math.random() * 0.6)
+				sArcBurst:Emit(1)
 			end
 		end
-		-- the energy drawn in
+		-- lightning drawn in from all round the hands, ever faster, all of it at once at the last breath
 		local drawing = charging and tau >= TL.Gather and tau < TL.Thrust
-		inStreaks.Enabled = drawing
-		inMotes.Enabled = drawing
 		if drawing then
-			inStreaks.Rate = 14 + 90 * gather
-			inMotes.Rate = 8 + 36 * gather
-			local R = 5 - 1.6 * gather
-			absorb.Size = Vector3.one * R * 2
-			inStreaks.Speed = nr(R / 0.3)
-			inMotes.Speed = nr(R / 0.42)
+			if now >= nextInflow then
+				inflow(gather)
+				nextInflow = now + U.Ramp(0.11, 0.028, gather)
+			end
 			if tau >= TL.Compress - 0.05 and not played.Inhale then
-				-- the last breath: everything round it is sucked in at once
 				played.Inhale = true
-				inStreaks:Emit(40)
-				inMotes:Emit(16)
-			end
-			if now >= nextTendril then
-				tendril(gather)
-				nextTendril = now + U.Ramp(0.15, 0.035, gather)
+				for _ = 1, 8 do
+					inflow(1)
+				end
 			end
 		end
-		for i = #tendrils, 1, -1 do
-			local w = tendrils[i]
-			local k = (now - w.Born) / w.Life
-			if k >= 1 or firedAt or fizzled then
-				w.Beam:Destroy()
-				w.Att:Destroy()
-				table.remove(tendrils, i)
-			else
-				local width = w.W * math.sin(k * math.pi)
-				w.Beam.Width0 = width
-				w.Beam.Width1 = width * 0.4
-				w.Att.Position *= 1 - dt * 2.4
-			end
+		-- the palms feed it, in turn
+		if charging and formed > 0.3 and hr and hl and now >= nextPalm then
+			nextPalm = now + U.Ramp(0.16, 0.06, gather)
+			palmSide = -palmSide
+			palmArc(if palmSide > 0 then hr else hl)
 		end
-		if charging and surge > 0 and now >= nextArc then
-			bolt(rv, surge > 0.6 and math.random() < 0.4)
-			nextArc = now + U.Ramp(0.18, 0.04, surge)
+		-- unstable, it throws lightning off
+		if charging and surge > 0 and now >= nextSnap then
+			snap(rv, surge > 0.6 and math.random() < 0.4)
+			nextSnap = now + U.Ramp(0.16, 0.035, surge)
 		end
-		for i = #bolts, 1, -1 do
-			local b = bolts[i]
-			if now - b.Born >= b.Life or fizzled or firedAt then
-				b.Beam:Destroy()
-				b.Att:Destroy()
-				table.remove(bolts, i)
-			end
-		end
-		-- the hands
+		-- the hands crackle
 		for _, e in ipairs(handFx) do
-			e.Enabled = alive and tau > 0.04
-			e.Rate = if e.Name == "HandGlow" then 10 + 30 * wake else 4 + 20 * gather
+			e.Enabled = alive and tau > 0.04 and (not firedAt or since < 0.6)
+			e.Rate = 6 + 18 * math.max(wake * 0.4, gather)
 		end
 		-- the ground under the caster
-		local power = if fizzled then 0 elseif firedAt then (if endedAt then 0 else 1) else surge
+		local power = if fizzled then 0 elseif firedAt then (if endedAt then 0 else 1 - drain) else surge
 		local gr = root and power > 0.05 and o.World(root.Position, Vector3.new(0, -8, 0))
 		if gr then
 			groundPart.CFrame = U.Up(gr.Position + gr.Normal * 0.12, gr.Normal) * CFrame.Angles(0, 0, math.rad(90))
@@ -1699,12 +1884,15 @@ function FX.Start(o: any): any
 			gDust.Enabled = false
 			gMotes.Enabled = false
 		end
-		-- light (kept low on the sphere: any brighter and it bleaches the arms holding it into a blur)
-		local lb = if firedAt then 1.3 else (0.15 * wake + 0.55 * U.EaseOut(grow) + 0.45 * surge + 0.6 * white)
+		-- light (kept low on the sphere: any brighter and it bleaches the arms holding it into a blur);
+		-- it flickers with the lightning on it
+		local flick = 1 + 0.25 * (math.random() - 0.5) * math.max(surge, if firedAt then 1 else 0)
+		local lb = if firedAt then 1.3 * (1 - drain) else (0.15 * wake + 0.55 * U.EaseOut(grow) + 0.45 * surge + 0.6 * white)
 		if fizzled or endedAt then
 			lb *= 1 - U.Clamp01((now - (endedAt :: number)) / 0.2)
 		end
-		ballLight.Brightness = lb
+		ballLight.Brightness = lb * flick
+		ballLight.Color = rgb(55, 150, 255):Lerp(C_ICE, white)
 		ballLight.Range = 6 + 10 * grow + 5 * surge + (if firedAt then 8 else 0)
 		-- the view: a faint cold tint creeps in as it peaks (the caster's own), gone at the release
 		if charging then
@@ -1747,19 +1935,26 @@ function FX.Start(o: any): any
 			release(ballPos, aim)
 		end
 		if not firedAt then
+			arcs.Step(now)
 			return
 		end
 
 		---------------------------------------------------------------
 		-- the beam
 		---------------------------------------------------------------
-		local since = since0
-		if type(frozen) == "number" and frozen >= TL.Fire then
-			since = math.min(frozen - TL.Fire, TL.Sustain - 0.01)
-		end
-		if not endedAt and since >= TL.Sustain + 0.05 then
-			-- (the server's Stop ends it on time; this is the screen's own end if that word is late)
+		if not endedAt and since >= TL.Sustain then
+			-- (its last moment: the end ball detonates with the server's blast. The server's Stop ends
+			-- it on time too; this is the screen's own end if that word is late)
 			collapse("Done")
+		end
+		if endedAt and not cut then
+			-- (the blast has taken over: the beam and its end ball are gone into it)
+			hideBeam()
+			arcs.Step(now)
+			if now - (endedAt :: number) >= TL.Collapse then
+				finish()
+			end
+			return
 		end
 		-- where it starts: in the sphere - but never on the far side of a wall the caster stands against
 		local from = ballPos
@@ -1775,288 +1970,397 @@ function FX.Start(o: any): any
 			end
 		end
 		-- it starts small and swells to massive over its life (its hitbox swells with it, on the server too)
-		local g = if AbilityConfig.BeamGrow then AbilityConfig.BeamGrow(def, since) else 1
-		local length, normal, stopper = BeamMath.Trace(from, aim, B.Range, B.HitRadius * g, B.StopRadius * math.sqrt(g), o.Bodies(), o.World)
+		local g = AbilityConfig.BeamGrow(def, since)
+		local bodies = o.Bodies()
+		local length, normal, stopper, _, endHit = BeamMath.Trace(from, aim, B.Range, B.HitRadius * g, B.StopRadius * math.sqrt(g), bodies, o.World)
 		if blockedAt then
-			length, normal, stopper = 0.3, blockedAt.Normal, nil
+			length, normal, stopper, endHit = 0.3, blockedAt.Normal, nil, blockedAt
 		end
-		-- shorter: at once (the contact is exact); longer: the head races out to it
-		if length < visLen then
-			-- (shorter: it pulls back to the new end fast but smoothly - it never jumps)
-			visLen = math.max(length, visLen + (length - visLen) * math.min(1, dt * 28))
+		-- its head races out (BeamReach: exactly where the server's hits reach), and pulls back to a
+		-- nearer end fast but smoothly - it never jumps
+		local want = math.min(length, math.max(0.3, AbilityConfig.BeamReach(def, since)))
+		if want < visLen then
+			visLen = math.max(want, visLen + (want - visLen) * math.min(1, dt * 28))
 		else
-			visLen = math.min(length, visLen + dt * (420 + 1600 * math.min(since, 0.25)))
+			visLen = math.min(want, visLen + dt * 900)
 		end
 		local reached = visLen >= length - 0.05
 		local coll = if endedAt then U.Clamp01((now - endedAt) / TL.Collapse) else 0
-		-- the tail leaves the sphere and chases the head as it dies
-		local startAt = visLen * coll * coll
+		-- the tail: it drains into the end ball over the beam's last moments (cut short, it chases the
+		-- head as it dies)
+		local feed = if cut then coll * coll else drain ^ 1.6
+		local startAt = visLen * feed
 		local p0 = from + aim * startAt
 		local p1 = from + aim * visLen
-		local span = math.max(0.05, visLen - startAt)
-		-- (it flares out of the sphere over a long neck: by the caster it is still the sphere's size -
-		-- never past his head - and it is massive further out)
-		local neckLen = math.min(math.max(6 * BEAM_W, 7.4 * BEAM_W * g * 1.5), span * 0.5)
-		local tipLen = math.min(4 * BEAM_W * g, span * 0.25)
-		local pN = p0 + aim * neckLen
-		local pT = p1 - aim * tipLen
-		origin.CFrame = U.Look(p0, aim)
-		neckPart.CFrame = U.Look(pN, aim)
-		tipPart.CFrame = U.Look(pT, aim)
-		tail.CFrame = U.Look(p1, aim)
-		muzzleLight.Brightness = 2.2 * (1 - coll)
+		muzzleLight.Brightness = 2.2 * (1 - coll) * (1 - drain)
 		muzzleLight.Range = 16 * (1 - coll)
+		origin.CFrame = U.Look(p0, aim)
 
-		-- THE ROOM ROUND IT. The flat layers face the camera: they spread across the beam the way this
-		-- screen sees it - so that is the only way they need room (seen from behind, they spread level
-		-- and a floor never touches them). The solid core and body need it all round. Each is measured
-		-- where it counts (the neck, the tip end of the main run) and the widths follow it along the beam
-		-- - it narrows only where a surface is closer than its edge, eased so it never pops. (Surfaces
-		-- right at the end are where it lands: the impact is meant to meet them)
-		local cam = workspace.CurrentCamera
-		local spread = aim:Cross(if cam then cam.CFrame.LookVector else Vector3.yAxis)
-		if spread.Magnitude < 0.2 then
-			spread = aim:Cross(Vector3.yAxis)
+		-- its size: it swells out of the sphere at the release, breathes, flashes on every hit, thins as
+		-- it drains or dies
+		local hitN = AbilityConfig.BeamTick(def, since)
+		local hitNow = false
+		if hitN > lastHitPop and since < TL.Sustain and not endedAt then
+			lastHitPop = hitN
+			thumpAt = now
+			hitNow = true
 		end
-		spread = if spread.Magnitude > 1e-3 then spread.Unit else Vector3.xAxis
+		local tk = if thumpAt > 0 then now - thumpAt else math.huge
+		local flash = math.exp(-tk * 9)
+		local swell = 1 + 0.3 * math.exp(-since * 9) * (1 - math.exp(-since * 60))
+		local grow0 = 0.3 + 0.7 * U.EaseOut(since / 0.12)
+		local thin = if cut then 1 - coll else 1 - 0.3 * drain
+		local unit = BW * g * swell * grow0 * thin * (1 + 0.06 * flash)
+		-- THE ROOM ROUND IT: it is 3D, so every side counts - measured where it flares, mid-run and
+		-- near its end. Swollen, it is let into the ground it tears up by a third of its radius at most;
+		-- small, it keeps clear of it (surfaces right at its end are where it lands: they are meant to be met)
+		local span = math.max(0.05, visLen - startAt)
 		local side = aim:Cross(Vector3.yAxis)
 		side = if side.Magnitude > 1e-3 then side.Unit else Vector3.xAxis
-		local upV = side:Cross(aim).Unit
 		local landing = normal ~= nil and reached
-		local keepOut = if landing then 5 * BEAM_W else 0
-		local function probe(q: Vector3, dirs: { Vector3 }, len: number): number
-			local least = len
-			for _, d in ipairs(dirs) do
-				local hit = o.World(q, d * len)
-				if hit and (keepOut <= 0 or (hit.Position - p1).Magnitude > keepOut) then
-					least = math.min(least, (hit.Position - q).Magnitude)
-				end
-			end
-			return least
+		local wantRoom = BeamMath.Room(p0, aim, span, if landing then SHELL * unit * 0.7 + 2 else 0, o.World, 16)
+		if drain <= 0 or wantRoom < roomAll then
+			roomAll = roomAll + (wantRoom - roomAll) * math.min(1, dt * (if wantRoom < roomAll then 25 else 5))
 		end
-		local spreadDirs = { spread, -spread }
-		local allDirs = { upV, -upV, side, -side }
-		local wantN = probe(pN, spreadDirs, 30)
-		local wantT = if span > neckLen + tipLen + 1 then probe(pT, spreadDirs, 30) else wantN
-		local wantM = if span > neckLen + tipLen + 4 then probe((pN + pT) * 0.5, spreadDirs, 30) else math.min(wantN, wantT)
-		-- (a bump between the two ends: both ends make room for it)
-		if wantM < (wantN + wantT) * 0.5 - 0.5 then
-			wantN = math.min(wantN, wantM)
-			wantT = math.min(wantT, wantM)
-		end
-		local wantA = math.min(probe(p0 + aim * math.min(span * 0.5, neckLen * 0.5), allDirs, 14), probe((pN + pT) * 0.5, allDirs, 14))
-		if span > neckLen + tipLen + 1 then
-			wantA = math.min(wantA, probe(pT, allDirs, 14))
-		end
-		local function ease(cur: number, want: number): number
-			return cur + (want - cur) * math.min(1, dt * (if want < cur then 25 else 5))
-		end
-		roomN = ease(roomN, wantN)
-		roomT = ease(roomT, wantT)
-		roomAll = ease(roomAll, wantA)
+		unit *= BeamMath.RoomFactor(SHELL * unit, g, roomAll)
+		local shellD = SHELL * unit
 
-		-- the layers: they swell out of the sphere at the release, breathe while it lives, thin as it dies
-		local swell = 1 + 0.35 * math.exp(-since * 9) * (1 - math.exp(-since * 60))
-		local fade = (1 - coll) ^ 1.5
-		local grow0 = 0.3 + 0.7 * U.EaseOut(since / 0.12)
-		local show = span > 0.15
-		-- (a flat band seen straight down its length folds edge-on and flickers: there it gives way
-		-- smoothly to the beam's 3D core and its glows, which look the same from every side)
-		local along = if cam then math.abs(cam.CFrame.LookVector:Dot(aim)) else 0
-		local bandVis = 1 - U.Clamp01((along - 0.82) / 0.14)
-		local rootW = rv * 2.2 -- (the sphere's own width: the neck starts exactly there)
-		for i, L in ipairs(bLayers) do
-			local nz = U.Noise(now * L.Speed * 3, seed + i * 7.1)
-			local breathe = 1 + L.Amp * nz
-			local thin = if L.Core then (1 - coll) else fade
-			local w = L.W * g * breathe * swell * grow0 * thin
-			-- (as it swells it is let into the ground it wrecks - drawn in front of it, so it never shows
-			-- a cut edge - and torn-up rock rises along its edges; small, it keeps clear of it)
-			local give = w * 0.42 * U.Clamp01((g - 0.7) / 0.9)
-			local wN = math.min(w, 2 * (math.max(0.45, roomN - 0.1) + give) / L.Edge)
-			local wT = math.min(w, 2 * (math.max(0.45, roomT - 0.1) + give) / L.Edge)
-			local lift = w * L.Edge * 0.5
-			L.Neck.ZOffset = L.Z
-			L.Main.ZOffset = L.Z + lift
-			L.Tip.ZOffset = L.Z + lift
-			local vis = show and thin > 0.02
-			L.Neck.Width0 = math.min(wN, rootW)
-			L.Neck.Width1 = wN
-			L.Main.Width0 = wN
-			L.Main.Width1 = wT
-			L.Tip.Width0 = wT
-			L.Tip.Width1 = wT * 0.5
-			L.Neck.Enabled = vis
-			L.Main.Enabled = vis
-			L.Tip.Enabled = vis
-			if math.abs(bandVis - L.Vis) > 0.03 then
-				L.Vis = bandVis
-				local t = ns(L.Tr + (1 - L.Tr) * (1 - bandVis))
-				L.Neck.Transparency = t
-				L.Main.Transparency = t
-				L.Tip.Transparency = t
-			end
-		end
-		-- the solid core and body: capsules from the sphere to the end (the body grows out of the neck)
-		local roomD = 2 * math.max(0.3, roomAll - 0.05)
-		local live = span > 0.4
-		local function capsule(rod: BasePart, caps: { BasePart }, s0: number, d: number, t: number)
-			local a = p0 + aim * math.min(s0, span * 0.5)
-			local len = math.max(0.05, (p1 - a).Magnitude - d)
-			local c3 = (a + p1) * 0.5
-			rod.Size = Vector3.new(len, d, d)
-			rod.CFrame = CFrame.lookAt(c3, c3 + aim) * CFrame.Angles(0, math.rad(90), 0)
-			rod.Transparency = if live and d > 0.03 then t else 1
-			local ends = { a + aim * (d * 0.5), p1 - aim * (d * 0.5) }
-			for k, cap in ipairs(caps) do
-				cap.Size = Vector3.one * d
-				cap.CFrame = CFrame.new(ends[k])
-				cap.Transparency = if live and d > 0.03 then t else 1
-			end
-		end
-		local wc = math.min(1.0 * BEAM_W * g * swell * grow0 * (1 - coll) + 0.02, roomD * 0.35, span)
-		local wm = math.min(2.5 * BEAM_W * g * swell * grow0 * (1 - coll) + 0.03, roomD * 0.7, span)
-		local wb = math.min(3.9 * BEAM_W * g * swell * grow0 * fade + 0.05, roomD, span)
-		capsule(coreRod, coreCaps, 0, wc, 0.05 + 0.9 * coll)
-		capsule(midRod, midCaps, neckLen * 0.25, wm, 0.35 + 0.6 * coll + 0.05 * U.Noise(now * 14, seed + 4))
-		capsule(bodyRod, bodyCaps, neckLen * 0.5, wb, 0.5 + 0.48 * coll + 0.05 * U.Noise(now * 18, seed + 2))
-		-- the shimmering sheath round the body (it breathes with the beam)
-		local ws = math.min(5.2 * BEAM_W * g * swell * grow0 * fade * (1 + 0.04 * U.Noise(now * 6, seed + 5)), roomD, span)
-		capsule(sheath, sheathCaps, neckLen * 0.8, ws, 0.15 + 0.85 * coll)
-		-- (the energy streaming down the inside never runs past the end)
-		flow.Lifetime = nr(math.max(0.02, span / 170))
-		flowCore.Lifetime = nr(math.max(0.02, span / 190))
-		-- (born small in the sphere, swelling as it streams out: nothing big ever sits by the caster)
-		local fw = 5.5 * BEAM_W * g * 0.8
-		flow.Size = ns(0, math.min(fw, rv * 1.6), 0.3, fw, 1, fw * 0.85)
-		flowCore.Size = ns(0, math.min(fw * 0.47, rv), 0.3, fw * 0.47, 1, fw * 0.4)
-		flow.ZOffset = fw * 0.45
-		flowCore.ZOffset = fw * 0.45 + 0.4
-		flow.Enabled = live and not endedAt
-		flowCore.Enabled = live and not endedAt
-		flow.Rate = 80
-		flowCore.Rate = 60
-		-- the head: the sphere hurled out ahead of the beam until it lands
-		local traveling = not reached and not endedAt
-		if head then
-			if traveling then
-				local hd = math.max(rv * 2.6, 1.5 * BEAM_W * g)
-				local stretch = math.clamp(visLen * 0.4, hd, 9 * BEAM_W * g)
-				head.Size = Vector3.new(hd, hd, stretch)
-				head.CFrame = U.Look(p1 - aim * stretch * 0.35, aim)
-				head.Transparency = 0.05
-			else
-				head.Transparency = 1
-			end
-		end
-		-- the lights along it
-		volume.Size = Vector3.new(1, 1, math.max(0.2, span))
-		volume.CFrame = U.Look(p0 + aim * span * 0.5, aim)
-		-- its volume: from the neck on, sized to the beam (drawn in front of any ground it reaches)
-		do
-			local fillLen = span - neckLen * 0.7
-			local fv = 7.4 * BEAM_W * g * 0.62 * fade
-			fillPart.Size = Vector3.new(0.5, 0.5, math.max(0.2, fillLen))
-			fillPart.CFrame = U.Look(p0 + aim * (neckLen * 0.7 + math.max(0.2, fillLen) * 0.5), aim)
-			local fillOn = not endedAt and fillLen > 2
-			fillGlow.Enabled = fillOn
-			fillPlasma.Enabled = fillOn
-			fillCore.Enabled = fillOn
-			if fillOn then
-				fillGlow.Size = ns(0, fv * 0.85, 1, fv)
-				fillPlasma.Size = ns(0, fv * 0.7, 1, fv * 0.85)
-				fillCore.Size = ns(0, fv * 0.3, 1, fv * 0.36)
-				fillGlow.ZOffset = fv * 0.5
-				fillPlasma.ZOffset = fv * 0.5 + 0.2
-				fillCore.ZOffset = fv * 0.5 + 0.5
-				local density = math.clamp(fillLen / math.max(1, fv * 0.5), 2, 90)
-				fillGlow.Rate = density * 4
-				fillPlasma.Rate = density * 3
-				fillCore.Rate = density * 4
-			end
-		end
-		for i, vl in ipairs(volLights) do
-			vl.Att.Position = Vector3.new(0, 0, span * (0.5 - i / 4))
-			vl.Light.Brightness = (0.8 + 0.2 * U.Noise(now * 7, seed + i)) * fade
-			vl.Light.Range = 18 * fade * g
-		end
-		-- the end
+		-- THE END BALL: where it sits - at the head while it races out, on what it lands on (a little off
+		-- a surface, its front pressed into it; against a body; at the end of its reach in open air) -
+		-- and never more than a third sunk into a floor under it
 		local onBody = stopper ~= nil
 		local hitWorld = normal ~= nil and not onBody
-		local landed = reached and not endedAt and normal ~= nil
-		surface:SetAttribute("Normal", if hitWorld then normal else nil)
-		endLight.Brightness = (if landed then 2.6 else 1.2) * fade * (1 + 0.15 * U.Noise(now * 15, seed + 9))
-		endLight.Range = 22 * fade
-		if impact then
-			U.Enable(impact, landed)
-		end
-		if math.abs(g - (h.LastG or 0)) > 0.02 then
-			h.LastG = g
-			endGlow.Size = ns(0, 7 * BEAM_W * g, 1, 8 * BEAM_W * g)
-			endFlare.Size = ns(0, 5 * BEAM_W * g, 1, 7 * BEAM_W * g)
-		end
-		endGlow.Enabled = not endedAt
-		endGlow.Rate = 30
-		endFlare.Enabled = not endedAt
-		endFlare.Rate = 12
-		splash.Enabled = landed
-		splash.Rate = 30
-		endSparks.Enabled = landed and hitWorld
-		endSparks.Rate = 45
-		endSmoke.Enabled = landed and hitWorld
-		endSmoke.Rate = 8
-		if hitWorld then
-			surface.WorldCFrame = U.Up(p1 + (normal :: Vector3) * 0.15, normal :: Vector3)
-		else
-			surface.WorldCFrame = U.Up(p1, -aim)
-		end
+		local landed = reached and normal ~= nil
 		if landed and not landedOnce then
 			landedOnce = true
+			landAt = now
 			if o.Mine then
 				camera("BeamHit", -aim, 1)
 			end
 			nearKick(p1, 40, 0.8)
 		end
-		-- each of the beam's hits (the server's ticks: Beam.Tick apart from the release) lands as a burst
-		-- where it ends, in time with the damage (v80's)
-		if landed then
-			local k = math.floor(since / B.Tick)
-			if k > lastHitPop and since < TL.Sustain then
-				lastHitPop = k
-				local n = (if hitWorld then normal else -aim) :: Vector3
-				fire("EndBlastSmall", U.Up(p1 + n * 0.3, n), 0.32 * BEAM_W * g, nil, 0.7, nil, true)
-				fire("BlastHit", U.Up(p1 + n * 0.2, n) * CFrame.Angles(0, math.random() * 6.28, 0), g, nil, 0.6, nil, true)
+		stretch += ((if reached then 1 else 1.7) - stretch) * math.min(1, dt * (if reached then 14 else 30))
+		local breathe = 1 + 0.045 * math.sin(now * 9.5) + 0.03 * U.Noise(now * 6, seed + 11)
+		local thump = if tk < 1 then 0.3 * math.exp(-tk * 9) * math.cos(tk * 28) else 0
+		local lk = if landAt > 0 then now - landAt else math.huge
+		local squash = if lk < 1 then 0.3 * math.exp(-lk * 10) * math.cos(lk * 24) else 0
+		local ballWant = math.max(shellD * 1.25, 1.2)
+		ballBase = if ballBase <= 0 then ballWant else ballBase + (ballWant - ballBase) * math.min(1, dt * 8)
+		local ballD = ballBase * breathe * (1 + thump) * (1 + 0.25 * drain) * (if cut then 1 - coll else 1)
+		local Rb = ballD * 0.5
+		local bc = p1
+		if landed and hitWorld then
+			bc = p1 + (normal :: Vector3) * (Rb * 0.55)
+		elseif landed and onBody then
+			bc = p1 - aim * (Rb * 0.25)
+		end
+		local fl = o.World(bc + Vector3.new(0, Rb, 0), Vector3.new(0, -Rb * 2, 0))
+		local wantLift = 0
+		if fl then
+			local hgt = (bc - fl.Position):Dot(fl.Normal)
+			wantLift = math.max(0, Rb * 0.67 - hgt)
+		end
+		lift += (wantLift - lift) * math.min(1, dt * 18)
+		bc += Vector3.yAxis * lift
+		local axis = if landed and hitWorld then (normal :: Vector3) else aim
+		local axial = 1 + 0.6 * (stretch - 1) - squash
+		local lateral = 1 - 0.12 * (stretch - 1) + 0.35 * squash
+		local bcf = U.Look(bc, axis)
+
+		-- the beam's line: from its root into the end ball's heart
+		local runV = bc - p0
+		local total = runV.Magnitude
+		local dir = if total > 1e-3 then runV / total else aim
+		-- (its flare is a long teardrop, never a disc: a beam too short for it - just out of the hands,
+		-- or draining away - is thinner in proportion)
+		local short = BeamMath.ShortFactor(shellD, total)
+		unit *= short
+		shellD *= short
+		local NL = math.min(math.max(6, 2.2 * shellD), total * 0.45)
+		local show = total > 0.3 and thin > 0.02
+		local zz = U.Noise(now * 17, seed + 5)
+		for i, L in ipairs(bLayers) do
+			local d = L.K * unit
+			local off = L.Off * NL
+			local a = NL * 0.5
+			local eq = off + a
+			-- (the hot layers flash white with every hit; the lightning on it flickers the cyan layer)
+			local tr = L.Tr
+			local col = L.Color
+			if i == 2 then
+				col = C_CYAN:Lerp(C_ICE, 0.35 * flash + 0.2 * math.max(0, zz))
+				tr = L.Tr - 0.12 * flash
+			elseif i == 3 then
+				col = C_AZURE:Lerp(C_CYAN, 0.5 * flash)
+				tr = L.Tr - 0.15 * flash + 0.05 * U.Noise(now * 14, seed + 4)
+			elseif i == 4 then
+				col = C_LIGHT:Lerp(C_ICE, flash)
+			end
+			tr = math.clamp(tr + (1 - tr) * (if cut then coll else 0), 0, 1)
+			if show and d > 0.03 then
+				if L.Neck then
+					L.Neck.Color = col
+				end
+				L.Cyl.Color = col
+				setShape(L.Neck, Vector3.new(d, d, 2 * a), U.Look(p0 + dir * eq, dir), tr)
+				local len = total - eq
+				if len > 0.05 then
+					setShape(L.Cyl, Vector3.new(len, d, d), U.Look(p0 + dir * (eq + len * 0.5), dir) * ALONG, tr)
+				else
+					L.Cyl.Transparency = 1
+				end
+			else
+				L.Cyl.Transparency = 1
+				if L.Neck then
+					L.Neck.Transparency = 1
+				end
 			end
 		end
-		-- the ground under its path, stirred wherever it is close
+		-- where its lightning runs: from the cyan layer's flare into the end ball
+		local runFrom = bLayers[2].Off * NL + NL * 0.5
+		bs.P0, bs.Dir, bs.From, bs.Len, bs.R, bs.G = p0, dir, runFrom, math.max(0, total - runFrom), shellD * 0.5, g
+		bs.Side, bs.Up = basis(dir)
+		bs.Ball, bs.BallR, bs.Live = bc, Rb, show
+
+		-- the Lightning pack's bolt wrapped round it, in lengths, re-struck every few frames
+		local runLen = math.max(0, total - runFrom)
+		local nS = if #sleeves > 0 and show and runLen > 1 then math.clamp(math.ceil(runLen / (2.2 * shellD + 4)), 1, #sleeves) else 0
+		if now >= nextSleeve then
+			nextSleeve = now + 1 / 30
+			for i = 1, MAX_SLEEVES do
+				local st = sleeveState[i]
+				st.Spin = math.random() * TAU
+				local roll = math.random()
+				st.Tr = if roll < 0.18 then 1 elseif roll < 0.5 then 0 elseif roll < 0.8 then 0.2 else 0.45
+				st.Color = if math.random() < 0.6 then C_ICE else C_ARC
+			end
+		end
+		for i = 1, MAX_SLEEVES do
+			local s = sleeves[i]
+			if s then
+				if i <= nS then
+					local st = sleeveState[i]
+					local seg = runLen / nS
+					local c = p0 + dir * (runFrom + seg * (i - 0.5))
+					local across = shellD * (1.22 + 0.3 * flash)
+					s.Color = st.Color
+					setShape(s, Vector3.new(seg * 1.25, across * 0.47, across), U.Look(c, dir) * ALONG * CFrame.Angles(st.Spin, 0, 0), math.max(st.Tr, if cut then coll else 0))
+				else
+					s.Transparency = 1
+				end
+			end
+		end
+		-- and 3D arcs leaping along its skin
+		if show and not endedAt and now >= nextSkin and bs.Len > 2 then
+			nextSkin = now + U.Ramp(0.08, 0.035, (g - 0.6) / 1.4)
+			local sf = math.random()
+			local lenF = 4 + math.random() * 7
+			local th0 = math.random() * TAU
+			local dth = (math.random() - 0.5) * 2.4
+			local hop = 0.2 + math.random() * 0.4
+			arcs.Add(function(_k: number)
+				local L = math.min(lenF * math.max(1, bs.G), bs.Len * 0.6)
+				local s0 = bs.From + sf * math.max(0, bs.Len - L)
+				local pts = {}
+				for j = 0, 6 do
+					local t = j / 6
+					local th = th0 + dth * t + (math.random() - 0.5) * 0.5
+					local rr = bs.R * (0.96 + hop * math.sin(t * math.pi) + (math.random() - 0.5) * 0.16)
+					pts[j + 1] = bs.P0 + bs.Dir * (s0 + L * t) + (bs.Side * math.cos(th) + bs.Up * math.sin(th)) * rr
+				end
+				return pts
+			end, 0.09 + math.random() * 0.08, 0.1 + 0.06 * g, if math.random() < 0.5 then C_ARC else C_ICE, 0.035)
+		end
+		-- the surge: a swell of light rushing down it, landing in the end ball exactly on each hit
+		local PULSE_T = 0.13
+		local nextTick = lastHitPop + 1
+		local tNext = (B.FirstTick or 0) + nextTick * B.Tick
+		if not endedAt and tNext < TL.Sustain and since >= tNext - PULSE_T and pulseFor < nextTick then
+			pulseFor = nextTick
+			pulseBorn = since
+		end
+		if pulse then
+			local s = (since - pulseBorn) / PULSE_T
+			if pulseFor >= 0 and s >= 0 and s < 1.15 and show then
+				local e = 1 - (1 - math.min(s, 1)) ^ 2
+				local pd = 2.9 * unit * 1.22
+				local pl = math.min(3 * pd, total * 0.5)
+				setShape(pulse, Vector3.new(pd, pd, math.max(0.1, pl)), U.Look(p0 + dir * (total * e), dir), 0.3 + 0.7 * math.max(0, s - 0.8) / 0.35)
+			else
+				pulse.Transparency = 1
+			end
+		end
+
+		-- the end ball's layers (its swirl spins; its core goes white with every hit and as it drains)
+		local hot = math.max(flash, drain)
+		local ballCf = bcf
+		local bshape = function(k: number): Vector3
+			return Vector3.new(ballD * k * lateral, ballD * k * lateral, ballD * k * axial)
+		end
+		local bt = if cut then coll else 0
+		if eCore then
+			eCore.Color = C_HOT:Lerp(C_WHITE, 0.4 + 0.6 * hot)
+		end
+		if eBody then
+			eBody.Color = C_AZURE:Lerp(C_CYAN, 0.6 * hot)
+		end
+		if eSkin then
+			eSkin.Color = C_CYAN:Lerp(C_ICE, hot)
+		end
+		setShape(eCore, bshape(0.5 + 0.12 * hot), ballCf, bt)
+		setShape(eBody, bshape(0.82), ballCf, math.min(1, 0.22 - 0.12 * hot + bt))
+		setShape(eSwirl, bshape(0.9), ballCf * CFrame.Angles(now * 6.1, now * 8.3, now * 4.7), math.min(1, 0.45 + bt))
+		setShape(eSkin, bshape(1.0), ballCf * CFrame.Angles(0, 0, now * 3), bt)
+		-- its lightning cage, re-struck every frame (the Lightning pack's way)
+		local cageOn = math.random() > 0.15
+		setSolid(eCageA, ballD * (1.12 + 0.12 * math.random()), CFrame.new(bc) * CFrame.Angles(math.random() * TAU, math.random() * TAU, math.random() * TAU), if cageOn then math.max(bt, 0.1 + 0.4 * math.random()) else 1)
+		setSolid(eCageB, ballD * (1.0 + 0.15 * math.random()), CFrame.new(bc) * CFrame.Angles(math.random() * TAU, math.random() * TAU, math.random() * TAU), if math.random() > 0.3 then math.max(bt, 0.15 + 0.4 * math.random()) else 1)
+		-- three Thunder bolts discharging out of it, evenly round its axis and slowly turning: splayed
+		-- into the surface it lands on, flared ahead of it in open air
+		do
+			local fwd = if landed and hitWorld then -(normal :: Vector3) else aim
+			local u1, u2 = basis(fwd)
+			local splay = math.rad(if landed then 58 else 40)
+			for i, tb in ipairs(thunders) do
+				local ang = now * 2.2 + (i - 1) * TAU / 3
+				local d = (fwd * math.cos(splay) + (u1 * math.cos(ang) + u2 * math.sin(ang)) * math.sin(splay)).Unit
+				local len = Rb * (1.5 + 0.5 * flash)
+				local lit = math.random() > 0.25 and not cut
+				setShape(tb, Vector3.new(len * 0.17, len, len * 0.2), U.Up(bc + d * (Rb * 0.7 + len * 0.5), d) * CFrame.Angles(0, math.random() * TAU, 0), if lit then 0.1 + 0.35 * math.random() else 1)
+			end
+		end
+		-- the drain: a force-field shell crushing in on it while lightning pours in along the last of the beam
+		if eImplode then
+			if drain > 0 and not cut then
+				setSolid(eImplode, ballD * (2.8 - 1.8 * drain), CFrame.new(bc), 0.75 - 0.6 * drain)
+			else
+				eImplode.Transparency = 1
+			end
+		end
+		if drain > 0 and not cut and now >= nextFeed then
+			nextFeed = now + 0.03
+			local d = randomUnit()
+			local far = 2.8 - 1.2 * drain
+			arcs.Add(function(k: number)
+				return jagged(bs.Ball + d * bs.BallR * far * (1 - 0.4 * k), bs.Ball + d * bs.BallR * 0.6, 5, 0.22)
+			end, 0.1, 0.1 + 0.05 * g, C_ARC, 0.03)
+		end
+		-- the end ball discharges into whatever it touches: the surface round it, the body it is on, or the
+		-- open air ahead of it
+		if not endedAt and now >= nextDischarge then
+			nextDischarge = now + U.Ramp(0.12, 0.05, (g - 0.6) / 1.4)
+			local d: Vector3
+			local tip: Vector3? = nil
+			if landed and hitWorld then
+				d = ((-(normal :: Vector3)) * 0.55 + randomUnit()).Unit
+				local hit = o.World(bc, d * Rb * 2.8)
+				if hit then
+					tip = hit.Position
+				end
+			elseif landed and onBody then
+				for _, b in ipairs(bodies) do
+					if b.Key == stopper then
+						tip = b.Cf.Position + Vector3.new((math.random() - 0.5) * 1.6, (math.random() - 0.4) * 3.2, (math.random() - 0.5) * 1.6)
+						break
+					end
+				end
+				d = if tip then ((tip :: Vector3) - bc).Unit else randomUnit()
+			else
+				d = (aim * 0.6 + randomUnit()).Unit
+			end
+			local reachOut = if tip then nil else Rb * (1.5 + math.random() * 0.8)
+			local fixed = tip
+			arcs.Add(function(_k: number)
+				local c = bs.Ball
+				local to = fixed or (c + d * (reachOut :: number))
+				return jagged(c + d * bs.BallR * 0.85, to, 6, 0.24)
+			end, 0.08 + math.random() * 0.07, 0.11 + 0.06 * g, if math.random() < 0.5 then C_ARC else C_ICE, 0.03)
+		end
+		-- the end ball's crackle, smoke and sparks (placed on its part once that part has moved)
+		tail.CFrame = U.Look(p1, aim)
+		endAtt.WorldPosition = bc
+		eCrackle.Enabled = not endedAt
+		eCrackle.Rate = 14 + 10 * flash
+		eCrackle.Size = ns(0, Rb * 0.8, 1, Rb * 1.1)
+		eCrackle.ZOffset = Rb * 0.6
+		surface:SetAttribute("Normal", if hitWorld then normal else nil)
+		if hitWorld then
+			surface.WorldCFrame = U.Up(p1 + (normal :: Vector3) * 0.15, normal :: Vector3)
+		else
+			surface.WorldCFrame = U.Up(p1, -aim)
+		end
+		endSmoke.Enabled = landed and hitWorld and not endedAt
+		endSmoke.Rate = 8
+		endSparkle.Enabled = landed and not endedAt
+		endSparkle.Rate = 20 + 30 * flash
+		endLight.Color = C_LIGHT:Lerp(C_ICE, flash)
+		endLight.Brightness = ((if landed then 2.6 else 1.4) + 3 * flash) * (1 - coll) * (1 + 0.2 * (math.random() - 0.5))
+		endLight.Range = (18 + 6 * g) * (1 - coll)
+		-- a hit lands at its end: the end ball thumps, an electric ring bursts off it, chips of the
+		-- surface fly (two by two, mirrored), smoke and dust kick up
+		if hitNow then
+			local n = (if hitWorld then normal else -aim) :: Vector3
+			shockRing(bc, n, ballD * 0.9, ballD * 2.3, 0.3, C_ICE, nil, 0.26)
+			flashLight(bc, C_ICE, 4, 20 + 6 * g, 0.25, nil, C_MID)
+			if landed and hitWorld then
+				local s1, s2 = basis(n)
+				local a0 = math.random() * TAU
+				for j = 0, 3 do
+					local a = a0 + j * TAU / 4
+					local out = s1 * math.cos(a) + s2 * math.sin(a)
+					chunk(p1 + n * 0.2, n, endHit, 0.55 + 0.25 * g, out, 20, 16)
+				end
+				fire("BlastHit", U.Up(p1 + n * 0.2, n) * CFrame.Angles(0, a0, 0), 0.55 * g, nil, 0.6, nil, true, Rb * 3)
+			end
+		end
+
+		-- the lights along it (they flicker with its lightning, flash with every hit)
+		volume.Size = Vector3.new(1, 1, math.max(0.2, total))
+		volume.CFrame = U.Look(p0 + dir * total * 0.5, dir)
+		for i, vl in ipairs(volLights) do
+			vl.Att.Position = Vector3.new(0, 0, total * (0.5 - i / 4))
+			vl.Light.Brightness = (0.8 + 0.25 * U.Noise(now * 19, seed + i) + 1.4 * flash) * (1 - coll) * (1 - 0.6 * drain)
+			vl.Light.Color = C_MID:Lerp(C_ICE, flash)
+			vl.Light.Range = 14 * g * (1 - coll)
+		end
+		-- the ground under its path: stirred wherever it is close, torn up (chunks thrown out to both
+		-- sides, mirrored) wherever the beam grinds into it
 		local kick = not endedAt and span > 4
 		for i, tp in ipairs(trailPts) do
 			local onG = false
 			if kick then
-				local q = p0 + aim * (span * (i - 0.5) / TRAIL)
-				local fl = o.World(q, Vector3.new(0, -8, 0))
-				if fl then
+				local q = p0 + dir * (total * (i - 0.5) / TRAIL)
+				local flq = o.World(q, Vector3.new(0, -8, 0))
+				if flq then
 					onG = true
-					local closeness = 1 - (q.Y - fl.Position.Y) / 8
-					tp.Att.WorldCFrame = U.Up(fl.Position + fl.Normal * 0.2, fl.Normal)
-					tp.Dust.Rate = 10 * closeness
+					local gap = q.Y - flq.Position.Y
+					local closeness = 1 - gap / 8
+					tp.Att.WorldCFrame = U.Up(flq.Position + flq.Normal * 0.2, flq.Normal)
+					tp.Dust.Rate = 10 * closeness + (if gap < shellD * 0.5 then 12 else 0)
+					if gap < shellD * 0.5 and now >= tp.NextChunk then
+						tp.NextChunk = now + 0.5 + math.random() * 0.4
+						for _, sgn in ipairs({ 1, -1 }) do
+							chunk(flq.Position + side * sgn * shellD * 0.35, flq.Normal, flq, 0.5 + 0.2 * g, side * sgn, 14, 16)
+						end
+					end
 				end
 			end
 			tp.Dust.Enabled = onG
 		end
 		if endLoop then
-			local want = if landed then (endLoop:GetAttribute("Base") :: number) else 0
-			endLoop.Volume += (want - endLoop.Volume) * math.min(1, dt * 12)
+			local wantV = if landed and not endedAt then (endLoop:GetAttribute("Base") :: number) else 0
+			endLoop.Volume += (wantV - endLoop.Volume) * math.min(1, dt * 12)
 		end
 		if roar then
-			local want = if endedAt then 0 else (roar:GetAttribute("Base") :: number)
-			roar.Volume += (want - roar.Volume) * math.min(1, dt * (if endedAt then 14 else 20))
+			local wantV = if endedAt then 0 else (roar:GetAttribute("Base") :: number) * (1 - 0.5 * drain)
+			roar.Volume += (wantV - roar.Volume) * math.min(1, dt * (if endedAt then 14 else 20))
 		end
 		-- the beam hums under the caster's view while it lasts
 		if o.Mine and not endedAt and now >= nextShake then
 			nextShake = now + 0.24
 			camera("BeamHold", nil, 1)
 		end
+		arcs.Step(now)
 		if endedAt and coll >= 1 then
 			finish()
 		end

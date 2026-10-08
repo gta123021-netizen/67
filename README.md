@@ -1,6 +1,96 @@
 # Overkill
 
-- `Overkill_premium_polish_v33.rbxlx` - **the latest place. Open this one in Roblox Studio.**
+## The overhaul (binary place)
+
+- `overhaul/Overkill_overhaul_v88.rbxl` - **the latest overhaul place. Open this one in Roblox Studio.**
+- `overhaul/Overkill_overhaul_v87.rbxl` - the place it was built from, kept for comparison.
+- `overhaul/src/` - its scripts as plain Luau (file name = path in the game tree). These are the v88 sources.
+- `overhaul/build.sh` - writes `overhaul/src/` into v87 and adds the lightning meshes v88 uses, giving
+  v88. It uses `tools/build_rbxl.py`, which replaces only the scripts that changed. `tools/rbxbin.py`
+  keeps every other byte of the place as it was. `tools/extract_rbxl.py` pulls the scripts out of a place.
+- `tools/lune/` - tests for Azure Tide Cannon, run with [Lune](https://github.com/lune-org/lune) 0.10.4
+  against the real place:
+  - `azure_tide_fx.luau` plays the whole effect frame by frame and checks for errors and leftovers
+  - `azure_tide_hits.luau` runs the server's beam hits against a test world
+
+  ```
+  overhaul/build.sh
+  lune run tools/lune/azure_tide_fx.luau overhaul/Overkill_overhaul_v88.rbxl overhaul/src floor
+  lune run tools/lune/azure_tide_hits.luau overhaul/Overkill_overhaul_v88.rbxl overhaul/src
+  ```
+
+### What changed in v88: Goki's Azure Tide Cannon
+
+**The beam is fully 3D and continuous.** The flat ribbons, the rays, and the glow sprites that were
+stacked along it are gone. Now it is four nested layers:
+
+- a white-hot core
+- a cyan layer
+- an azure body
+- a force-field shell
+
+Each layer flares out of the sphere in the hands as a smooth teardrop and runs whole into the end
+ball. There are no joins and no circles along it.
+
+**It is electric.** The VFX library's Lightning mesh is wrapped around the beam in lengths. Each
+length is spun and flickered every few frames, the way its own pack animates it. 3D lightning arcs
+also leap along the beam's skin. With every hit, a surge of light rushes down the beam and lands in
+the end ball.
+
+**It reaches 80 studs, not 150.**
+
+**The end ball (new).** This is the beam's head: a 3D ball in a crackling lightning cage, with three
+Thunder bolts discharging out of it. It:
+
+- races out stretched like a comet
+- squashes when it lands
+- thumps and throws an electric shockwave ring on every hit
+- discharges lightning into what it touches: the floor and wall round it, the body it is on, or open
+  air
+- throws chips of the surface it is grinding
+
+**The charge keeps its design.** Every layer now sits inside the 3D sphere, so there are no halo
+discs round it. The streaks, wisps and 2D bolts are 3D lightning instead:
+
+- drawn in from all round the hands
+- fed into the sphere from each palm in turn
+- snapping off the sphere as it surges
+- a lightning cage and electric accretion rings round the black hole
+
+**The explosion is compact and symmetric.** In its last quarter second, the beam drains into the end
+ball while a force-field shell crushes in on it. Then it detonates exactly `BlastRadius` (11 studs)
+round. Before, the blast was about 20 studs and its fireballs reached about 78 across. The blast is:
+
+- a white-hot core, and an energy dome and its skin, all cooling from white to deep blue
+- a level electric shockwave ring and a mirrored tilted pair
+- 8 lightning rays evenly round along the ground and 4 rising between them
+- 6 Thunder bolts
+- a ring of 10 rock spikes torn up round the crater
+- 12 chunks of that ground thrown evenly all round. They tumble with dust trails, bounce, settle
+  and sink away.
+
+Lightning then crackles over the crater while the light cools. The packs' bursts keep only their
+smoke, dust, flames and shards: flat rings, streaks, lines and glow discs are filtered out.
+
+**Hitboxes match what you see** (server: `AbilityService`, shared math: `BeamMath`):
+
+- Hits reach only as far as the head has travelled. The first hit lands 0.1 s after the release.
+- A body beside the beam is hit only with no wall between them and the beam.
+- The beam's width hitbox (`HitRadius` 2.6 × its size) is drawn width: between the azure body and the
+  shell. It narrows wherever the beam is drawn narrower, for example along a floor or as a short beam.
+- The final blast hits the body the beam ends on and everyone within `BlastRadius` of its end, with
+  nothing between. Bodies along the drained beam are not hit by it.
+- The server's ability clock no longer starts with a wrong first step.
+
+**The hotbar icon has an outline.** The Azure Tide icon now has the HUD's ink outline round its own
+shape. It scales and wiggles with the icon, and fades with it while on cooldown.
+
+**Code check.** Every script in the place was type-checked with luau-lsp and the Roblox definitions.
+The few warnings it gave were not real errors, apart from the server clock's first step above.
+
+## The premium polish line
+
+- `Overkill_premium_polish_v33.rbxlx` - the latest place of this line.
 - `Overkill_premium_polish_v32.rbxlx`, `Overkill_premium_polish_v31.rbxlx` - earlier builds.
 - `Overkill_premium_polish_v30.rbxlx` - the original place file (v30), kept for comparison.
 - `src/` - every script in the place, extracted as plain Luau (file name = its path in the game tree). These are the v33 sources.
@@ -12,7 +102,7 @@
 
   Only the scripts whose source changed are replaced. The rest of the place is copied through byte for byte.
 
-## What changed in v33
+### What changed in v33
 
 - **No leftover rim beside the text.** An icon's rings all end on the edge of its slot. Where
   that edge fell between two screen pixels, each ring left a faint line of its colour next to
@@ -33,7 +123,7 @@
 
   The last pixel-snapping helpers are removed.
 
-## What changed in v32
+### What changed in v32
 
 Roblox lays UI that has a UIScale out in unscaled units, rounds every edge there, and only
 then scales it to the screen. So v31's pixel snapping could not hold: a panel inset inside a
@@ -54,9 +144,9 @@ so these come out exactly even at any screen size:
   avatars and slots, rule badges, party frames, queue lock, invite avatars, toasts, shop cards
 - the XP bar and slider outlines no longer look thinner along the filled part
 
-## What changed in v31
+### What changed in v31
 
-### Even icon spacing, down to the pixel
+#### Even icon spacing, down to the pixel
 The HUD is scaled to fit the screen. Roblox then rounds every frame to whole pixels on its own, so an
 icon set 10 units from its plate's left, top and bottom edges could land 8px from one edge and 7px
 from the others. The same happened to the rims of the title plates. In v31 these are placed on whole
@@ -74,13 +164,13 @@ when the screen size or the UI size setting changes, so the gaps are exactly equ
 The two search bars (bag, party) and the panel headers in hero select and aura preview were also
 evened out.
 
-### HUD pills
+#### HUD pills
 - The CHANGE button is centred vertically in the HERO pill.
 - The + button and the circle around it are centred in the COINS pill. The + is now drawn with bars
   instead of a font character, so it sits in the exact middle.
 - The LEVEL pill has more mini stars (about 33 instead of about 22), as dense as the shurikens and coins.
 
-### Bug fixes
+#### Bug fixes
 - **Robux coin packs**: the coins and the purchase id are saved together before the purchase is
   confirmed. A purchase can no longer be paid out twice, or lost if the server stops.
 - **Shutdown saves**: quest, shop and hero data now wait for every save to finish on shutdown. Before,

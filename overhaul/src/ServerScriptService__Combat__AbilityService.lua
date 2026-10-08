@@ -160,11 +160,14 @@ local function targets(e: any): { any }
 	return list
 end
 
--- BEAM: from Fire, a beam along the server's aim for Sustain seconds; a tick every Beam.Tick hits
--- every body in it (the TickAttack), the last moment bursts at its end (the BlastAttack)
+-- BEAM: from Fire, a beam along the server's aim for Sustain seconds; a tick every Beam.Tick (the
+-- first FirstTick after the release) hits every body in it (the TickAttack) - only as far as its head
+-- has raced out (AbilityConfig.BeamReach: what every screen draws), never through a wall; its last
+-- moment detonates its end ball (the BlastAttack, BlastRadius round its end)
 Runners.Beam = {}
 function Runners.Beam.Trace(cast: any): (Vector3, number, any, { any }, { any })
 	local e, B = cast.E, cast.Def.Beam
+	local since = A.now() - cast.Start - cast.Def.Timeline.Fire
 	local origin = BeamMath.Origin(e.Root.Position, cast.Aim, B.Origin)
 	-- (never the far side of a wall the caster stands against: it starts at the wall's face)
 	local reach = origin - e.Root.Position
@@ -175,14 +178,30 @@ function Runners.Beam.Trace(cast: any): (Vector3, number, any, { any }, { any })
 		end
 	end
 	local bodies = targets(e)
-	local grow = AbilityConfig.BeamGrow(cast.Def, A.now() - cast.Start - cast.Def.Timeline.Fire)
-	local len, _normal, _stopper, inBeam = BeamMath.Trace(origin, cast.Aim, B.Range, B.HitRadius * grow, B.StopRadius * math.sqrt(grow), bodies, A.worldRay)
-	return origin, len, _stopper, inBeam, bodies
+	local grow = AbilityConfig.BeamGrow(cast.Def, since)
+	local head = math.max(0.5, AbilityConfig.BeamReach(cast.Def, since))
+	local len, normal, stopper, inBeam = BeamMath.Trace(origin, cast.Aim, math.min(B.Range, head), B.HitRadius * grow, B.StopRadius * math.sqrt(grow), bodies, A.worldRay)
+	-- (as wide as every screen draws it: narrower where a floor or a wall is close, or where it is short)
+	local shellD = (B.Shell or 3.6) * (B.Width or 1.6) * grow
+	local room = BeamMath.Room(origin, cast.Aim, len, if normal then shellD * 0.7 + 2 else 0, A.worldRay, 16)
+	local k = BeamMath.RoomFactor(shellD, grow, room)
+	k *= BeamMath.ShortFactor(shellD * k, len)
+	if k < 0.999 then
+		local edge = BeamMath.BodyRadius + B.HitRadius * grow * k
+		local kept = {}
+		for _, c in ipairs(inBeam) do
+			if c.Key == stopper or c.Dist <= edge then
+				table.insert(kept, c)
+			end
+		end
+		inBeam = kept
+	end
+	return origin, len, stopper, inBeam, bodies
 end
 
 function Runners.Beam.Hit(cast: any, final: boolean)
 	local e, B = cast.E, cast.Def.Beam
-	local origin, len, _, inBeam, bodies = Runners.Beam.Trace(cast)
+	local origin, len, stopper, inBeam, bodies = Runners.Beam.Trace(cast)
 	local endPos = origin + cast.Aim * len
 	local attack = Config.Attacks[if final then B.BlastAttack else B.TickAttack]
 	if not attack then
@@ -192,7 +211,9 @@ function Runners.Beam.Hit(cast: any, final: boolean)
 	local order = {}
 	for _, c in ipairs(inBeam) do
 		local v = c.Key
-		if not victims[v] then
+		-- (its last moment is the blast at its end: by then the beam has drained into its end ball, so
+		-- only the body it ends on - and the blast round it, below - are hit)
+		if not victims[v] and (not final or v == stopper) then
 			-- where it lands: on the body's surface facing the beam
 			local onLine = origin + cast.Aim * math.min(c.Along, len)
 			local toBody = v.Root.Position - onLine
@@ -203,12 +224,12 @@ function Runners.Beam.Hit(cast: any, final: boolean)
 		end
 	end
 	if final then
-		-- the burst at its end reaches everyone round it (never through a wall)
+		-- the blast at its end reaches everyone round it (never through a wall): the dome every screen draws
 		for _, b in ipairs(bodies) do
 			local v = b.Key
 			if not victims[v] then
 				local p = b.Cf.Position
-				if (p - endPos).Magnitude <= B.BlastRadius * AbilityConfig.BeamGrow(cast.Def, cast.Def.Timeline.Sustain) + BeamMath.BodyRadius then
+				if (p - endPos).Magnitude <= B.BlastRadius + BeamMath.BodyRadius then
 					local from = endPos - cast.Aim * 0.6
 					local hit = A.worldRay(from, p - from)
 					if not hit then
@@ -264,7 +285,7 @@ function Runners.Beam.Step(cast: any, tau: number)
 	end
 	if not cast.Fired then
 		cast.Fired = true
-		cast.NextTick = T.Fire
+		cast.NextTick = T.Fire + (B.FirstTick or 0)
 	end
 	local stop = T.Fire + T.Sustain
 	while cast.NextTick and cast.NextTick <= tau and cast.NextTick < stop - 1e-3 do
@@ -432,10 +453,10 @@ function AbilityService.Interrupt(e: any)
 	end
 end
 
-local lastStep = os.clock()
+local lastStep: number? = nil
 local function step()
 	local t = A.now()
-	local dt = math.min(t - lastStep, 0.1)
+	local dt = if lastStep then math.min(t - lastStep, 0.1) else 0
 	lastStep = t
 	for e, cast in pairs(casts) do
 		if cast.Over then

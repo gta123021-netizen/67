@@ -74,8 +74,8 @@ function BeamMath.Origin(rootPos: Vector3, aim: Vector3, offset: Vector3): Vecto
 end
 
 -- closest approach of the beam's line (from `o` along unit `d`, 0..len) and a body's axis (a to b):
--- (the distance between them, how far along the beam that is)
-function BeamMath.LineToAxis(o: Vector3, d: Vector3, len: number, a: Vector3, b: Vector3): (number, number)
+-- (the distance between them, how far along the beam that is, the two closest points)
+function BeamMath.LineToAxis(o: Vector3, d: Vector3, len: number, a: Vector3, b: Vector3): (number, number, Vector3, Vector3)
 	-- (Ericson, closest points of two segments)
 	local d1 = d * len
 	local d2 = b - a
@@ -108,7 +108,7 @@ function BeamMath.LineToAxis(o: Vector3, d: Vector3, len: number, a: Vector3, b:
 	end
 	local p = o + d1 * s
 	local q = a + d2 * t
-	return (p - q).Magnitude, s * len
+	return (p - q).Magnitude, s * len, p, q
 end
 
 -- a body's capsule axis (world) from its root frame
@@ -116,12 +116,56 @@ function BeamMath.Axis(cf: CFrame): (Vector3, Vector3)
 	return cf:PointToWorldSpace(Vector3.new(0, BeamMath.BodyBottom, 0)), cf:PointToWorldSpace(Vector3.new(0, BeamMath.BodyTop, 0))
 end
 
+--[[ HOW WIDE THE BEAM IS DRAWN, and so how wide its hitbox is (the effects and the server share these):
+	a factor (<= 1) of its full width. `shellD` is its full diameter now, `g` its Grow.
+	  Room:  a floor or a wall closer than its edge narrows it - swollen, it is let into the ground it
+	         tears up by a third of its radius at most
+	  Short: a beam too short for its flare (a long teardrop out of the hands, never a disc) is thinner
+	         in proportion ]]
+function BeamMath.RoomFactor(shellD: number, g: number, room: number): number
+	local give = 0.33 * math.clamp((g - 0.85) / 0.6, 0, 1)
+	local capD = 2 * math.max(0.4, room - 0.05) / (1 - give)
+	return math.min(1, capD / math.max(shellD, 1e-3))
+end
+function BeamMath.ShortFactor(shellD: number, total: number): number
+	local nl = math.min(math.max(6, 2.2 * shellD), total * 0.45)
+	if nl < 1.4 * shellD then
+		return math.max(0, nl / (1.4 * shellD))
+	end
+	return 1
+end
+-- the room all round the beam's line (up, down and to both sides of it): measured where it flares, mid
+-- run and near its end; surfaces within `keepOut` of its end are where it lands and don't count
+function BeamMath.Room(origin: Vector3, d: Vector3, span: number, keepOut: number, world: (Vector3, Vector3) -> RaycastResult?, reach: number): number
+	local side = d:Cross(Vector3.yAxis)
+	side = if side.Magnitude > 1e-3 then side.Unit else Vector3.xAxis
+	local up = side:Cross(d).Unit
+	local tip = origin + d * span
+	local function probe(q: Vector3): number
+		local least = reach
+		for _, v in ipairs({ up, -up, side, -side }) do
+			local hit = world(q, v * reach)
+			if hit and (keepOut <= 0 or (hit.Position - tip).Magnitude > keepOut) then
+				least = math.min(least, (hit.Position - q).Magnitude)
+			end
+		end
+		return least
+	end
+	local room = probe(origin + d * math.min(span * 0.5, 4))
+	if span > 6 then
+		room = math.min(room, probe(origin + d * span * 0.5), probe(tip - d * math.min(span * 0.25, 6)))
+	end
+	return room
+end
+
 --[[ trace the beam. bodies = { { Key = any, Cf = CFrame } } (never the caster). world = the ray
 	against the world (origin, vector) -> RaycastResult?. Returns
 	  length   where it ends (studs from the origin)
 	  normal   the surface it ends on (nil: open air at full range; a body: back along the beam)
 	  stopper  the body it ends on (its Key), if a body
-	  inBeam   { { Key, Along, Dist } } every body inside it up to its end, nearest first ]]
+	  inBeam   { { Key, Along, Dist } } every body inside it up to its end, nearest first
+	A body beside the beam (not on its core line) is in it only if no wall stands between the beam and
+	it: the beam's body never reaches through a wall, a floor or a pillar. ]]
 function BeamMath.Trace(origin: Vector3, dir: Vector3, range: number, hitRadius: number, stopRadius: number, bodies: { any }, world: (Vector3, Vector3) -> RaycastResult?): (number, Vector3?, any, { any }, RaycastResult?)
 	local d = dir.Unit
 	local length = range
@@ -136,8 +180,16 @@ function BeamMath.Trace(origin: Vector3, dir: Vector3, range: number, hitRadius:
 	local R = BeamMath.BodyRadius
 	for _, b in ipairs(bodies) do
 		local a, top = BeamMath.Axis(b.Cf)
-		local dist, along = BeamMath.LineToAxis(origin, d, length + R, a, top)
-		if dist <= R + hitRadius and along > 0 then
+		local dist, along, _, onBody = BeamMath.LineToAxis(origin, d, length + R, a, top)
+		local inside = dist <= R + hitRadius and along > 0
+		if inside and dist > R * 0.5 then
+			-- (from the beam's line - kept short of the wall it ends on - straight to the body)
+			local from = origin + d * math.min(along, math.max(0, length - 0.3))
+			if world(from, onBody - from) then
+				inside = false
+			end
+		end
+		if inside then
 			table.insert(cand, { Key = b.Key, Along = along, Dist = dist })
 			if dist <= R + stopRadius then
 				-- its core meets this body: it ends on the body's near surface

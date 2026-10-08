@@ -4,7 +4,8 @@
 	(AbilityConfig.Slots). Built EXACTLY the way the HUD's own dock tiles are (OverkillHUD dockButton):
 	the same 100 x 116 tile, flat navy face, the HUD's one ink outline, the accent ring 6 in from the
 	edge, the icon in the middle and the name tag sitting on the bottom edge - so the hotbar reads as
-	part of the same HUD as SHOP / STATS / BAG, sitting on the same baseline.
+	part of the same HUD as SHOP / STATS / BAG, sitting on the same baseline. The icon carries the HUD's
+	ink outline too, round its own shape (ART_OUTLINE).
 
 	  ready      the accent ring, the art in full colour, the ring breathing softly
 	  hover      the tile lifts (the HUD's own hover), the shine runs over it, the tooltip opens
@@ -42,6 +43,10 @@ return function(ctx: any)
 	local RING_W = 2.5 * 1.35
 	local ULT = { C.Gold, C.GoldDeep }
 	local LOCKED = { C.Navy500, C.Navy700 }
+	-- the icon's ink outline: copies of the art in ink under it, nudged this far (whole units) evenly
+	-- all round - an outline that follows the art's own shape (a stroke could only follow its box)
+	local ART_OUTLINE = 3
+	local OUTLINE_STEPS = 16
 
 	local bar = new("Frame", {
 		Name = "AbilityBar",
@@ -270,7 +275,7 @@ return function(ctx: any)
 				s.Hover = on
 				if on then
 					Kit.sfx("Hover")
-					Kit.wiggle(if s.Locked then s.Lock else s.Art, 0.8)
+					Kit.wiggle(if s.Locked then s.Lock else s.ArtHolder, 0.8)
 					showTip(s)
 				else
 					hideTip(s)
@@ -295,9 +300,10 @@ return function(ctx: any)
 			{ RING_IN - RING_W / 2, C.Navy600 },
 		}, z + 1)
 		Kit.outlineOnTop(face, z + 7)
-		-- the art, where the dock's icons sit
-		local art = Kit.image({
+		-- the art, where the dock's icons sit, in its ink outline (one holder: it scales and wiggles as one)
+		local artHolder = new("Frame", {
 			Name = "Art",
+			BackgroundTransparency = 1,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.new(0.5, 0, 0, 44),
 			Size = UDim2.fromOffset(68, 68),
@@ -305,7 +311,34 @@ return function(ctx: any)
 			Visible = false,
 			Parent = face,
 		})
-		local artScale = Kit.fx(art)
+		local artScale = Kit.fx(artHolder)
+		local outline: { ImageLabel } = {}
+		local placed: { [string]: boolean } = {}
+		for k = 0, OUTLINE_STEPS - 1 do
+			local a = k * 2 * math.pi / OUTLINE_STEPS
+			local dx, dy = math.round(math.cos(a) * ART_OUTLINE), math.round(math.sin(a) * ART_OUTLINE)
+			local key = dx .. "," .. dy
+			if not placed[key] then
+				placed[key] = true
+				table.insert(outline, Kit.image({
+					Name = "Outline",
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Position = UDim2.new(0.5, dx, 0.5, dy),
+					Size = UDim2.fromScale(1, 1),
+					ImageColor3 = C.Ink,
+					ZIndex = z + 3,
+					Parent = artHolder,
+				}))
+			end
+		end
+		local art = Kit.image({
+			Name = "Icon",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = z + 4,
+			Parent = artHolder,
+		})
 		local artGrad = new("UIGradient", { Rotation = 90, Parent = art })
 		local lock = lockGlyph(face, if ult then 40 else 36, z + 3)
 		local cd = sweep(face, z + 4)
@@ -355,7 +388,7 @@ return function(ctx: any)
 		local capText = Kit.text({ Text = AbilityConfig.KeyText[slotId] or "", TextSize = 20, ZIndex = z + 10, Stroke = 2.6, Parent = cap })
 
 		s.Holder, s.Api, s.Body, s.Scale, s.Face = holder, api, api.Body, api.Scale, face
-		s.Ring, s.Art, s.ArtScale, s.ArtGrad, s.Lock = ring[1], art, artScale, artGrad, lock
+		s.Ring, s.Art, s.ArtHolder, s.Outline, s.ArtScale, s.ArtGrad, s.Lock = ring[1], art, artHolder, outline, artScale, artGrad, lock
 		s.Cd, s.Seconds, s.SecondsScale, s.Flash, s.Sheen = cd, seconds, secondsScale, flash, sheen
 		s.Tag, s.TagText, s.Cap, s.CapText = tag, tagText, cap, capText
 		slots[slotId] = s
@@ -399,6 +432,7 @@ return function(ctx: any)
 		local accent, deep = accentOf(s)
 		s.Lock.Visible = s.Locked
 		s.Art.Visible = not s.Locked and def.Icon ~= nil and def.Icon ~= ""
+		s.ArtHolder.Visible = s.Art.Visible
 		s.Ring.Color = if s.Locked and not s.Ult then C.Navy500 else accent
 		s.Ring.Transparency = if s.Locked then 0.35 else 0
 		s.CapText.TextColor3 = if s.Locked then C.TextDim else C.Text
@@ -416,6 +450,9 @@ return function(ctx: any)
 		fitTag(s.TagText, def.Short or def.Name)
 		if s.Art.Visible then
 			s.Art.Image = def.Icon
+			for _, o in ipairs(s.Outline) do
+				o.Image = def.Icon
+			end
 			-- white on clear art, tinted: white-hot at the top into the ability's colours
 			s.ArtGrad.Color = ColorSequence.new({
 				ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
@@ -592,6 +629,12 @@ return function(ctx: any)
 					s.Seconds.Text = if left < 3 then ("%.1f"):format(left) else tostring(math.ceil(left))
 					s.Art.ImageColor3 = GREY
 					s.Art.ImageTransparency = 0.45
+					if s.OutlineFaded ~= true then
+						s.OutlineFaded = true
+						for _, o in ipairs(s.Outline) do
+							o.ImageTransparency = 0.55
+						end
+					end
 					s.Ring.Color = C.Navy500
 					s.Ring.Transparency = 0
 					s.Ready = false
@@ -600,6 +643,12 @@ return function(ctx: any)
 					s.Seconds.Visible = false
 					s.Art.ImageColor3 = Color3.new(1, 1, 1)
 					s.Art.ImageTransparency = 0
+					if s.OutlineFaded ~= false then
+						s.OutlineFaded = false
+						for _, o in ipairs(s.Outline) do
+							o.ImageTransparency = 0
+						end
+					end
 					if not s.Ready then
 						s.Ready = true
 						if not casting then
